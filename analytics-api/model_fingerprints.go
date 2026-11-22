@@ -204,6 +204,27 @@ type fingerprintPlan struct {
 	sampleKey      string
 }
 
+func savedFingerprintProtocol(base string) string {
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	path := strings.TrimRight(u.Path, "/")
+	switch {
+	case strings.HasSuffix(path, "/v1/responses"):
+		return "responses"
+	case strings.HasSuffix(path, "/v1/chat/completions"):
+		return "chat"
+	case strings.HasSuffix(path, "/v1/messages"):
+		return "messages"
+	case strings.HasSuffix(path, "/v1beta"), strings.HasSuffix(path, "/v1beta/models"):
+		return "gemini"
+	case strings.HasSuffix(path, "/v1/systemone"):
+		return systemOneProtocol
+	}
+	return ""
+}
+
 // Resolve the actual upstream before reserving its site and sending paid probes.
 func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (fingerprintPlan, error) {
 	plan := fingerprintPlan{}
@@ -264,25 +285,22 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 			Targeted     bool     `json:"targeted_responses"`
 			Unconfigured bool     `json:"targeted_unconfigured_models"`
 			Fingerprints []string `json:"targeted_fingerprint_protocols"`
+			Upstream     bool     `json:"targeted_upstream_protocols"`
 		}
 		if err != nil || decodeMap(runtime["capabilities"], &caps) != nil || !caps.Targeted {
 			return plan, errors.New("来源不支持渠道定向检测")
-		}
-		targetProtocol := ""
-		if protocol != "responses" {
-			if !slices.Contains(caps.Fingerprints, protocol) {
-				return plan, errors.New("来源网关不支持此模型的定向指纹协议（" + protocol + "），请更新网关")
-			}
-			targetProtocol = protocol
 		}
 		providers, err := effectiveProviders(preflight, src, true)
 		if err != nil {
 			return plan, errors.New("无法确认渠道配置")
 		}
+		var endpoint configuredModelEndpoint
+		var explicit bool
 		for _, p := range providers {
 			if p.Provider == t.Provider {
 				revision = configuredProbeFingerprint(src, p)
 				plan.site = fingerprintSite(p.Base)
+				endpoint, explicit = p.ModelEndpoints[t.Model]
 				break
 			}
 		}
@@ -290,9 +308,35 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 			return plan, errors.New("渠道已不存在")
 		}
 		plan.sampleKey = revision
-		config["base_url"], config["key"], config["provider"], config["allow_unconfigured"] = src.Base, src.Key, t.Provider, caps.Unconfigured
+		targetProtocol, allowUnconfigured := "", caps.Unconfigured
+		if explicit {
+			protocol = savedFingerprintProtocol(endpoint.Base)
+			format = map[string]string{"responses": "responses", "gemini": "gemini", "chat": "openai", "messages": "anthropic"}[protocol]
+			if format == "" {
+				return plan, errors.New("已配置的模型端点不支持文本指纹采样")
+			}
+			if protocol != "responses" {
+				if !caps.Upstream {
+					return plan, errors.New("来源网关不支持按已配置端点检测，请更新网关")
+				}
+				// The gateway derives this exact wire endpoint using the same
+				// destination resolver as the saved model setting. Do not use
+				// the legacy fingerprint marker that forces a Gemini sibling.
+				targetProtocol = "endpoint-" + protocol
+			}
+			config["format"] = format
+			allowUnconfigured = false
+			plan.site = fingerprintSite(endpoint.Base)
+			plan.sampleKey = tokenHash(revision + "\n" + format + "\n" + endpoint.Base + "\n" + endpoint.Upstream)
+		} else if protocol != "responses" {
+			if !slices.Contains(caps.Fingerprints, protocol) {
+				return plan, errors.New("来源网关不支持此模型的定向指纹协议（" + protocol + "），请更新网关")
+			}
+			targetProtocol = protocol
+		}
+		config["base_url"], config["key"], config["provider"], config["allow_unconfigured"] = src.Base, src.Key, t.Provider, allowUnconfigured
 		config["targeted"] = true
-		client = http.Client{Timeout: 250 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: t.Provider, allowUnconfigured: caps.Unconfigured, fingerprintProtocol: targetProtocol}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		client = http.Client{Timeout: 250 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: t.Provider, allowUnconfigured: allowUnconfigured, fingerprintProtocol: targetProtocol}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	if plan.site == "" {
 		return plan, errors.New("无法确认渠道上游站点")

@@ -69,6 +69,7 @@ export function useChannelControls({
   keyId,
   model,
   enabled,
+  poll = enabled,
 }: {
   connection: Connection;
   rows: Channel[];
@@ -76,6 +77,7 @@ export function useChannelControls({
   keyId: string;
   model: string;
   enabled: boolean;
+  poll?: boolean;
 }) {
   const client = useQueryClient();
   const [drafts, setDrafts] = useState<Map<string, Draft>>(new Map());
@@ -110,7 +112,7 @@ export function useChannelControls({
       },
       retry: false,
       staleTime: 5000,
-      refetchInterval: enabled && !pendingSources.has(source) ? 5000 : false,
+      refetchInterval: poll && enabled && !pendingSources.has(source) ? 5000 : false,
       refetchIntervalInBackground: false,
     })),
   });

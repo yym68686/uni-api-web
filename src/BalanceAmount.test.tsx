@@ -1,5 +1,5 @@
 import { it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { BalanceValue } from "./ChannelMetrics";
 it("does not invent a balance when an account is unlinked or its balance is missing", () => {
@@ -9,7 +9,7 @@ it("does not invent a balance when an account is unlinked or its balance is miss
   expect(screen.getByText("暂无站点余额")).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 });
-it("keeps wallet colors and marks a cached amount when refresh fails", () => {
+it("keeps wallet colors and shows cached balance details in a tooltip when refresh fails", async () => {
   render(<Tooltip.Provider>
     <BalanceValue detail balance={[
       ...[-1, 0, 50, 100].map(amount => ({ account_id: String(amount), status: "ok", amount })),
@@ -21,5 +21,7 @@ it("keeps wallet colors and marks a cached amount when refresh fails", () => {
     expect(screen.getByText(value)).toHaveClass("balance-warning");
   expect(screen.getByText("$100.00")).toHaveClass("balance-positive");
   expect(screen.getByText("$12.00")).toBeVisible();
-  expect(screen.getByText("更新失败 · 上次余额")).toBeVisible();
+  expect(screen.queryByText("更新失败 · 上次余额")).not.toBeInTheDocument();
+  fireEvent.focus(screen.getByRole("img", { name: "余额更新详情" }).closest(".tip-target")!);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("更新失败 · 上次余额");
 });

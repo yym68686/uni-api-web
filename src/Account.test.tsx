@@ -1,5 +1,5 @@
 import { it, expect, vi } from "vitest";
-import { act, render, screen, within, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -99,19 +99,25 @@ it("shows the same verified site wallet on linked channels and never queries gat
   wallet = { ...wallet, status: "error" };
   await user.click(screen.getByRole("button", { name: "工具" }));
   await user.click(screen.getByRole("button", { name: "刷新已查余额" }));
-  expect(await within(summary).findByText(/更新失败 · 上次余额/)).toBeVisible();
+  const balanceInfo = async (detail: string) => {
+    const icon = await within(summary).findByRole("img", { name: "余额更新详情" });
+    fireEvent.focus(icon.closest(".tip-target")!);
+    await waitFor(() => expect(screen.getByRole("tooltip")).toHaveTextContent(detail));
+    fireEvent.blur(icon.closest(".tip-target")!);
+  };
+  await balanceInfo("更新失败 · 上次余额");
   expect(within(summary).getByText("$28.2504")).toBeVisible();
   expect(calls.filter(path => path.endsWith("/accounts/site/balance"))).toHaveLength(2);
   expect(calls.some(path => path.endsWith("/channel-balances"))).toBe(false);
 
   wallet = { ...wallet, error_reason: "rate_limited" };
   await user.click(screen.getByRole("button", { name: "刷新已查余额" }));
-  expect(await within(summary).findByText(/站点限流，请稍后刷新/)).toBeVisible();
+  await balanceInfo("站点限流，请稍后刷新");
   expect(within(summary).queryByRole("button", { name: "重新登录站点" })).not.toBeInTheDocument();
 
   wallet = { ...wallet, error_reason: "verification_required" };
   await user.click(screen.getByRole("button", { name: "刷新已查余额" }));
-  expect(await within(summary).findByText(/站点要求人机验证/)).toBeVisible();
+  await balanceInfo("站点要求人机验证");
   expect(summary).toHaveTextContent(dateTime(200));
   const onBrowserMessage = (event: MessageEvent) => {
     const { channel, id, type } = event.data || {};
@@ -132,7 +138,7 @@ it("shows the same verified site wallet on linked channels and never queries gat
     await user.click(browserLogin);
     expect(await within(summary).findByText("$26.75")).toBeVisible();
     expect(summary).toHaveTextContent(dateTime(400));
-    expect(within(summary).queryByText(/更新失败|要求人机验证/)).not.toBeInTheDocument();
+    expect(within(summary).queryByRole("img", { name: "余额更新详情" })).not.toBeInTheDocument();
     expect(writes).toEqual([{ path: "/analytics/v1/sub2api/accounts/site/login", body: {
       name: "mysandbox", base: "https://upstream.test", email: "fixture@example.com",
       password: "fixture-password", access_token: "browser-access", refresh_token: "browser-refresh",

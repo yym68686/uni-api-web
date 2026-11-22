@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   ArrowDown,
@@ -42,6 +43,7 @@ export function ChannelSortDialog({
   keyId = "",
   routeApplyDisabled,
   onPreview,
+  previewActionsTarget,
 }: {
   rules: ChannelSortRule[];
   onApply: (rules: ChannelSortRule[], templateId?: string) => void;
@@ -58,6 +60,7 @@ export function ChannelSortDialog({
   keyId?: string;
   routeApplyDisabled?: boolean;
   onPreview?: (rows: Channel[] | null) => void;
+  previewActionsTarget?: HTMLElement | null;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ChannelSortRule[]>([]);
@@ -97,13 +100,14 @@ export function ChannelSortDialog({
     cancelPreview();
     void routing?.apply(plan);
   }
-  async function showPreview() {
-    if (matchesTemplate) onApply(draft, chosen!.id);
-    else onApply(draft);
-    const rows = previewRows?.(draft) || [];
+  async function showPreview(previewRules = draft) {
+    const previewSignature = JSON.stringify(previewRules);
+    if (matchesTemplate && previewSignature === signature) onApply(previewRules, chosen!.id);
+    else onApply(previewRules);
+    const rows = previewRows?.(previewRules) || [];
     const next = {
-      signature,
-      rules: draft.map((r) => ({ ...r })),
+      signature: previewSignature,
+      rules: previewRules.map((r) => ({ ...r })),
       rows,
       plan: null,
     };
@@ -581,7 +585,7 @@ export function ChannelSortDialog({
                   {error}
                 </p>
               ))}
-              {routeApplyDisabled && (
+              {routing && routeApplyDisabled && (
                 <p className="muted">数据未就绪或有未保存的调序，暂不可应用</p>
               )}
             </div>
@@ -636,8 +640,8 @@ export function ChannelSortDialog({
           </footer>
         </Dialog.Content>
       </Dialog.Portal>
-      {preview && !open && (
-        <>
+      {preview && !open && (() => {
+        const actions = <>
           <button
             className="button small selected"
             disabled={routing?.busy}
@@ -668,6 +672,13 @@ export function ChannelSortDialog({
               {error}
             </span>
           ))}
+          {routing && routeApplyDisabled && (
+            <span role="status" className="muted">请等数据加载完成，或先处理未保存的调序</span>
+          )}
+          {routing && !routeApplyDisabled && !loading && !preview.plan && (
+            <button className="button small" disabled={routing.busy}
+              onClick={() => void showPreview(preview.rules)}>重新预览</button>
+          )}
           {preview.plan &&
             !preview.plan.errors.length &&
             !preview.plan.sources.some((s) => s.changes.length) && (
@@ -675,8 +686,9 @@ export function ChannelSortDialog({
                 顺序与实际路由一致
               </span>
             )}
-        </>
-      )}
+        </>;
+        return previewActionsTarget ? createPortal(actions, previewActionsTarget) : actions;
+      })()}
     </Dialog.Root>
   );
 }

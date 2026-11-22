@@ -408,6 +408,7 @@
 .workspace .observation-table[data-compact][data-ranked] .channel-identity {width:37%}
 .workspace .observation-table[data-compact]:not([data-editing]) .channel-identity {min-width:0}
 .workspace .observation-table .column-balance .balance-values {align-items:flex-end}
+.wallet-status-info {margin-inline-start:4px;vertical-align:-2px;color:var(--muted)}
 .workspace .observation-table[data-compact] .column-balance .amount small {display:none}
 .workspace .observation-table th,
 .workspace .observation-table td {padding:7px 11px;font-size:13px;white-space:nowrap}

@@ -274,9 +274,13 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			mappings := map[string]map[string]string{}
 			engines := map[string]string{}
 			engineModes := map[string]string{}
+			catalogCopies := map[string]bool{}
 			for _, row := range modelRows {
 				engines[row.Provider] = row.Engine
 				engineModes[row.Provider] = row.EngineMode
+				if !bindingsOnly && isConfiguredCopyID(row.Provider) {
+					catalogCopies[row.Provider] = true
+				}
 				if row.Upstream != "" && row.Upstream != row.Model {
 					if mappings[row.Provider] == nil {
 						mappings[row.Provider] = map[string]string{}
@@ -300,7 +304,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				}{key.Prefix, key.Position}
 			}
 			if !bindingsOnly {
-				for provider, name := range s.observationCopyLabels(r.Context(), src, state, keyIDs) {
+				for provider, name := range s.observationCopyLabels(r.Context(), src, state, keyIDs, catalogCopies) {
 					labels[provider] = name
 				}
 			}

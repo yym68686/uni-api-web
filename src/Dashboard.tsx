@@ -6,7 +6,6 @@ import { LoadingIndicator } from "./LoadingIndicator";
 import { CompactDialogHeader } from "./CompactDialog";
 import { endpointChoices, readKeys } from "./requestFilters";
 import { FailureCounts, failureReasonLabel } from "./FailureCounts";
-import { BalanceAmount } from "./BalanceAmount";
 import { refreshAccountBalanceAfterLogin } from "./accountBalance";
 import type { SiteWallet } from "./types";
 import { useKeyRequestStats } from "./keyRequestStats";
@@ -105,8 +104,6 @@ import type { Filters, View } from "./preferences";
 import {
   balanceIsLow,
   balanceIsKnown,
-  hasWalletAmount,
-  walletStatusLabel,
   count,
   dateTime,
   ms,
@@ -127,6 +124,7 @@ import { readMetrics } from "./metricsApi";
 import { trafficBuckets } from "./trafficBuckets";
 import {
   BalanceValue,
+  WalletAmount,
   Status,
   ChannelMetricHeaders,
   ChannelMetricCells,
@@ -698,6 +696,7 @@ export default function Dashboard({
   const channelSort = scopedChannelSort(sortPreferences, channelScope);
   const routingSort = useRouteSorting(sortStorageScope);
   const [sortPreview, setSortPreview] = useState<{ scope: string; rows: Channel[] } | null>(null);
+  const [sortPreviewActions, setSortPreviewActions] = useState<HTMLDivElement | null>(null);
   const filterScope = view === "balances" || view === "overview" || routeView ? view : "channels";
   const needsChannelData = channelView || view === "balances" || view === "overview" || view === "automations";
   const filters = pageFilters[filterScope];
@@ -745,7 +744,7 @@ export default function Dashboard({
   const [filterTab, setFilterTab] = useState("conditions");
   const adjustingChannels = channelView && editingRoutes === view;
   const canEditRoutes = channelView && !!baseConnection.account;
-  const previewingSort = channelView && !adjustingChannels && sortPreview?.scope === channelScope;
+  const previewingSort = channelView && sortPreview?.scope === channelScope;
   const routeHelpId = useId();
   useEffect(() => setSortPreview(null), [channelScope, view]);
   useEffect(() => setFilterTab("conditions"), [view]);
@@ -997,10 +996,11 @@ export default function Dashboard({
       .map((source) => source.id),
     keyId,
     model,
-    enabled: !!baseConnection.account && (routeView || adjustingChannels),
+    enabled: canEditRoutes,
+    poll: routeView || adjustingChannels,
   });
-  const tableRows = adjustingChannels ? controls.arrange(rows)
-    : previewingSort ? previewChannelOrder(rows, sortPreview.rows)
+  const tableRows = previewingSort ? previewChannelOrder(rows, sortPreview.rows)
+    : adjustingChannels ? controls.arrange(rows)
     : routeView ? controls.arrange(rows, true) : rows;
   const rowRanks = useMemo(
     () => new Map(tableRows.map((row, i) => [rowId(row), i + 1])),
@@ -1053,7 +1053,7 @@ export default function Dashboard({
   const balanceTargets = [...new Set([...(activeAudit?.targets || []), ...(needsBalanceCoverage ? balanceCatalog : []), ...visibleBalanceProviderIds])];
   const balanceEnabled = channelView || view === "balances" || !!focusedBalance;
   const pollBalances = auto && !activeAudit && !needsBalanceCoverage;
-  const balanceMap = useChannelAccountBalances(balanceEnabled ? balanceTargets : [], imported.data?.data || [], baseConnection.session, !!baseConnection.account && balanceEnabled, pollBalances);
+  const balanceMap = useChannelAccountBalances(balanceEnabled ? balanceTargets : [], imported.data?.data || [], baseConnection.session, !!baseConnection.account && balanceEnabled, pollBalances, siteFor);
   const balanceLoading = !!baseConnection.account && imported.isPending;
   // Standalone gateways still expose historical deductions via this legacy
   // route. Only retain the cost field; never use this result as a wallet.
@@ -1252,8 +1252,8 @@ export default function Dashboard({
   // A background poll for the same filter does not remove its usable data.
   const loadingScope = !metrics.data || !catalog.data || (!baseConnection.account && !keys.data);
   const fetching = metrics.isFetching || catalog.isFetching || keys.isFetching;
-  const routePage = new Map(adjustingChannels ? pageRows.map(row => [rowId(row), row]) : []);
-  const routeDrag = useChannelRouteDrag(JSON.stringify([adjustingChannels, auditScope, currentPage]), routePage,
+  const routePage = new Map(adjustingChannels && !previewingSort ? pageRows.map(row => [rowId(row), row]) : []);
+  const routeDrag = useChannelRouteDrag(JSON.stringify([adjustingChannels, previewingSort, auditScope, currentPage]), routePage,
     (from, to, after) => controls.moveRelative(from, to, after, pageRows));
   function setFilter(name: keyof Filters, value: string) {
     setPage(0);
@@ -1458,7 +1458,7 @@ export default function Dashboard({
     <button type="button" className={`button small ${hasRouteDrafts ? "primary" : ""}`}
       aria-label={hasRouteDrafts ? "应用全部临时修改" : "完成调整"}
       title={hasRouteDrafts ? "应用所有范围的顺序和停用修改" : "退出顺序编辑"}
-      disabled={controls.draftsPending} aria-busy={controls.draftsPending || undefined}
+      disabled={controls.draftsPending || routingSort.busy || (hasRouteDrafts && previewingSort)} aria-busy={controls.draftsPending || undefined}
       onClick={() => hasRouteDrafts ? void controls.applyAll() : finishRouteEdit()}>
       {controls.draftsPending ? <Spinner small /> : <Check size={13} aria-hidden="true" />}{hasRouteDrafts ? "应用" : "完成"}
     </button>
@@ -1850,10 +1850,11 @@ export default function Dashboard({
                   {channelView && <ChannelSortDialog key={channelScope} rules={sortRules}
                     previewRows={rules=>{const visible=new Set(filtered.map(rowId));return sortChannels(rows.filter(row=>visible.has(rowId(row))),rules,{checks:checks.results,multipliers:imported.data?.multipliers});}}
                     onPreview={preview=>{setSortPreview(preview?{scope:channelScope,rows:preview}:null);setPage(0);}}
+                    previewActionsTarget={canEditRoutes ? sortPreviewActions : undefined}
                     labelRows={rows}
-                    routing={routeView?routingSort:undefined}
+                    routing={canEditRoutes ? routingSort : undefined}
                     keyId={keyId}
-                    routeApplyDisabled={loadingScope||!!error||adjustingChannels||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
+                    routeApplyDisabled={loadingScope||!!error||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
                     scopeLabel={[
                       model || "全部模型",
                       sourceList.find(s=>s.id===selectedSourceId)?.name || "全部来源",
@@ -1889,10 +1890,10 @@ export default function Dashboard({
                 </section>
                 <section hidden={filterTab !== "tools"} aria-label="渠道工具">
                   <div className="channel-filter-toolbox">
-                  {routeView && routingSort.pending && <button className="button small" title="恢复上一次应用前的路由顺序" disabled={routingSort.busy} onClick={()=>void routingSort.undo()}>撤回排序</button>}
-                  {routeView && routingSort.error && <WorkbenchNotice label="排序操作失败" messages={[routingSort.error]} />}
+                  {canEditRoutes && routingSort.pending && <button className="button small" title="恢复上一次应用前的路由顺序" disabled={routingSort.busy || hasRouteDrafts || controls.pending} onClick={()=>void routingSort.undo()}>撤回排序</button>}
+                  {canEditRoutes && routingSort.error && <WorkbenchNotice label="排序操作失败" messages={[routingSort.error]} />}
                   {canEditRoutes && !inlineRoute && !adjustingChannels && routeButton}
-                  {adjustingChannels && <ChannelControlReset controls={controls} sources={sourceList} keys={keys.data?.data || []} />}
+                  {adjustingChannels && !previewingSort && !routingSort.busy && <ChannelControlReset controls={controls} sources={sourceList} keys={keys.data?.data || []} />}
                   {adjustingChannels && hasRouteDrafts && <button type="button" className="button small"
                     aria-label="放弃全部临时修改" disabled={controls.draftsPending} onClick={controls.discardAll}>放弃草稿</button>}
                   {channelView && (
@@ -1941,6 +1942,7 @@ export default function Dashboard({
                   </WorkbenchDisclosure>
                 </div>
               </div>
+              {canEditRoutes && <div className="channel-sort-preview-actions" ref={setSortPreviewActions} />}
               {adjustingChannels && <span id={routeHelpId} className="sr-only">在当前页的同一来源内拖动渠道。键盘可用上下方向键移动，Home 置顶。同一渠道的所有模型一起移动。</span>}
               {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","关联渠道"]]} />}
               {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="站点钱包">
@@ -1948,13 +1950,12 @@ export default function Dashboard({
                   ? !(catalog.isPending || metrics.isPending) && <LoadingIndicator label="查询站点关联" />
                   : <p>当前范围暂无已核验站点账号</p>)}
                 <ul>{[...groupedWallets].map(([id,entry])=><li key={id}>
-                  <strong>{entry.label}</strong><span>{hasWalletAmount(entry.wallet) && <BalanceAmount value={entry.wallet.amount} />}
-                    {(entry.wallet.status !== "ok" || !hasWalletAmount(entry.wallet)) && <> {walletStatusLabel(entry.wallet)}</>}
+                  <strong>{entry.label}</strong><span><WalletAmount wallet={entry.wallet} />
                     {" · "}关联 {entry.providers.size} 个渠道
                     {!!entry.wallet.checked_at && <small className="muted"> · 查询于 {dateTime(entry.wallet.checked_at)}</small>}</span>
                   {entry.wallet.status === "error" && ["verification_required", "login_required"].includes(entry.wallet.error_reason ?? "") &&
                     <button type="button" className="button small" onClick={() => recoverWallet(entry.wallet)}>重新登录站点</button>}
-                  <button type="button" className="button small" onClick={()=>setWalletDialog(id)}>充值设置与订单</button>
+                  {entry.wallet.provider_kind !== "openrouter" && <button type="button" className="button small" onClick={()=>setWalletDialog(id)}>充值设置与订单</button>}
                 </li>)}</ul>
               </section> : null}
               <AnimatePresence>
@@ -2001,7 +2002,7 @@ export default function Dashboard({
                         const balance = balanceMap.get(providerId(row));
                         const historicalCost = historicalCostMap.get(providerId(row));
                         const control = adjustingChannels ? controls.info(row) : null;
-                        const routeDisabled = !control?.ready || control.pending || control.stale;
+                        const routeDisabled = previewingSort || routingSort.busy || !control?.ready || control.pending || control.stale;
                         const routeLabel = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`.trim();
                         const upstreamGroup = fingerprints.groupRejections.get(providerId(row));
                         return (
@@ -2016,7 +2017,7 @@ export default function Dashboard({
                             <td className="channel-identity"><div className="channel-row-identity">
                               {control && <button type="button" className="icon-button route-grip" aria-label={`移动 ${routeLabel}`}
                                 aria-describedby={routeHelpId} aria-keyshortcuts="ArrowUp ArrowDown Home" disabled={routeDisabled}
-                                title={control.error || (control.stale ? "规则已变化，请先放弃草稿" : !control.ready ? "暂不可调整" : "拖动排序（也可用上下方向键）")}
+                                title={previewingSort ? "取消排序预览后可手动调整" : control.error || (control.stale ? "规则已变化，请先放弃草稿" : !control.ready ? "正在读取调序所需的数据" : "拖动排序（也可用上下方向键）")}
                                 {...routeDrag(row)} onKeyDown={event => {
                                   const direction = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
                                   if (!direction && event.key !== "Home") return;

@@ -15,14 +15,30 @@ func TestObservationUnboundCopyUsesExactRetiredOriginName(t *testing.T) {
 	ctx := context.Background()
 	const origin, caller = "bananarouter", "local-only-caller"
 	copyID := configuredImportName(origin, caller)
-	var identityChanged, missingCaller atomic.Bool
+	var identityChanged, missingCaller, promoted, rotated, unavailable atomic.Bool
+	var configReads atomic.Int32
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("name lookup attempted %s", r.Method)
 		}
 		switch r.URL.Path {
 		case "/v1/channel-controls":
-			writeJSON(w, 200, map[string]any{"revision": "boot:1", "temporary_channels": []any{map[string]any{"provider": copyID, "api_key_id": caller, "identity_changed": identityChanged.Load(), "models": []string{"gemini-4-argon"}}}})
+			channels := []any{}
+			if !promoted.Load() {
+				channels = append(channels, map[string]any{"provider": copyID, "api_key_id": caller, "identity_changed": identityChanged.Load(), "models": []string{"gemini-4-argon"}})
+			}
+			writeJSON(w, 200, map[string]any{"revision": "boot:1", "temporary_channels": channels})
+		case "/v1/channel-settings/providers":
+			configReads.Add(1)
+			if unavailable.Load() {
+				http.Error(w, "temporarily unavailable", 503)
+				return
+			}
+			key := "local-only-routing"
+			if rotated.Load() {
+				key = "local-only-rotated"
+			}
+			writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: copyID, Base: "https://api.bananarouter.test/v1", API: key, IdentityChanged: true}}})
 		case "/v1/api-keys":
 			keys := []any{}
 			if !missingCaller.Load() {
@@ -95,10 +111,33 @@ func TestObservationUnboundCopyUsesExactRetiredOriginName(t *testing.T) {
 	missingCaller.Store(true)
 	read("", "")
 	missingCaller.Store(false)
+	if configReads.Load() != 0 {
+		t.Fatal("temporary copy labels should not load configuration")
+	}
+	promoted.Store(true)
+	read("", origin)
+	rotated.Store(true)
+	read("", "") // A plausible hostname must not override known conflicting credentials.
+	rotated.Store(false)
+	unavailable.Store(true)
+	read("", "") // Optional display metadata cannot break the observation response.
+	unavailable.Store(false)
+	missingCaller.Store(true)
+	read("", "")
+	missingCaller.Store(false)
 	if _, err := s.control.db.Exec(`UPDATE console_configured_channels SET key_hashes='["rotated"]' WHERE provider=$1`, copyID); err != nil {
 		t.Fatal(err)
 	}
+	promoted.Store(false)
 	read("", "")
+	promoted.Store(true)
+	if _, err := s.control.db.Exec(`DELETE FROM console_configured_channels WHERE provider=$1`, origin); err != nil {
+		t.Fatal(err)
+	}
+	read("", origin) // Older promoted copies may predate the origin inventory.
+	if configReads.Load() != 4 {
+		t.Fatalf("unexpected optional config reads: %d", configReads.Load())
+	}
 }
 
 func TestConfiguredCopyDisplayLabelsRequireExactIdentityEvidence(t *testing.T) {

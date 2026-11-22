@@ -247,6 +247,29 @@ it("shows a verified New API account wallet when the imported channel has no Sub
   await waitFor(() => expect(balanceIsLow(result.current.get(providerId(imported))?.data)).toBe(true));
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+it("reads the official OpenRouter wallet without a linked site account and keeps it only on transient failures", async () => {
+  let wallet: { status: string; amount?: number; checked_at?: number; error_reason?: string } = {
+    status: "ok", amount: 18.25, checked_at: 100,
+  };
+  const fetch = vi.fn(async (_url: string) => new Response(JSON.stringify(wallet)));
+  vi.stubGlobal("fetch", fetch);
+  const rows = ["openrouter", "unrelated"].map(provider => ({ source_id: "source", provider }));
+  const target = providerId(rows[0]);
+  const { result } = renderHook(() => useChannelAccountBalances(rows.map(providerId), [], "credits", true, false,
+    ({ provider }) => provider === "openrouter" ? "https://openrouter.ai/" : "https://openrouter.ai.example/"), { wrapper });
+  await waitFor(() => expect(result.current.get(target)?.data[0].amount).toBe(18.25));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0][0]).toContain("/v1/sources/source/openrouter-balance?provider=openrouter");
+  expect(result.current.has(providerId(rows[1]))).toBe(false);
+
+  wallet = { status: "error", error_reason: "openrouter_fetch_failed" };
+  await result.current.get(target)!.refetch();
+  await waitFor(() => expect(result.current.get(target)?.data[0]).toMatchObject({ status: "error", amount: 18.25, error_reason: "openrouter_fetch_failed" }));
+
+  wallet = { status: "error", error_reason: "openrouter_management_key_rejected" };
+  await result.current.get(target)!.refetch();
+  await waitFor(() => expect(result.current.get(target)?.data[0].amount).toBeUndefined());
+});
 it("scans different account sites concurrently and keeps accounts on the same site serial", async () => {
   const finish = new Map<string, () => void>();
   const fetch = vi.fn((input: string) => new Promise<Response>((resolve) => {

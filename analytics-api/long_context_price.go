@@ -31,10 +31,17 @@ func (e *Engine) withLongContextUsage(ctx context.Context, q string, args []any,
 		// Match usagePriceModel's upstream-first fallback. The public model
 		// filter remains in where, but cannot select the upstream price policy.
 		minThreshold = min(minThreshold, tier.ThresholdTokens)
-		modelFilters = append(modelFilters, "(input_tokens>? AND ("+billed+"=? OR starts_with("+billed+",?)))")
-		longArgs = append(longArgs, tier.ThresholdTokens, p.Model, p.Model+"-")
-		tierModels[tier.ThresholdTokens] = append(tierModels[tier.ThresholdTokens], "("+billed+"=? OR starts_with("+billed+",?))")
-		tierArgs[tier.ThresholdTokens] = append(tierArgs[tier.ThresholdTokens], p.Model, p.Model+"-")
+		match := "(" + billed + "=? OR starts_with(" + billed + ",?)"
+		names := []any{p.Model, p.Model + "-"}
+		if strings.HasPrefix(p.Model, "gemini-") {
+			match += " OR " + billed + "=? OR starts_with(" + billed + ",?)"
+			names = append(names, googlePriceNamespace+p.Model, googlePriceNamespace+p.Model+"-")
+		}
+		match += ")"
+		modelFilters = append(modelFilters, "(input_tokens>? AND "+match+")")
+		longArgs = append(append(longArgs, tier.ThresholdTokens), names...)
+		tierModels[tier.ThresholdTokens] = append(tierModels[tier.ThresholdTokens], match)
+		tierArgs[tier.ThresholdTokens] = append(tierArgs[tier.ThresholdTokens], names...)
 		knownThresholds = knownThresholds && (tier.ThresholdTokens == 100000 || tier.ThresholdTokens == 272000)
 	}
 	if len(modelFilters) == 0 {

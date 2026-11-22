@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 )
 
 type configuredDisplayIdentity struct {
@@ -24,7 +25,7 @@ func isConfiguredCopyID(provider string) bool {
 // inventory is name evidence only: never turn it into ownership/rate evidence.
 // The exact generated ID, live caller membership, unchanged identity, source
 // target, site and credential hashes must all agree before using the old name.
-func (s *Service) observationCopyLabels(ctx context.Context, src controlSource, state subGatewayControls, keys []string) map[string]string {
+func (s *Service) observationCopyLabels(ctx context.Context, src controlSource, state subGatewayControls, keys []string, catalogCopies map[string]bool) map[string]string {
 	callers := map[string]bool{}
 	for _, key := range keys {
 		callers[key] = key != ""
@@ -34,6 +35,42 @@ func (s *Service) observationCopyLabels(ctx context.Context, src controlSource, 
 		wanted[provider] = []string{key}
 	}
 	labels, _ := readConfiguredCopyLabels(ctx, s.control.db, src, wanted, nil)
+	// Promoted copies no longer have a temporary-channel record. Verify their
+	// current configured identity just as the management view does. A changed
+	// temporary copy must not fall through to the promoted path.
+	for _, channel := range state.Temporary {
+		delete(catalogCopies, channel.Provider)
+	}
+	if len(catalogCopies) == 0 || len(keys) == 0 {
+		return labels
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	providers, err := effectiveProviders(ctx, src, true)
+	if err != nil {
+		return labels
+	}
+	promoted := map[string][]string{}
+	live := map[string]managementProvider{}
+	for _, p := range providers {
+		// The provider export marks every generated copy as identity_changed,
+		// including promoted copies. Once not temporary, the live fingerprint
+		// (not that flag) is the same verification used by channel management.
+		if !catalogCopies[p.Provider] || p.Temporary {
+			continue
+		}
+		evidence := managementProviderEvidence(src, p)
+		if evidence.Base != "" && evidence.CredentialCount > 0 {
+			live[p.Provider], promoted[p.Provider] = evidence, keys
+		}
+	}
+	verified, _ := readConfiguredCopyLabels(ctx, s.control.db, src, promoted, live)
+	for provider, name := range verified {
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels[provider] = name
+	}
 	return labels // Optional presentation metadata must not break the listing.
 }
 

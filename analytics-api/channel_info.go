@@ -134,7 +134,7 @@ func (s *Service) channelSites(w http.ResponseWriter, r *http.Request) {
 					mu.Unlock()
 					return
 				}
-				providers, e = configuredProviders(ctx, src)
+				providers, e = effectiveProviders(ctx, src, true)
 				s.observeSourceFailure(r.Context(), src, e)
 			}
 			mu.Lock()
@@ -144,6 +144,15 @@ func (s *Service) channelSites(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			for _, p := range providers {
+				// An official OpenRouter import can use a separate account-wide
+				// credits lookup even when it has no linked site-wallet account.
+				if officialOpenRouter(p.Base) {
+					data = append(data, site{id, p.Provider, "https://openrouter.ai/"})
+					continue
+				}
+				if p.Temporary && !p.IdentityChanged {
+					continue
+				}
 				if link := dashboardURL(p.Base); link != "" {
 					data = append(data, site{id, p.Provider, link})
 				}

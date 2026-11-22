@@ -388,7 +388,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 		s.CreatedBins = histogramValues(createdValue)
 		s.TextBins = histogramValues(textValue)
 		s.DurationBins = histogramValues(durationValue)
-		if p, ok := priceMap[usagePriceModel(model, upstream)]; ok && p.Verified && s.UsageSamples > 0 {
+		if _, p := lookupUsagePrice(priceMap, model, upstream); p.Verified && s.UsageSamples > 0 {
 			ordinary := max(0, s.Input-s.CacheRead-s.CacheWrite)
 			write5 := max(0, s.CacheWrite-s.CacheWrite1h)
 			writeCost := 0.0
@@ -483,11 +483,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 			endpoint = "all"
 		}
 		stats := channels[k].JSON()
-		pricingModel := usagePriceModel(id[2], id[3])
-		price, found := priceMap[pricingModel]
-		if !found {
-			price = Price{Model: pricingModel}
-		}
+		pricingModel, price := lookupUsagePrice(priceMap, id[2], id[3])
 		stats["pricing_model"] = pricingModel
 		stats["sale_percent"] = price.salePercent()
 		out.Data = append(out.Data, AnalyticChannel{SourceID: id[0], Provider: id[1], Model: id[2], UpstreamModel: id[3], Endpoint: endpoint, Stream: channelStream, Stats: stats})

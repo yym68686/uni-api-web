@@ -49,7 +49,7 @@ function setup(
     body: any,
   ) => Promise<Response | undefined> | Response | undefined,
   checkFixture: CheckFixture = { data: [] },
-  catalogFixture: { providers?: string[]; models?: string[]; detection?: boolean; rejections?: boolean } = {},
+  catalogFixture: { providers?: string[]; models?: string[]; detection?: boolean; rejections?: boolean; sorting?: boolean } = {},
 ) {
   const states: Record<string, ControlState> = {
     one: { revision: "one:0", instance_id: "one", rules: [] },
@@ -58,6 +58,9 @@ function setup(
   const writes: { source: string; body: any }[] = [];
   const checkWrites: { source: string; provider: string }[] = [];
   const detectionWrites: { path: string; body: any }[] = [];
+  const reads: string[] = [];
+  const sortCalls: { action: string; models?: { model: string; providers: string[] }[] }[] = [];
+  let sortedOrder: string[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
@@ -66,6 +69,7 @@ function setup(
           u.pathname.match(/\/sources\/([^/]+)\//)?.[1] ||
           u.searchParams.get("source_id") ||
           "all";
+      if (!init?.method || init.method === "GET") reads.push(u.pathname);
       const keySource = u.searchParams.get("api_key_id")?.split("::")[0];
       const ids =
         source !== "all" ? [source] : keySource ? [keySource] : ["one", "two"];
@@ -91,7 +95,7 @@ function setup(
               ...emptyStats(),
               success: 7,
               success_rate_denominator: 7,
-              success_rate: 1,
+              success_rate: catalogFixture.sorting ? (provider === "visible-second" ? 0.9 : 0.1) : 1,
               inflight: 2,
               usage_samples: 7,
               input_tokens: 1000,
@@ -146,6 +150,22 @@ function setup(
           source_id: "one", provider, model, state: "done", revision: provider === "changed-key" ? "old" : "revision",
           result: {status: "error", checked_at: 1, samples:[{request_id: "sample", state: "error", http_status: 403, error_code: "group_deleted"}]},
         })) : [], supported_models: [model] };
+      } else if (catalogFixture.sorting && u.pathname.endsWith("/channel-sort")) {
+        const request = JSON.parse(String(init?.body));
+        sortCalls.push(request);
+        if (request.action === "prepare") {
+          sortedOrder = request.models[0].providers;
+          body = { receipt: "test-receipt", revision: states[source].revision, changes: [{
+            api_key_id: "key", key_position: 1, model: "m",
+            before: ["visible-first", "hidden", "visible-second"], after: sortedOrder, upstreams: {},
+          }] };
+        } else if (request.action === "apply") {
+          expect(request.receipt).toBe("test-receipt");
+          states[source] = { ...states[source], revision: "one:1", rules: [
+            { api_key_id: "key", model: "m", order: sortedOrder, disabled: [] },
+          ] };
+          body = { status: "applied", revision: "one:1" };
+        }
       } else if (u.pathname.endsWith("channel-controls")) {
         if (controlUnavailable)
           return new Response("控制接口暂不可用", { status: 503 });
@@ -247,8 +267,43 @@ function setup(
       </MotionConfig>
     </QueryClientProvider>,
   );
-  return { ...app, user, writes, states, client, checkWrites, detectionWrites };
+  return { ...app, user, writes, states, client, checkWrites, detectionWrites, reads, sortCalls };
 }
+
+it("preloads routing data and lets observation preview and apply sorting while editing", async () => {
+  history.replaceState(null, "", "#view=channels");
+  const app = setup(false, undefined, { data: [] }, { sorting: true });
+  await screen.findByRole("table", {}, { timeout: 5000 });
+  await app.user.selectOptions(condition("uni-api 来源"), "one");
+  await app.user.selectOptions(screen.getByLabelText("API key 筛选"), "one::key");
+  await app.user.selectOptions(screen.getByLabelText("模型筛选"), "m");
+  await waitFor(() => {
+    expect(app.reads).toContain("/analytics/v1/sources/one/channel-controls");
+    expect(app.client.getQueriesData({ queryKey: ["control-catalog"] }).some(([key, data]) =>
+      key[2] === "one" && key[3] === "one::key" && data != null)).toBe(true);
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(4);
+  });
+  const firstRow = () => within(screen.getByRole("table")).getAllByRole("row")[1];
+  expect(firstRow()).toHaveTextContent("visible-first");
+  await app.user.click(tool("调整顺序"));
+  await waitFor(() => expect(within(firstRow()).getByRole("button", { name: /^移动 / })).toBeEnabled());
+  openFilter("显示");
+  await app.user.click(screen.getByRole("button", { name: "多条件排序" }));
+  await app.user.click(screen.getByRole("button", { name: "添加排序依据" }));
+  await app.user.selectOptions(screen.getByLabelText("第 1 排序依据"), "success");
+  await app.user.click(screen.getByRole("button", { name: "预览" }));
+  await waitFor(() => expect(firstRow()).toHaveTextContent("visible-second"));
+  expect(screen.getByRole("button", { name: "完成调整" })).toBeVisible();
+  expect(within(firstRow()).getByRole("button", { name: /^移动 / })).toBeDisabled();
+  const filter = document.querySelector<HTMLDetailsElement>(".channel-filter-disclosure")!;
+  await app.user.click(within(filter).getByRole("button", { name: /^关闭筛选/ }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "应用排序" })).toBeEnabled());
+  expect(app.sortCalls.map(call => call.action)).toEqual(["prepare"]);
+  expect(app.states.one.rules).toEqual([]);
+  await app.user.click(screen.getByRole("button", { name: "应用排序" }));
+  await waitFor(() => expect(app.states.one.rules[0]?.order[0]).toBe("visible-second"));
+  expect(app.sortCalls.map(call => call.action)).toEqual(["prepare", "apply"]);
+});
 it("adds handles to existing rows without opening a dialog or adding headers or toolbar rows", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();

@@ -133,6 +133,7 @@ export interface ModelPrice {
 export interface SiteWallet {
   account_id: string;
   label?: string;
+  provider_kind?: string;
   status: string;
   amount?: number | null;
   checked_at?: number;

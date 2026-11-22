@@ -69,7 +69,7 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 		case (model == chat || model == gemini) && path == "/v1/chat/completions":
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprintf(w, "data: {\"id\":\"fixture\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"test\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"fixture\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", model, model)
-		case model == responses && path == "/v1/responses":
+		case (model == responses || model == gemini) && path == "/v1/responses":
 			subSSE(w, "test", model)
 		default:
 			http.Error(w, "wrong protocol for model", 404)
@@ -188,10 +188,11 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 		}
 		assertHit(entry.path)
 		if entry.model == gemini {
-			if mustJSON(result["confirmed_protocols"]) != `["gemini","chat"]` {
+			if mustJSON(result["confirmed_protocols"]) != `["gemini","chat","responses"]` {
 				t.Fatal("detection stopped after the first success", result)
 			}
 			assertHit("/v1/chat/completions")
+			assertHit("/v1/responses")
 		}
 	}
 	result := post("/v1/channel-management/detect-protocol", map[string]any{"provider": decisionProvider, "model": decisionModel}, 200)
@@ -297,6 +298,39 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 			t.Fatal("reset changed a different model or did not restore defaults", row)
 		}
 	}
+	target := fingerprintTarget{Source: src.ID, Provider: configuredImportName(provider, key), Model: gemini}
+	previousSampleKey := ""
+	for _, endpoint := range []struct{ protocol, format, path string }{
+		{"chat", "openai", "/v1/chat/completions"},
+		{"responses", "responses", "/v1/responses"},
+	} {
+		state, _, err = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		post("/v1/channel-management", map[string]any{"api_key_id": key, "edit_provider": target.Provider, "models": models, "position": 1,
+			"protocols": map[string]string{gemini: endpoint.protocol}}, 200)
+		plan, err := service.prepareFingerprint(ctx, target)
+		if err != nil || plan.config["format"] != endpoint.format || plan.config["allow_unconfigured"] != false {
+			t.Fatalf("fingerprint did not use the saved %s endpoint: %v", endpoint.protocol, err)
+		}
+		if plan.sampleKey == "" || plan.sampleKey == previousSampleKey {
+			t.Fatal("changing a saved endpoint must invalidate partial samples")
+		}
+		previousSampleKey = plan.sampleKey
+		raw, err := runFingerprintViaTransport(ctx, &plan.client, plan.config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The fixture sends text, not fingerprint reference samples. What
+		// matters is that all three samples completed on the saved transport.
+		if strings.Count(string(raw), `"state":"done"`) != 3 {
+			t.Fatalf("samples did not complete on %s: %s", endpoint.protocol, raw)
+		}
+		for i := 0; i < 3; i++ {
+			assertHit(endpoint.path)
+		}
+	}
 
 	// Exact legacy OpenRouter shape from the affected edit. No request goes to
 	// OpenRouter: this verifies catalog capability and the atomic save itself.
@@ -340,5 +374,9 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 	}
 	if len(got) != 2 || got[gemini] != "messages" || got[jev] != "systemone" {
 		t.Fatal("saved endpoint choices did not round-trip", got)
+	}
+	plan, err := service.prepareFingerprint(ctx, fingerprintTarget{Source: src.ID, Provider: openrouter, Model: gemini})
+	if err != nil || plan.config["format"] != "anthropic" || plan.site != "openrouter.ai" {
+		t.Fatal("OpenRouter preflight did not honor its saved Messages endpoint", err)
 	}
 }

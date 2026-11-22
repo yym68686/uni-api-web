@@ -60,6 +60,28 @@ func usagePriceModel(model, upstream string) string {
 	return canonicalPriceModel(model)
 }
 
+const googlePriceNamespace = "google/"
+
+func lookupUsagePrice(prices map[string]Price, model, upstream string) (string, Price) {
+	name := usagePriceModel(model, upstream)
+	price, found := prices[name]
+	// Relay IDs preserve the publisher namespace in request facts. Only map
+	// Google/Gemini IDs to their matching reference price; honor explicit
+	// prices (including unverified ones), and never borrow from a public alias.
+	if gemini, ok := strings.CutPrefix(name, googlePriceNamespace); ok && strings.HasPrefix(gemini, "gemini-") && !strings.Contains(gemini, "/") {
+		if !found || price.Source == "fact-discovered" && !price.Verified && price.Input == 0 && price.Output == 0 && price.CacheRead == 0 && price.CacheWrite == 0 && price.CacheWrite1h == 0 {
+			canonical := canonicalPriceModel(gemini)
+			if fallback, ok := prices[canonical]; ok && fallback.Verified {
+				return canonical, fallback
+			}
+		}
+	}
+	if !found {
+		price = Price{Model: name}
+	}
+	return name, price
+}
+
 // A missing setting is a legacy/default value, not an explicit opt-out.
 func (p Price) chargesCacheWrite() bool {
 	if p.ChargeCacheWrite != nil {

@@ -262,7 +262,7 @@ No model service settings or production routing are changed by this application.
 
 接口：控制台 `GET/POST /analytics/v1/sources/{id}/channel-controls`，uni-api `GET/POST /v1/channel-controls`。仅接受已登录控制台会话和来源的首个配置密钥或管理员密钥。普通业务 key 无管理权限。修改写入 uni-api 审计日志，密钥仅以不可逆 ID 标识。
 
-渠道观测与顺序调整共享搜索、来源、API key、模型、时间、端点、流式、余额和状态等筛选。切换视图、时间或分页会保留草稿。编辑期间按请求顺序显示，不使用指标排序预览；拖动不会改变未显示渠道的排名位置。路由修改的范围只由来源、API key 和模型决定，其他筛选只影响展示。
+渠道观测与顺序调整共享搜索、来源、API key、模型、时间、端点、流式、余额和状态等筛选。切换视图、时间或分页会保留草稿。多条件排序在调整期间也可预览；预览不修改草稿或路由，取消预览会回到草稿顺序。预览后可从表格上方应用排序，无需保持筛选面板打开。拖动不会改变未显示渠道的排名位置。路由修改的范围只由来源、API key 和模型决定，其他筛选只影响展示。
 
 渠道观测、余额管理的 API key 下拉框显示最终请求成功率与成功数/已完成请求数，跟随各页面独立的时间、模型筛选（观测页还跟随端点和流式状态）。未选择模型时合并所有模型。统计仅使用网关最终 `request` 事件，一次请求无论重试多少渠道都只计一次；不累计 `attempt`、hedge 取消或进行中的请求。来源相同且 key 相同才合并，历史重放按 event ID 去重；无记录显示“暂无已完成请求”，历史同步未完成时标注“部分记录”。接口 `/v1/key-request-stats` 一次聚合所有 key，使用已有的日/分钟汇总，不逐 key 拉取全量历史。“已接入 · 查看路由”中的 key 筛选显示明确标注的近 24 小时、全部模型统计。
 
@@ -397,6 +397,8 @@ new-api 仅同步当前账号有权限的分组，用持久映射保留字符串
 余额与消费按站点 `quota_per_unit` 换算；账单用 `newapi:` 请求标识、账号和业务 key 精确关联，数字展示 ID 不参与去重。按稳定请求/事件/令牌组合分配持久账单 ID。支持普通 ratio 和有明确命中档位/条件倍率证据的文本线性表达式，且核对实际扣费；其他复杂表达式保留实际消费，单价不作猜测。订阅额度不当作钱包成本，存在无法关联的退款时不宣布净消费完整。扫描使用固定时间范围；网关采集的两类请求标识由账号站点类型隔离匹配。旧网关未记录 `X-Oneapi-Request-Id` 的历史请求不能补造利润。
 
 已关联站点账号的 New API 导入渠道，若余额查询确认 `/v1/usage` 不存在（404/405），渠道观测会复用与站点账号页面相同的钱包余额，详情标注「站点账号余额」。Key 配额、订阅、鉴权失败和网络错误保留原结果；不按域名猜测账号，也不将未知余额当作零。详见 [New API 渠道余额](docs/newapi-channel-balances.md)。
+
+OpenRouter 渠道的站点余额使用官方 [Get remaining credits](https://openrouter.ai/docs/api/api-reference/credits/get-credits) 接口，按 `total_credits - total_usage` 显示账户或组织的美元余额。部署 analytics API 时通过服务端 Secret 配置 `OPENROUTER_MANAGEMENT_KEY`，并填写 `OPENROUTER_BALANCE_SOURCE_ID` 和 `OPENROUTER_BALANCE_PROVIDER` 绑定到该钱包对应的来源 ID 和渠道标识。普通模型 API key 的限额不是站点余额，不能替代 Management Key。相同站点的其他渠道不会自动共享此钱包。
 
 可选真实验证：`TEST_NEWAPI_CREDENTIALS` 指向仓库外的 JSON（`Base`、`Username`、`Password`），配合 `TEST_CONTROL_DATABASE_URL` 运行 `TestNewAPILiveAdapter`。该测试发起 4 次付费探针，验证专用 key 隔离、刷新及账单关联，退出时仅删除本次创建的 key 并撤销测试会话。默认测试不会访问真实站点。
 

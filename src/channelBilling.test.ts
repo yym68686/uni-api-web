@@ -63,14 +63,16 @@ it("sorts model-specific multipliers without guessing missing metadata from prov
 });
 
 it("shows an unbound copy's source label without changing route identity or inventing a rate", () => {
-  const copy = { ...row, provider: "sub2api-copy-01bd2c8136e0c116158d" };
-  const result = channelBilling(copy, {
+  const copy = { ...row, provider: "sub2api-copy-4ce253a5f4587683da99" };
+  const listing = {
     data: [],
-    labels: { fugue: { [copy.provider]: "bananarouter" } },
+    labels: { fugue: { [copy.provider]: "openai-next" } },
     model_billing: {},
     unavailable_sources: [],
-  });
-  expect(channelName(result)).toBe("bananarouter");
+  };
+  const result = channelBilling(copy, listing);
+  expect(channelName(result)).toBe("openai-next");
+  expect(channelName(channelBilling({ ...copy, source_id: "other" }, listing))).toBe(copy.provider);
   expect(result.provider).toBe(copy.provider);
   expect(result.billing_multiplier).toBeNull();
   expect(result.billing_multiplier_source).toBeUndefined();

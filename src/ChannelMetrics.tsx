@@ -3,7 +3,7 @@ import { channelLatency } from "./channelLatency";
 import { FailureCounts } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
-import { CircleHelp } from "lucide-react";
+import { CircleHelp, Info } from "lucide-react";
 import type { Channel, Distribution, SiteWallet, Stats } from "./types";
 import type { SiteBalanceResult } from "./ChannelAccountBalances";
 import { Tip } from "./ui";
@@ -31,6 +31,18 @@ type MetricColumnsProps = {
   columns?: readonly ObservationColumn[];
   renderDetection?: (id: DetectionColumn) => ReactNode;
 };
+export function WalletAmount({ wallet, inlineDetails = false }: { wallet: SiteWallet; inlineDetails?: boolean }) {
+  const known = hasWalletAmount(wallet);
+  return <>
+    {known && <BalanceAmount value={wallet.amount} />}
+    {wallet.status === "error" && !inlineDetails ? <>
+      {!known && <span className="muted">—</span>}
+      <Tip text={<>{walletStatusLabel(wallet)}{wallet.checked_at ? <><br />查询于 {dateTime(wallet.checked_at)}</> : null}</>}>
+        <Info className="wallet-status-info" size={13} role="img" aria-label="余额更新详情" />
+      </Tip>
+    </> : (wallet.status !== "ok" || !known) && <small className="muted"> {walletStatusLabel(wallet)}</small>}
+  </>;
+}
 export function BalanceValue({
   balance,
   loading,
@@ -45,17 +57,10 @@ export function BalanceValue({
       ? <LoadingIndicator size="inline" label="查询余额" />
       : <span className="muted">站点账号未核验</span>;
   }
-  function walletValue(wallet: SiteWallet) {
-    return <>
-      {hasWalletAmount(wallet) && <BalanceAmount value={wallet.amount} />}
-      {(wallet.status !== "ok" || !hasWalletAmount(wallet)) &&
-        <small className="muted"> {walletStatusLabel(wallet)}</small>}
-    </>;
-  }
   if (!detail && balance.length > 1) {
     return <Tip text={<div className="table-diagnostic-tip">
       {balance.map(wallet => <div key={wallet.account_id}>
-        <strong>{wallet.label || "站点账号"}</strong> · {walletValue(wallet)}
+        <strong>{wallet.label || "站点账号"}</strong> · <WalletAmount wallet={wallet} inlineDetails />
         {wallet.checked_at ? <div>{dateTime(wallet.checked_at)}</div> : null}
       </div>)}
       <div>各账号余额单独显示，不合计。</div>
@@ -65,7 +70,12 @@ export function BalanceValue({
   }
   return (
     <div className={`balance-values ${detail ? "expanded" : ""}`}>
-      {balance.map(wallet => (
+      {balance.map(wallet => wallet.status === "error" ? (
+        <span key={wallet.account_id} className="amount">
+          {detail && wallet.label && <small>{wallet.label} </small>}
+          <WalletAmount wallet={wallet} />
+        </span>
+      ) : (
         <Tip key={wallet.account_id} keyboard={detail} text={<>
           <strong>{wallet.label || "站点账号余额"}</strong><br />
           {wallet.checked_at ? `查询时间 ${dateTime(wallet.checked_at)}` : "暂无查询时间"}<br />
@@ -73,7 +83,7 @@ export function BalanceValue({
         </>}>
           <span className="amount">
             {detail && wallet.label && <small>{wallet.label} </small>}
-            {walletValue(wallet)}
+            <WalletAmount wallet={wallet} />
           </span>
         </Tip>
       ))}

@@ -7,6 +7,57 @@ import (
 	"time"
 )
 
+func TestOpenRouterGeminiUsageUsesMatchingReferencePrice(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	const official, relay, alias = "gemini-4-carbon", "google/gemini-4-carbon", "public-alias"
+	input, output := int64(300000), int64(100000)
+	now := time.Now().Add(-10 * time.Minute).UnixMilli()
+	facts := []Fact{
+		{Schema: 1, Kind: "attempt", EventID: "openrouter-known", Provider: "openrouter", Model: alias, UpstreamModel: relay, Outcome: "success", AtMS: now, InputTokens: &input, OutputTokens: &output},
+		{Schema: 1, Kind: "attempt", EventID: "openrouter-unknown", Provider: "openrouter", Model: official, UpstreamModel: "google/gemini-unpriced", Outcome: "success", AtMS: now, InputTokens: &input, OutputTokens: &output},
+		{Schema: 1, Kind: "attempt", EventID: "openrouter-other-publisher", Provider: "openrouter", Model: alias, UpstreamModel: "someone/" + official, Outcome: "success", AtMS: now, InputTokens: &input, OutputTokens: &output},
+		{Schema: 1, Kind: "attempt", EventID: "openrouter-no-usage", Provider: "openrouter", Model: "no-usage", UpstreamModel: relay, Outcome: "success", AtMS: now},
+	}
+	if err := e.Import(ctx, "openrouter-prices", "v1", facts); err != nil {
+		t.Fatal(err)
+	}
+	check := func(name string, cost *float64) {
+		t.Helper()
+		result, err := e.Query(ctx, QueryFilter{Range: "24h", Provider: "openrouter"})
+		if err != nil || len(result.Data) != len(facts) {
+			t.Fatalf("missing OpenRouter rows: %+v %v", result.Data, err)
+		}
+		for _, row := range result.Data {
+			got, priced := row.Stats["estimated_cost_usd"].(float64)
+			if row.Model != alias || row.UpstreamModel != relay {
+				if priced {
+					t.Fatalf("unexpected price for missing evidence: %+v", row)
+				}
+				continue
+			}
+			if row.Stats["pricing_model"] != name || priced != (cost != nil) || cost != nil && math.Abs(got-*cost) > 1e-9 {
+				t.Fatalf("price model=%v amount=%v, want %q / %v", row.Stats["pricing_model"], got, name, cost)
+			}
+		}
+	}
+	base, tiered, custom := 1.6, 2.7, 1.2
+	check(official, &base)
+	yes := true
+	if err := e.SavePrice(ctx, Price{Model: official, Input: 2, Output: 10, Verified: true, LongContextPremium: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	check(official, &tiered)
+	if err := e.SavePrice(ctx, Price{Model: relay, Input: 4, Verified: true}); err != nil {
+		t.Fatal(err)
+	}
+	check(relay, &custom)
+	if err := e.SavePrice(ctx, Price{Model: relay, Input: 4, Verified: false}); err != nil {
+		t.Fatal(err)
+	}
+	check(relay, nil)
+}
+
 func TestMappedUsageUsesRecordedUpstreamPriceAndPolicy(t *testing.T) {
 	ctx := context.Background()
 	e := stateTestEngine(t)

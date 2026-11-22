@@ -48,6 +48,10 @@ export function walletFailureDetail(wallet: { error_reason?: string }) {
     case "login_required": return "站点会话失效，请重新登录";
     case "rate_limited": return "站点限流，请稍后刷新";
     case "access_denied": return "站点拒绝访问，请检查账号权限";
+    case "openrouter_management_key_required": return "请为此渠道配置 OpenRouter 管理密钥";
+    case "openrouter_management_key_rejected": return "OpenRouter 拒绝了管理密钥，请核对权限";
+    case "openrouter_channel_unverified": return "无法确认此渠道连接到 OpenRouter 官方站点";
+    case "openrouter_fetch_failed": return "暂时无法读取 OpenRouter 余额";
     default: return "";
   }
 }

@@ -1,3 +1,13 @@
+.channel-sort-preview-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.channel-sort-preview-actions:empty {
+  display: none;
+}
 .guide-dialog.channel-sort-dialog {
   width: min(720px, calc(100vw - 32px));
   max-height: min(820px, calc(100dvh - 48px));
