@@ -289,6 +289,13 @@ it.each([false,true])("imports sub2api aliases independently of originals (keep 
   expect(writes[0].model_mappings).toEqual({"gpt-5.6-luna":"codex-auto-review"});
 });
 
+function channelConfigurationFixture(provider: string, models: string[], revision = "r1") {
+  const doc = { provider, base_url: "https://fixture.test/v1/responses", model: models };
+  return Response.json({ provider, revision, kind: "configured", base: doc, effective: doc,
+    override_paths: [], available_keys: [], affected_keys: [],
+    schema: { engines: ["gpt"], fields: [{ path: "/base_url", type: "string", group: "基本与模型" }] } });
+}
+
 it("manages initial channels with account/unassigned filters and shows every caller key route", async () => {
   const accounts = fixtures().slice(0, 1);
   const base = { kind: "configured", source_id: "primary", source_name: "Fugue", api_key_id: "", key_position: 0, key_prefix: "", positions: {}, revision: "", manageable: false };
@@ -299,6 +306,9 @@ it("manages initial channels with account/unassigned filters and shows every cal
   const writes: any[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     if (init?.method === "POST") { writes.push(JSON.parse(String(init.body))); return new Response("{}", { status: 202 }); }
+    if (input.includes("/channel-settings?")) return channelConfigurationFixture("initial-unassigned", ["custom-model"]);
+    if (input.includes("/model-catalog?")) return Response.json({ models: [], refreshed_at: null });
+    if (input.includes("channel-options")) return Response.json({ revision: "r1", channels: [], keys: [{ key_id: "key-2", position: 2, prefix: "masked-two" }] });
     const data = input.endsWith("/channel-management") ? configured : input.endsWith("/accounts") ? accounts : input.endsWith("/channels") ? configured : input.endsWith("/sources") ? [{id:"primary",name:"Fugue"},{id:"do",name:"DigitalOcean"}] : input.endsWith("/channel-routes") ? [
       { provider:"initial-bound", model:"gpt-6-astra", api_key_id:"key-1", key_prefix:"masked-one", key_position:1, position:2 },
       { provider:"initial-bound", model:"gpt-6-astra", api_key_id:"key-2", key_prefix:"masked-two", key_position:2, position:5 },
@@ -338,8 +348,10 @@ it("manages initial channels with account/unassigned filters and shows every cal
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
   expect(screen.getByText("initial-unassigned",{selector:"strong"})).toBeVisible();
   await user.click(screen.getByRole("button",{name:"已添加 · 1 个 key"}));
-  expect(await within(screen.getByRole("dialog")).findByText("第 3 位")).toBeVisible();
-  await user.click(screen.getByRole("button",{name:"关闭添加渠道"}));
+  const unified = within(screen.getByRole("dialog",{name:"渠道设置"}));
+  await user.click(await unified.findByRole("button",{name:/已接入 · 1 个 Key/}));
+  expect(await unified.findByText("第 3 位")).toBeVisible();
+  await user.click(unified.getByRole("button",{name:"关闭渠道设置"}));
   view.unmount();
   mount("management-fixture");
   expect(await screen.findByLabelText("sub2api 账号筛选")).toHaveValue("__unassigned__");
@@ -382,10 +394,11 @@ it.each([false, true])("edits an unassigned channel's connection settings from i
   await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "__unassigned__");
   await user.click(screen.getByText("bananarouter", {selector:"strong"}));
   const drawer = within(screen.getByRole("dialog", {name:"bananarouter"}));
-  expect(drawer.getByRole("button", {name:"查看接入配置"})).toBeVisible();
+  expect(drawer.queryByRole("button", {name:"查看接入配置"})).not.toBeInTheDocument();
   if (multiple) expect(drawer.getByRole("button", {name:"编辑 Fugue"})).toBeVisible();
   await user.click(drawer.getByRole("button", {name:multiple ? "编辑 DigitalOcean" : "编辑渠道"}));
   const settings = within(screen.getByRole("dialog", {name:"渠道设置"}));
+  expect(await settings.findByRole("button", {name:"模型与接入"})).toBeVisible();
   expect(await settings.findByLabelText("上游地址")).toHaveValue(address);
   expect(writes).toHaveLength(0);
   await user.clear(settings.getByLabelText("上游地址"));
@@ -469,6 +482,8 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
       if (path.endsWith("detect-protocol")) return Response.json(openrouter ? {protocol: "chat", confirmed_protocols: ["chat", "messages", "responses"]} : {protocol: "gemini"});
       return new Promise<Response>(resolve => { resolveSave = resolve; });
     }
+    if (path.includes("/channel-settings?")) return channelConfigurationFixture(provider, models, revision);
+    if (path.includes("/model-catalog?")) return Response.json({ models: [], refreshed_at: null });
     if (path.includes("channel-options")) return Response.json({
       revision, model_upstream_protocols:true, keys:[{key_id:"key",position:1,prefix:"masked"}],
       channels:[...models.map(model => ({provider:"peer", model})), ...rows],
@@ -482,11 +497,11 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
   const user = userEvent.setup();
   mount("manual-protocol-editor", new QueryClient({defaultOptions:{queries:{retry:false}}}));
   await user.click(await screen.findByRole("button",{name:"已添加 · 1 个 key"}));
-  await user.click(await screen.findByRole("button",{name:"编辑 Key 1"}));
-  const panel = within(screen.getByRole("dialog"));
-  expect(panel.getByRole("heading",{ name:"各模型路由位置" })).toBeVisible();
-  const position = panel.getByRole("combobox",{ name:"gemini-4-carbon 的路由位置" });
-  await waitFor(() => expect(position).toBeEnabled());
+  const panel = within(screen.getByRole("dialog",{name:"渠道设置"}));
+  const positionRole = { name:"gemini-4-carbon 路由位置" };
+  await waitFor(() => expect(panel.getByRole("combobox", positionRole)).toBeEnabled());
+  const position = panel.getByRole("combobox", positionRole);
+  expect(panel.getByRole("columnheader",{ name:"路由位置" })).toBeVisible();
   expect(position).toHaveValue("2");
   await user.selectOptions(position, "1");
   const gemini = panel.getByRole("combobox",{name:"gemini-4-carbon 上游端点"});
@@ -507,8 +522,8 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({path:expect.stringContaining("/detect-protocol"),body:{revision:"r1",model:"gemini-4-carbon",provider}});
   await user.selectOptions(jev, openrouter ? "systemone" : "messages");
-  await user.click(panel.getByRole("button",{name:"保存更改"}));
-  expect(screen.queryByRole("dialog",{name:"添加到渠道"})).not.toBeInTheDocument();
+  await user.click(panel.getByRole("button",{name:"应用接入变更"}));
+  expect(screen.queryByRole("dialog",{name:"渠道设置"})).not.toBeInTheDocument();
   expect(screen.getByText(/正在后台保存/)).toBeVisible();
   const changes = {positions:{"gemini-4-carbon":1,"jev-latest":2},protocols:{"gemini-4-carbon":openrouter ? "messages" : "gemini","jev-latest":openrouter ? "systemone" : "messages"},edit_provider:provider};
   expect(writes[1]?.body).toMatchObject(changes);
@@ -562,6 +577,8 @@ it.each(["site", "native"])("keeps configured model-card price warnings consiste
   const requests: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     requests.push(init?.method || "GET");
+    if (input.includes("/channel-settings?")) return channelConfigurationFixture(channel.provider, models);
+    if (input.includes("/model-catalog?")) return Response.json({ models: [], refreshed_at: null });
     if (input.includes("channel-options")) return Response.json({revision:"r1", keys:[{key_id:"key",position:1,prefix:"masked"}],channels:rows});
     return Response.json({data:
       input.endsWith("/prices") ? models.map(model => ({model,input:model === "gpt-6-luna" ? inputPrice : 1,output:10,verified:true})) :
@@ -580,18 +597,20 @@ it.each(["site", "native"])("keeps configured model-card price warnings consiste
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-luna");
   expect((await screen.findAllByText("异常", {exact:true}))[0]).toBeVisible();
   await user.click(screen.getByRole("button",{name:"已添加 · 1 个 key"}));
-  await user.click(await screen.findByRole("button",{name:"编辑 Key 1"}));
-  const luna = screen.getByRole("checkbox",{name:"gpt-6-luna"});
+  if (evidence === "site") await user.click(await screen.findByRole("button",{name:"编辑 Key 1"}));
+  const label = (model: string) => evidence === "site" ? model : `接入 ${model}`;
+  const container = evidence === "site" ? "label" : "tr";
+  const luna = await screen.findByRole("checkbox",{name:label("gpt-6-luna")});
   await waitFor(() => expect(luna).toBeEnabled());
   expect(luna).toBeChecked();
-  expect(within(luna.closest("label")!).getByText("单价异常")).toHaveClass("negative");
-  expect(screen.getByRole("checkbox",{name:"gpt-6-sol"}).closest("label")).not.toHaveTextContent("单价异常");
+  expect(within(luna.closest(container)!).getByText("单价异常")).toHaveClass("negative");
+  expect(screen.getByRole("checkbox",{name:label("gpt-6-sol")}).closest(container)).not.toHaveTextContent("单价异常");
   await user.click(luna);
   expect(luna).not.toBeChecked();
-  expect(luna.closest("label")).toHaveTextContent("单价异常");
+  expect(luna.closest(container)).toHaveTextContent("单价异常");
   inputPrice = 2;
   await client.invalidateQueries({queryKey:["management-query"]});
-  await waitFor(() => expect(luna.closest("label")).not.toHaveTextContent("单价异常"));
+  await waitFor(() => expect(luna.closest(container)).not.toHaveTextContent("单价异常"));
   expect(luna).not.toBeChecked();
   expect(requests.every(method => method === "GET")).toBe(true);
 });

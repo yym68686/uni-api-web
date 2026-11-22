@@ -2589,6 +2589,31 @@ nav > button.active > svg {
 .settings-icon-button:disabled {opacity:.25;}
 .settings-icon-button.settings-close {margin-left:auto;align-self:flex-start;}
 .settings-workspace {display:grid;grid-template-columns:194px minmax(0,1fr);flex:1;min-height:0;}
+.channel-catalog-toolbar {padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:16px;}
+.channel-catalog-toolbar > div,.channel-catalog-toolbar form,.channel-model-access-filters {
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.channel-catalog-toolbar input,.channel-model-access input:not([type="checkbox"]),.channel-model-access select {
+  min-height:34px;min-width:0;padding:5px 8px;border:1px solid var(--line);border-radius:7px;color:var(--ink);background:var(--bg);
+}
+.channel-catalog-toolbar > small {display:block;margin-top:10px;}
+.channel-model-route-workspace .route-mode-tabs {padding-inline:0;}
+.channel-model-route-body {padding-top:16px;}
+.channel-model-access {margin:16px 0;}
+.channel-model-access-filters {margin:8px 0;}
+.channel-model-access-scroll {overflow:auto;border:1px solid var(--line);border-radius:9px;}
+.channel-model-access table {width:100%;min-width:620px;text-align:left;border-collapse:collapse;table-layout:fixed;}
+.channel-model-access th,.channel-model-access td {padding:8px;vertical-align:top;border-bottom:1px solid var(--line);}
+.channel-model-access th:nth-child(1) {width:26%;}
+.channel-model-access th:nth-child(2) {width:12%;}
+.channel-model-access th:nth-child(3) {width:23%;}
+.channel-model-access th:nth-child(4) {width:13%;}
+.channel-model-access td input:not([type="checkbox"]),.channel-model-access td select {width:100%;}
+.channel-model-access th code {overflow-wrap:anywhere;}
+.channel-model-access th small {display:block;font-weight:normal;margin:4px 0;}
+.channel-model-access .configured-protocol-item,.channel-model-access .import-protocol-row {display:flex;flex-direction:column;align-items:stretch;gap:4px;}
+.channel-model-public-name {display:flex;align-items:center;gap:4px;margin-bottom:5px;}
+.channel-model-position {margin-bottom:5px;}
 .settings-sidebar {display:flex;flex-direction:column;gap:24px;min-height:0;overflow:auto;padding:22px 14px;background:var(--subtle);border-right:1px solid var(--line);}
 .settings-tabs {display:flex;flex-direction:column;gap:5px;}
 .settings-tabs button {display:flex;align-items:center;gap:10px;min-height:40px;flex-shrink:0;text-align:left;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:13px;font-weight:500;white-space:nowrap;}

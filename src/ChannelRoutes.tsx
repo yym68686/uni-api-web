@@ -28,6 +28,8 @@ import { configuredQualityResult } from "./channelManagement";
 import { ModelQualityWarning } from "./ModelQualityWarning";
 import { ModelPriceWarning } from "./Sub2apiPricing";
 import { ConfiguredModelProtocols } from "./ConfiguredModelProtocols";
+import { ChannelModelAccessTable } from "./ChannelModelAccessTable";
+import type { CatalogModel } from "./ChannelModelCatalog";
 import { channelProtocols, configuredChannelProtocols } from "./channelProtocol";
 import {
   managedRouteCount,
@@ -227,6 +229,7 @@ export function ConfiguredChannelDialog({
   prices,
   initialAdd,
   submitAdd,
+  catalog,
 }: {
   item: ManagedChannel;
   close: () => void;
@@ -237,6 +240,7 @@ export function ConfiguredChannelDialog({
   prices?: ModelPrice[];
   initialAdd?: ConfiguredChannelAddDraft;
   submitAdd?: SubmitChannelAdd<ConfiguredChannelAddDraft>;
+  catalog?: { models: CatalogModel[]; ownerKey?: string };
 }) {
   const client = useQueryClient();
   const members = channelMembers(group);
@@ -258,11 +262,11 @@ export function ConfiguredChannelDialog({
   const [adding, setAdding] = useState(!!initialAdd);
   const modeChosen = useRef(!!initialAdd);
   useEffect(() => {
-    if (!modeChosen.current && counts && !counts.partial) {
+    if (!catalog && !modeChosen.current && counts && !counts.partial) {
       setAdding(counts.count === 0);
       modeChosen.current = true;
     }
-  }, [counts]);
+  }, [counts, catalog]);
   const [editingProvider, setEditingProvider] = useState(initialAdd?.editingProvider || "");
   const toolDefaultsPending=toolChecks.isPending || accounts.isPending;
   const toolDefaultsError=toolChecks.isError || accounts.isError;
@@ -270,20 +274,22 @@ export function ConfiguredChannelDialog({
   const [selectedOverride, setSelected] = useState<string[]|null>(initialAdd?.models || null);
   const [aliases, setAliases] = useState<ModelAlias[]>(initialAdd?.aliases || []);
   const modelOptions = [
-    ...new Set([...item.models, ...(selectedOverride||[]), ...aliases.map(a=>a.upstream), ...SUB_MODELS,
+    ...new Set([...item.models, ...(selectedOverride||[]), ...aliases.map(a=>a.upstream),
+      ...(catalog ? catalog.models.map(m => m.model) : SUB_MODELS),
       ...providerRoutes(routes[sources.indexOf(item.source_id)]?.data?.data||[],[item.provider]).flatMap(r=>[r.model,r.upstream_model||r.model]),
-      ...(toolChecks.data?.data||[]).filter(c=>c.source_id===item.source_id&&c.provider===item.provider&&(c.kind==="model"||c.kind==="availability")).map(c=>c.model)]),
+      ...(catalog ? [] : (toolChecks.data?.data||[]).filter(c=>c.source_id===item.source_id&&c.provider===item.provider&&(c.kind==="model"||c.kind==="availability")).map(c=>c.model))]),
   ];
   const allChecks=configuredModelChecks(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions);
   const toolTarget={tool_use:configuredToolUseResult(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions)};
   const quality=configuredQualityResult(item,accounts.data?.data||[],toolChecks.data?.data||[]);
-  const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(allChecks.find(c=>c.model===model));
-  const selected=selectedOverride ?? item.models.filter(model=>canSelectModel(model)&&modelIsDefaultSelected(allChecks.find(c=>c.model===model))&&!toolUseFailed(toolTarget,model));
+  const checkByModel = new Map(allChecks.map(check => [check.model, check]));
+  const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(checkByModel.get(model));
+  const selected=selectedOverride ?? (catalog ? [] : item.models.filter(model=>canSelectModel(model)&&modelIsDefaultSelected(checkByModel.get(model))&&!toolUseFailed(toolTarget,model)));
   const mapping = aliasMappings(aliases, selected);
   const [key, setKey] = useDefaultChannelChoice(
-    keyDirectory?.data?.keys.map((key) => key.key_id) ?? [],
+    keyDirectory?.data?.keys.filter(k => !catalog?.ownerKey || k.key_id === catalog.ownerKey).map((key) => key.key_id) ?? [],
     adding && !editingProvider,
-    initialAdd?.key,
+    initialAdd?.key || catalog?.ownerKey,
   );
   const [position, setPosition] = useState(initialAdd?.position ?? 1);
   const [perModel, setPerModel] = useState(initialAdd?.perModel ?? false);
@@ -294,6 +300,7 @@ export function ConfiguredChannelDialog({
   const [protocolChoices, setProtocolChoices] = useState<Record<string, string>>(initialAdd?.protocols || {});
   const [draftRevision, setDraftRevision] = useState(initialAdd?.editingProvider ? initialAdd.revision : undefined);
   const [detecting, setDetecting] = useState(false);
+  const [probing, setProbing] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(initialAdd?.error || "");
   const [success, setSuccess] = useState("");
@@ -324,10 +331,22 @@ export function ConfiguredChannelDialog({
     if (initialEdit?.length) beginEdit(item, initialEdit);
     // A supplied edit is the initial state of this dialog, never replayed on refetch.
   }, []);
+  const itemRoutes = routes[sources.indexOf(item.source_id)]?.data;
+  useEffect(() => {
+    if (!catalog || modeChosen.current || !itemRoutes || itemRoutes.snapshot_consistent === false ||
+      (catalog.ownerKey ? itemRoutes.unavailable_keys?.includes(catalog.ownerKey) : itemRoutes.unavailable_keys?.length)) return;
+    const relevant = providerRoutes(itemRoutes.data, [item.provider]).filter(r => !catalog.ownerKey || r.api_key_id === catalog.ownerKey);
+    const first = [...relevant].sort((a,b) => a.key_position - b.key_position)[0];
+    if (first) beginEdit(item, relevant.filter(r => r.api_key_id === first.api_key_id && r.provider === first.provider));
+    else {
+      modeChosen.current = true;
+      setAdding(true);
+    }
+  }, [catalog, item, itemRoutes]);
   const options = useQuery({
     queryKey: ["configured-import-options", item.source_id, key],
-    queryFn: ({ signal }) =>
-      controlRequest<{
+    queryFn: async ({ signal }) => {
+      const result = await controlRequest<{
         revision: string;
         model_upstream_protocols?: boolean;
         keys: KeyInfo[];
@@ -342,7 +361,11 @@ export function ConfiguredChannelDialog({
         "/v1/sub2api/channel-options?" +
           new URLSearchParams({ source_id: item.source_id, api_key_id: key }),
         { signal },
-      ),
+      );
+      if (!Array.isArray(result.channels) || !Array.isArray(result.keys) || !result.revision)
+        throw Error("API key 路由响应不完整，请重新读取配置");
+      return result;
+    },
     enabled: adding && !!key,
     retry: false,
     refetchOnWindowFocus: false,
@@ -370,6 +393,13 @@ export function ConfiguredChannelDialog({
   const invalidProtocol = !!options.data?.model_upstream_protocols && protocolModels.some(({upstream,supported}) => !!protocolChoices[upstream] && !supported.includes(protocolChoices[upstream]));
   const staleDraft = !!draftRevision && !!options.data && draftRevision !== options.data.revision;
   const invalidModels=unavailableModelChanges(desiredModels,savedModels,upstream=>allChecks.some(c=>(item.model_mappings?.[c.model]||c.model)===upstream&&canSelectModel(c.model)));
+  const routePending = !!catalog && (!options.data || options.isFetching || !!options.error || (!!editingProvider && initializedEdit.current !== `${item.source_id}:${key}:${editingProvider}`));
+  const currentPositions: Record<string, number> = Object.create(null);
+  const positionCounts: Record<string, number> = Object.create(null);
+  for (const row of options.data?.channels || []) {
+    positionCounts[row.model] = (positionCounts[row.model] || 0) + 1;
+    if (row.provider === editingProvider) currentPositions[row.model] = positionCounts[row.model];
+  }
   useEffect(() => {
     if (
       !editingProvider ||
@@ -379,13 +409,6 @@ export function ConfiguredChannelDialog({
       initializedEdit.current === `${item.source_id}:${key}:${editingProvider}`
     )
       return;
-    const positions: Record<string, number> = {},
-      counts: Record<string, number> = {};
-    for (const row of options.data.channels) {
-      counts[row.model] = (counts[row.model] || 0) + 1;
-      if (row.provider !== editingProvider) continue;
-      positions[row.model] = counts[row.model];
-    }
     const {originals,aliases:renamed}=splitChannelModels(options.data.channels.filter(r=>r.provider===editingProvider),item);
     if (!originals.length && !renamed.length) {
       setError("此 API key 的渠道已变化，请重新打开编辑。");
@@ -393,7 +416,7 @@ export function ConfiguredChannelDialog({
     }
     setSelected(originals);
     setAliases(renamed);
-    setModelPositions(positions);
+    setModelPositions(currentPositions);
     initializedEdit.current = `${item.source_id}:${key}:${editingProvider}`;
   }, [editingProvider, options.data, options.isFetching, item, key, inventory.isPending]);
   const positions = mapping.models.length
@@ -410,6 +433,10 @@ export function ConfiguredChannelDialog({
         ),
       )
     : 1;
+  const canSaveModels = !catalog || Object.keys(protocolChoices).length > 0 ||
+    Object.keys(savedModels).length !== Object.keys(desiredModels).length ||
+    Object.entries(desiredModels).some(([name, up]) => savedModels[name] !== up) ||
+    Object.keys(savedModels).some(name => (activePositions[name] ?? Math.min(position, positions)) !== currentPositions[name]);
   function batchDraft(part:BatchPart):BatchDraft {
     const resolve=(m:string)=>item.model_mappings?.[m]||m;
     const originals=Object.fromEntries(selected.map(m=>[m,resolve(m)]));
@@ -426,6 +453,7 @@ export function ConfiguredChannelDialog({
   async function save() {
     if (
       busy ||
+      routePending || !canSaveModels ||
       detecting ||
       inventory.isPending ||
       toolDefaultsPending || toolDefaultsError ||
@@ -497,27 +525,95 @@ export function ConfiguredChannelDialog({
       setBusy(false);
     }
   }
-  return (
-    <Dialog.Root
-      open
-      onOpenChange={(open) => {
-        if (!open && !busy) close();
+  async function probeModel(model: string) {
+    if (probing) return;
+    setProbing(model);
+    setError("");
+    try {
+      await controlRequest("/v1/channel-management/checks", { method: "POST",
+        body: JSON.stringify({ kind: "availability", manual: true, targets: [{ source_id: item.source_id, provider: item.provider, models: [model] }] }),
+      });
+      await toolChecks.refetch();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "模型检测启动失败");
+    } finally { setProbing(""); }
+  }
+  function renderModelAccess(protocol?: (upstream: string) => ReactNode) {
+    type Entry = { name: string; original?: string; aliasIndex?: number };
+    const namesByUpstream = new Map<string, Entry[]>();
+    const upstreamOf = (model: string) => item.model_mappings?.[model] || model;
+    const append = (up: string, entry: Entry) => {
+      const entries = namesByUpstream.get(up) || [];
+      entries.push(entry);
+      namesByUpstream.set(up, entries);
+    };
+    for (const model of selected) append(upstreamOf(model), { name: model, original: model });
+    aliases.forEach((alias, aliasIndex) => append(upstreamOf(alias.upstream), { name: alias.public, aliasIndex }));
+    const catalogByModel = new Map(catalog?.models.map(m => [m.model, m]));
+    const serving = new Set(Object.values(savedModels));
+    const upstreams = [...new Set([...catalogByModel.keys(), ...modelOptions.map(upstreamOf), ...namesByUpstream.keys()])].sort();
+    const controlDisabled = busy || detecting || inventory.isPending || routePending;
+    return <ChannelModelAccessTable disabled={busy || detecting} routePending={routePending || inventory.isPending} protocol={protocol}
+      rows={upstreams.map(upstream => {
+        const check = checkByModel.get(upstream);
+        return { upstream, catalog: catalogByModel.get(upstream), names: (namesByUpstream.get(upstream) || []).map(m => m.name),
+          canEnable: canSelectModel(upstream) || serving.has(upstream),
+          canRename: canSelectModel(upstream),
+          checking: check?.state === "running" || check?.state === "queued" || probing === upstream,
+          status: <>{importModelLabel(check || { model: upstream, state: "idle", message: "", result: null }) || "检测通过"}
+            <ModelQualityWarning model={upstream} result={quality} />
+            <ModelPriceWarning check={check} prices={prices} /></> };
+      })}
+      onToggle={({upstream}, checked) => {
+        if (checked) {
+          const prior = Object.entries(savedModels).filter(([,up]) => up === upstream);
+          if (prior.length) {
+            const restore = splitChannelModels(prior.map(([model, up]) => ({ model, upstream_model: up })), item);
+            setSelected([...selected, ...restore.originals]);
+            setAliases([...aliases, ...restore.aliases]);
+          } else {
+            setSelected([...selected, upstream]);
+          }
+        } else {
+          setSelected(selected.filter(model => upstreamOf(model) !== upstream));
+          setAliases(aliases.filter(alias => upstreamOf(alias.upstream) !== upstream));
+        }
       }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay
-          className={`dialog-overlay${initialEdit || nested ? " route-edit-overlay" : ""}`}
-        />
-        <Dialog.Content
-          className={`guide-dialog sub-import-dialog route-workspace${initialEdit || nested ? " route-edit-dialog" : ""}`}
-          onEscapeKeyDown={(e) => {
-            if (busy) e.preventDefault();
-          }}
-          onPointerDownOutside={(e) => {
-            if (busy) e.preventDefault();
-          }}
-        >
-          <header className="route-dialog-header">
+      onRename={(up, index, name) => {
+        const entry = namesByUpstream.get(up)?.[index];
+        if (!entry) return;
+        if (entry.original !== undefined) {
+          setSelected(selected.filter(model => upstreamOf(model) !== up));
+          const originals = namesByUpstream.get(up)!.flatMap(e =>
+            e.original === undefined ? [] : [{ upstream: e.original, public: e === entry ? name : e.name }]);
+          setAliases([...originals, ...aliases]);
+        } else {
+          setAliases(aliases.map((alias,i) => i === entry.aliasIndex ? { ...alias, public: name } : alias));
+        }
+        const prior = activePositions[entry.name.trim()];
+        if (prior != null) setModelPositions(old => ({ ...old, [name.trim()]: Math.min(prior, modelPositionLimit(name.trim(), options.data?.channels || [], editingProvider)) }));
+      }}
+      onAlias={upstream => setAliases([...aliases, { upstream, public: "" }])}
+      onRemoveAlias={(up, index) => {
+        const entry = namesByUpstream.get(up)?.[index];
+        if (!entry) return;
+        if (entry.original !== undefined) setSelected(selected.filter(model => model !== entry.original));
+        else setAliases(aliases.filter((_,i) => i !== entry.aliasIndex));
+      }}
+      onProbe={model => void probeModel(model)}
+      position={name => {
+        if (!name.trim()) return "—";
+        const limit = modelPositionLimit(name.trim(), options.data?.channels || [], editingProvider);
+        return <select aria-label={`${name} 路由位置`} disabled={controlDisabled || !perModel}
+          value={activePositions[name.trim()] ?? Math.min(position, positions)}
+          onChange={event => setModelPositions(old => ({...old, [name.trim()]: Number(event.target.value)}))}>
+          {Array.from({ length: limit }, (_,i) => <option key={i} value={i+1}>第 {i+1} 位</option>)}
+        </select>;
+      }}
+    />;
+  }
+  const content = <>
+          {!catalog && <header className="route-dialog-header">
             <Dialog.Title>添加到渠道</Dialog.Title>
             <Dialog.Description>
               {group.name} · {group.source_name}
@@ -529,13 +625,14 @@ export function ConfiguredChannelDialog({
             >
               <X size={18} />
             </Dialog.Close>
-          </header>
+          </header>}
           <nav className="route-mode-tabs" aria-label="渠道接入视图">
             <button
               type="button"
               aria-pressed={!adding}
               disabled={busy}
               onClick={() => {
+                if (catalog && !modeChosen.current) return;
                 modeChosen.current = true;
                 setAdding(false);
                 setError("");
@@ -552,6 +649,10 @@ export function ConfiguredChannelDialog({
               disabled={busy}
               onClick={() => {
                 if (adding) return;
+                if (catalog) {
+                  if (modeChosen.current) setAdding(true);
+                  return;
+                }
                 modeChosen.current = true;
                 setAdding(true);
                 setEditingProvider("");
@@ -569,10 +670,14 @@ export function ConfiguredChannelDialog({
               }}
             >
               <Plus size={14} />
-              {editingProvider && adding ? "编辑接入" : "新增接入"}
+              {catalog || (editingProvider && adding) ? "编辑接入" : "新增接入"}
             </button>
           </nav>
-          <div className="route-dialog-body">
+          <div className={catalog ? "channel-model-route-body" : "route-dialog-body"}>
+            {catalog && !adding && !modeChosen.current && itemRoutes &&
+              (itemRoutes.snapshot_consistent === false ||
+                (catalog.ownerKey ? itemRoutes.unavailable_keys?.includes(catalog.ownerKey) : !!itemRoutes.unavailable_keys?.length)) &&
+              renderModelAccess()}
             {!adding && (
               <section
                 className="configured-source"
@@ -704,7 +809,24 @@ export function ConfiguredChannelDialog({
                               item,
                               candidates.filter((r) => r.provider === provider),
                             );
+                          else if (catalog) {
+                            setEditingProvider("");
+                            setDraftRevision(undefined);
+                            setSelected([]);
+                            setAliases([]);
+                            setKey(e.target.value);
+                            setPosition(1);
+                            setPerModel(true);
+                            setModelPositions({});
+                            setProtocolChoices({});
+                          }
                         } else {
+                          const existing = catalog && providerRoutes(itemRoutes?.data || [], [item.provider]).filter(r => r.api_key_id === e.target.value);
+                          if (existing && existing.length) {
+                            const provider = existing.find(r => r.origin_provider)?.provider || existing[0].provider;
+                            beginEdit(item, existing.filter(r => r.provider === provider));
+                            return;
+                          }
                           setKey(e.target.value);
                           setPosition(1);
                           setPerModel(false);
@@ -717,9 +839,10 @@ export function ConfiguredChannelDialog({
                         <option value="" disabled>{keyDirectory?.data ? keyDirectory.data.keys.length ? "选择 API key" : "暂无 API key" : keyDirectory?.isError ? "API key 加载失败" : "正在读取 API key…"}</option>
                       )}
                       {keyDirectory?.data?.keys
+                        .filter(k => !catalog?.ownerKey || k.key_id === catalog.ownerKey)
                         .filter(
                           (k) =>
-                            !editingProvider ||
+                            !!catalog || !editingProvider ||
                             providerRoutes(
                               routes[sources.indexOf(item.source_id)]?.data
                                 ?.data || [],
@@ -761,7 +884,7 @@ export function ConfiguredChannelDialog({
                   </label>
                 </div>
                 {!!key && options.isFetching && <LoadingIndicator size="compact" label="读取所选 API key 的路由位置" />}
-                {mapping.models.length > 0 && <ModelPositions
+                {!catalog && mapping.models.length > 0 && <ModelPositions
                   actions={batchButton("positions","路由位置")}
                   models={mapping.models}
                   channels={options.data?.channels || []}
@@ -772,17 +895,19 @@ export function ConfiguredChannelDialog({
                   disabled={busy || options.isFetching || options.isError || !options.data || !key || !perModel}
                   uniform={!perModel}
                 />}
-                {protocolModels.length > 0 && options.data?.model_upstream_protocols &&
+                {(catalog || protocolModels.length > 0) && options.data?.model_upstream_protocols &&
                   <ConfiguredModelProtocols key={JSON.stringify([item.source_id, key, editingProvider, options.data.revision])}
                     source={item.source_id} revision={options.data.revision} models={protocolModels}
                     saved={savedProtocols} choices={protocolChoices} suggested={suggestedProtocols}
                     onChange={(model, protocol) => setProtocolChoices(old => ({ ...old, [model]: protocol }))}
-                    disabled={busy || options.isFetching || options.isError} onDetecting={setDetecting} />}
+                    disabled={busy || options.isFetching || options.isError} onDetecting={setDetecting}
+                    render={catalog ? renderModelAccess : undefined} />}
+                {catalog && !options.data?.model_upstream_protocols && renderModelAccess()}
                 {protocolModels.length > 0 && options.data?.model_upstream_protocols === false &&
                   <p className="muted">该来源的 uni-api 尚不支持按模型设置上游端点，现有端点不变。</p>}
                 {editingProvider && Object.keys(protocolChoices).length > 0 &&
                   <p className="muted">端点设置只应用于当前 Key。请先保存，再执行跨渠道批量调整。</p>}
-                <ChannelModelSelection
+                {!catalog && <ChannelModelSelection
                   models={modelOptions}
                   canSelect={canSelectModel}
                   selected={selected} onChange={setSelected} editing={!!editingProvider}
@@ -798,15 +923,15 @@ export function ConfiguredChannelDialog({
                       {toolUseFailed(toolTarget,model)&&<small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>}
                     </>;
                   }}
-                />
-                <ModelAliases
+                />}
+                {!catalog && <ModelAliases
                   actions={batchButton("aliases","模型重命名")}
                   models={modelOptions}
                   canSelect={canSelectModel}
                   aliases={aliases}
                   onChange={setAliases}
                   disabled={busy || options.isFetching}
-                />
+                />}
                 {!!invalidModels.length && <p role="alert" className="negative">新增模型须检测可用：{invalidModels.join("、")}</p>}
                 {mapping.error && (
                   <p role="alert" className="negative">
@@ -826,7 +951,7 @@ export function ConfiguredChannelDialog({
                   <button
                     className="button primary"
                     disabled={
-                      busy ||
+                      busy || routePending || !canSaveModels ||
                       detecting ||
                       inventory.isPending ||
                       toolDefaultsPending || toolDefaultsError ||
@@ -851,12 +976,24 @@ export function ConfiguredChannelDialog({
                     }
                   >
                     {busy ? <Spinner small /> : <Plus size={14} />}
-                    {editingProvider ? "保存更改" : "添加到渠道"}
+                    {catalog ? "应用接入变更" : editingProvider ? "保存更改" : "添加到渠道"}
                   </button>
                 </div>
               </form>
             )}
           </div>
+  </>;
+  if (catalog) return <section className="channel-model-route-workspace" aria-label="当前 Key 的接入配置">{content}</section>;
+  return (
+    <Dialog.Root open onOpenChange={open => { if (!open && !busy) close(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={`dialog-overlay${initialEdit || nested ? " route-edit-overlay" : ""}`} />
+        <Dialog.Content
+          className={`guide-dialog sub-import-dialog route-workspace${initialEdit || nested ? " route-edit-dialog" : ""}`}
+          onEscapeKeyDown={e => { if (busy) e.preventDefault(); }}
+          onPointerDownOutside={e => { if (busy) e.preventDefault(); }}
+        >
+          {content}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

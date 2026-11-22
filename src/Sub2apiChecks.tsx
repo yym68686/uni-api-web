@@ -38,7 +38,7 @@ import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPref
 import { useImportBindings, boundGroups } from "./sub2apiImports";
 import { readCompleteSubTarget } from "./subTargetDetails";
 import { CreateChannel } from "./CreateChannel";
-import { ChannelSettings } from "./ChannelSettings";
+import { ChannelConfigurationDialog, ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { useManagementPage, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation } from "./managementQuery";
@@ -80,7 +80,7 @@ import { TableColumns, useTableColumns } from "./TableColumns";
 import { managementColumnsStorageKey, managementOverviewForColumns } from "./managementOverview";
 import { PageBoundary } from "./PageBoundary";
 import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
-import type { ChannelAddDraft, ChannelAddRequest, ConfiguredChannelAddDraft, SiteChannelAddDraft } from "./channelAdd";
+import type { ChannelAddDraft, ChannelAddRequest, ConfiguredChannelAddDraft, SiteChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
 
 const SiteAccountSettings = lazy(() => import("./SiteAccountSettings").then(m => ({default: m.SiteAccountSettings})));
 const Sub2apiImport = lazy(() => import("./Sub2apiImport").then(m => ({default: m.Sub2apiImport})));
@@ -724,6 +724,8 @@ function ManagementChannelDrawer({
                 <ChannelSettings
                   key={JSON.stringify([member.source_id, member.provider])}
                   triggerLabel={configuredMembers.length > 1 ? `编辑 ${member.source_name || member.source_id}` : "编辑渠道"}
+                  member={member}
+                  prices={prices}
                   row={{
                     provider: member.provider,
                     provider_name: member.name || member.provider,
@@ -733,9 +735,9 @@ function ManagementChannelDrawer({
                   }}
                 />
               ))}
-              <button className="button small primary" onClick={onOpenChannel}>
+              {(!!account.id || !configuredMembers.length) && <button className="button small primary" onClick={onOpenChannel}>
                 {configured ? "查看接入配置" : "添加到渠道"}
-              </button>
+              </button>}
             </div>
           </div>
           <section className="detail-section" aria-label="渠道概览">
@@ -2144,10 +2146,17 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         />
         </Suspense></PageBoundary>
       )}
-      {configuredDialog && <ConfiguredChannelDialog item={configuredDialog.item} prices={prices.data?.data}
-        initialAdd={configuredDialog.draft}
-        submitAdd={request => submitChannelAdd(request, () => setConfiguredDialog(null), draft => ({configured: {...configuredDialog,draft}}))}
-        close={() => setConfiguredDialog(null)} />}
+      {configuredDialog && (() => {
+        const member = channelMembers(configuredDialog.item)[0];
+        const submit = (request: Parameters<SubmitChannelAdd<ConfiguredChannelAddDraft>>[0]) =>
+          submitChannelAdd(request, () => setConfiguredDialog(null), draft => ({configured: {...configuredDialog,draft}}));
+        return !configuredDialog.draft && channelMembers(configuredDialog.item).length === 1 && !member.account_ids?.length ? (
+          <ChannelConfigurationDialog open row={{provider:member.provider, provider_name:member.name, source_id:member.source_id, source_name:member.source_name, model:member.models[0] || ""}}
+            member={member} prices={prices.data?.data} initialModelTab submitAdd={submit}
+            onOpenChange={open => { if (!open) setConfiguredDialog(null); }} />
+        ) : <ConfiguredChannelDialog item={configuredDialog.item} prices={prices.data?.data}
+          initialAdd={configuredDialog.draft} submitAdd={submit} close={() => setConfiguredDialog(null)} />;
+      })()}
       {managementDetail && (
         <ManagementChannelDrawer
           row={managementDetail}

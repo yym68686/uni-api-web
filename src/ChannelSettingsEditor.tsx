@@ -1,7 +1,7 @@
 import { DetailLoading } from "./PageLoading";
 import { LoadingIndicator } from "./LoadingIndicator";
 import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
-import { useEffect, useState, useRef, type ReactNode } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Eye,
@@ -23,7 +23,6 @@ import {
   History,
   ArrowUp,
   ArrowDown,
-  Download,
   ShieldCheck,
   CircleCheck,
   ChevronDown,
@@ -36,6 +35,9 @@ import {
   setImageGenerationRemoval,
 } from "./imageGenerationRemoval";
 import { GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
+import { ChannelModelCatalog } from "./ChannelModelCatalog";
+import type { ManagedChannel } from "./channelManagement";
+import type { ConfiguredChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
 import { Spinner } from "./ui";
 import type { Channel } from "./types";
 
@@ -147,8 +149,9 @@ const categories: Record<
 > = {
   基本与模型: {
     icon: SlidersHorizontal,
-    description: "设置上游连接与模型映射。",
+    description: "设置上游地址和引擎。",
   },
+  模型与接入: { icon: Layers, description: "在同一处管理上游模型目录与各 API key 的实际接入。" },
   密钥: { icon: KeyRound, description: "管理上游密钥、调用顺序与限额。" },
   并行请求: { icon: Layers, description: "设置较慢请求的并行尝试策略。" },
   重试保护: {
@@ -487,111 +490,21 @@ function Keys({
     </div>
   );
 }
-function Models({
-  value,
-  onChange,
-  discover,
-}: {
-  value: unknown;
-  onChange: (v: unknown) => void;
-  discover: ReactNode;
-}) {
-  const rows = Array.isArray(value)
-    ? value.flatMap((v) =>
-        typeof v === "string"
-          ? [{ upstream: v, public: v }]
-          : v && typeof v === "object"
-            ? Object.entries(v).map(([upstream, alias]) => ({
-                upstream,
-                public: String(alias),
-              }))
-            : [],
-      )
-    : [];
-  const save = (next: typeof rows) =>
-    onChange(
-      next.map((v) =>
-        v.upstream === v.public ? v.public : { [v.upstream]: v.public },
-      ),
-    );
-  return (
-    <div className="settings-model-editor">
-      <div className="settings-model-toolbar">
-        <span className="settings-count">{rows.length} 个模型</span>
-        <div className="settings-inline-actions">
-          {discover}
-          <button
-            className="button small"
-            onClick={() => save([...rows, { upstream: "", public: "" }])}
-          >
-            <Plus size={15} />
-            添加模型
-          </button>
-        </div>
-      </div>
-      <div className="settings-model-table">
-        <table className="setting-models">
-          <thead>
-            <tr>
-              <th>上游模型</th>
-              <th>公开模型</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td>
-                  <input
-                    aria-label={`上游模型 ${i + 1}`}
-                    value={r.upstream}
-                    onChange={(e) =>
-                      save(
-                        rows.map((v, n) =>
-                          n === i ? { ...v, upstream: e.target.value } : v,
-                        ),
-                      )
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    aria-label={`公开模型 ${i + 1}`}
-                    value={r.public}
-                    onChange={(e) =>
-                      save(
-                        rows.map((v, n) =>
-                          n === i ? { ...v, public: e.target.value } : v,
-                        ),
-                      )
-                    }
-                  />
-                </td>
-                <td>
-                  <button
-                    className="settings-icon-button is-destructive"
-                    title="删除模型"
-                    aria-label={`删除模型 ${i + 1}`}
-                    onClick={() => save(rows.filter((_, n) => n !== i))}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
 import type { SettingsChannel } from "./ChannelSettings";
 export function Editor({
   row,
   onClose,
+  member,
+  prices,
+  initialModelTab,
+  submitAdd,
 }: {
   row: SettingsChannel;
   onClose: () => void;
+  member?: ManagedChannel;
+  prices?: import("./types").ModelPrice[];
+  initialModelTab?: boolean;
+  submitAdd?: SubmitChannelAdd<ConfiguredChannelAddDraft>;
 }) {
   const client = useQueryClient();
   const path = `/v1/sources/${encodeURIComponent(row.source_id!)}/channel-settings`;
@@ -610,7 +523,7 @@ export function Editor({
   const [draft, setDraft] = useState<Document>();
   const [resetOverride, setResetOverride] = useState(false);
   const isGlobal = row.provider === GLOBAL_SETTINGS_SCOPE;
-  const [tab, setTab] = useState(isGlobal ? "超时与冷却" : "基本与模型");
+  const [tab, setTab] = useState(isGlobal ? "超时与冷却" : initialModelTab ? "模型与接入" : "基本与模型");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -710,6 +623,7 @@ export function Editor({
         "channel-management",
         "channel-routes",
         "settings-channel-catalog",
+        "channel-model-catalog",
       ].map((name) => client.invalidateQueries({ queryKey: [name] })),
     ]);
   }
@@ -720,6 +634,8 @@ export function Editor({
         throw Error("高级配置必须是单渠道对象");
       if (!isGlobal && value.provider !== view?.provider)
         throw Error("渠道标识不能更改");
+      if (!isGlobal && !equal(get(value, "/model"), get(view!.effective, "/model")))
+        throw Error("实际路由模型只能在「模型与接入」中修改");
       const full = structuredClone(view!.effective);
       for (const f of view!.schema.fields) {
         const patched = set(full, f.path, get(value, f.path));
@@ -745,7 +661,7 @@ export function Editor({
     try {
       const changes: Change[] = [
         reset
-          ? { provider: row.provider, set: {}, remove: [], reset: true }
+          ? { ...settingsDiff({ ...view, effective: view.base }, resetDocument(view)), reset: true }
           : resetOverride
             ? {
                 ...settingsDiff({ ...view, effective: view.base }, readDraft()),
@@ -796,6 +712,9 @@ export function Editor({
     } finally {
       setBusy(false);
     }
+  }
+  function resetDocument(view: SettingsView) {
+    return isGlobal ? structuredClone(view.base) : set(view.base, "/model", get(view.effective, "/model"));
   }
   async function reconcile(id = operation) {
     setBusy(true);
@@ -873,11 +792,13 @@ export function Editor({
           : "自动识别（实际引擎未返回）";
   const visibleFields = view.schema.fields.filter(
     (f) =>
-      f.path !== "/preferences/unknown_upstream_400_retries" ||
-      view.schema.all_upstream_400_retries === true,
+      f.path !== "/model" &&
+      (f.path !== "/preferences/unknown_upstream_400_retries" ||
+        view.schema.all_upstream_400_retries === true),
   );
   const groups = [
     ...new Set(visibleFields.map((f) => f.group)),
+    ...(!isGlobal ? ["模型与接入"] : []),
     "高级配置",
     ...(!isGlobal ? ["模板与批量"] : []),
     "变更记录",
@@ -934,7 +855,7 @@ export function Editor({
                   }}
                 >
                   <Icon size={16} />
-                  <span>{group}</span>
+                  <span>{group === "基本与模型" ? "基本设置" : group}</span>
                 </button>
               );
             })}
@@ -968,6 +889,12 @@ export function Editor({
               基础配置与覆盖冲突，正在沿用上次有效设置：{view.conflict}
             </p>
           )}
+          {tab === "模型与接入" && (dirty ? (
+            <p role="status" className="settings-feedback">请先保存其他渠道设置，再刷新目录或应用接入；也可以关闭并放弃未保存的设置。</p>
+          ) : row.source_id && (
+            <ChannelModelCatalog key={row.provider} source={row.source_id} provider={row.provider} revision={view.revision}
+              member={member} prices={prices} ownerKey={view.api_key_id} close={onClose} onSettingsChanged={refreshed} submitAdd={submitAdd} />
+          ))}
 
           {!isGlobal &&
             tab === "基本与模型" &&
@@ -1179,41 +1106,6 @@ export function Editor({
                         }
                         value={value}
                         onChange={(v) => edit(set(draft, f.path, v))}
-                      />
-                    ) : f.type === "models" ? (
-                      <Models
-                        value={value}
-                        onChange={(v) => edit(set(draft, f.path, v))}
-                        discover={
-                          <button
-                            className="button small ghost"
-                            disabled={busy}
-                            onClick={async () => {
-                              setBusy(true);
-                              try {
-                                const result = await controlRequest<{
-                                  models: string[];
-                                }>(path + "/discover", {
-                                  method: "POST",
-                                  body: JSON.stringify({
-                                    revision: view.revision,
-                                    operation_id: crypto.randomUUID(),
-                                    changes: [settingsDiff(view, draft)],
-                                  }),
-                                });
-                                edit(set(draft, "/model", result.models));
-                                setNotice("已读取上游模型列表，保存后生效");
-                              } catch (e) {
-                                setError(String(e));
-                              } finally {
-                                setBusy(false);
-                              }
-                            }}
-                          >
-                            <Download size={15} />
-                            从上游读取模型
-                          </button>
-                        }
                       />
                     ) : [
                         "/only_request_types",
@@ -1465,9 +1357,9 @@ export function Editor({
                   if (!t) return;
                   let next = draft;
                   for (const [p, v] of Object.entries(t.patch.set || {}))
-                    next = set(next, p, v);
+                    if (p !== "/model" && !p.startsWith("/model/")) next = set(next, p, v);
                   for (const p of t.patch.remove || [])
-                    next = set(next, p, undefined);
+                    if (p !== "/model" && !p.startsWith("/model/")) next = set(next, p, undefined);
                   edit(next);
                 }}
               >
@@ -1499,7 +1391,7 @@ export function Editor({
                     });
                     await templates.refetch();
                     setNotice(
-                      "模板已保存（模型、超时和规则）；凭据和自定义请求体不进入模板",
+                      "模板已保存（超时和规则）；模型接入、凭据和自定义请求体不进入模板",
                     );
                   } catch (e) {
                     setError(String(e));
@@ -1575,7 +1467,7 @@ export function Editor({
               )}
             </>
           )}
-          {tab !== "变更记录" && (
+          {tab !== "变更记录" && tab !== "模型与接入" && (
             <details className="settings-request-preview">
               <summary>
                 <Braces size={16} />
@@ -1655,11 +1547,11 @@ export function Editor({
       )}
       <footer className="settings-footer">
         <div className="settings-footer-secondary">
-          <button
+          {tab !== "模型与接入" && <button
             className="button ghost"
             disabled={busy}
             onClick={() => {
-              edit(structuredClone(view.base));
+              edit(resetDocument(view));
               setResetOverride(true);
               setOperation("");
               void run(false, true);
@@ -1667,7 +1559,7 @@ export function Editor({
           >
             <RotateCcw size={15} />
             恢复基础配置
-          </button>
+          </button>}
           <span className="settings-draft-state">
             {dirty ? "有未保存的修改" : "已与来源同步"}
           </span>

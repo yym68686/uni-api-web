@@ -148,6 +148,9 @@ var channelSpendReceiptInvalidationSQL string
 //go:embed migrations/0036_newapi_test_key_reclamation.sql
 var newAPITestKeyReclamationSQL string
 
+//go:embed migrations/0037_channel_model_catalog.sql
+var channelModelCatalogSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -195,6 +198,7 @@ func controlMigrations() []controlMigration {
 		{"0034_fingerprint_previous_result", fingerprintPreviousResultSQL, []string{"console_model_fingerprints"}},
 		{"0035_channel_spend_receipt_invalidation", channelSpendReceiptInvalidationSQL, []string{"console_sub_spend_logs", "console_billing_error_evidence"}},
 		{"0036_newapi_test_key_reclamation", newAPITestKeyReclamationSQL, []string{"console_newapi_key_reclaims", "console_site_key_creates", "console_sub_targets"}},
+		{"0037_channel_model_catalog", channelModelCatalogSQL, []string{"console_sources", "console_channel_model_catalogs"}},
 	}
 }
 
