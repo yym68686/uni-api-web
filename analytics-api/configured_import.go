@@ -203,6 +203,10 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), code)
 		return
 	}
+	if len(in.Protocols) > 0 && state[configuredProtocolField] != true {
+		http.Error(w, "该来源尚不支持逐模型上游端点，请先更新 uni-api", 409)
+		return
+	}
 	provider := configuredImportName(in.Provider, key)
 	documentProvider := in.Provider
 	editingNative := false
@@ -326,6 +330,10 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	}
 	owner, _ := s.controlUser(r)
 	if err = s.validateConfiguredModelChanges(ctx, src, in.Provider, owner, current, resolved); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if err = configuredModelProtocols(document, in.Protocols, resolved); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}

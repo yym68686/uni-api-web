@@ -24,6 +24,7 @@ type managementModel struct {
 	Upstream   string `json:"upstream_model"`
 	Engine     string `json:"engine"`
 	EngineMode string `json:"engine_mode"`
+	Protocol   string `json:"upstream_protocol,omitempty"`
 }
 type managementProvider struct {
 	Base             string `json:"base"`
@@ -203,6 +204,7 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 }
 
 type channelRoute struct {
+	Protocol       string `json:"upstream_protocol,omitempty"`
 	EngineOrigin   string `json:"engine_origin,omitempty"`
 	Engine         string `json:"engine,omitempty"`
 	EngineMode     string `json:"engine_mode,omitempty"`
@@ -260,13 +262,7 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 			}
 			defer func() { <-slots }()
 			catalog, _, e := fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {key.ID}, "endpoint": {"all"}, "stream": {"all"}})
-			var rows []struct {
-				Provider   string `json:"provider"`
-				Model      string `json:"model"`
-				Upstream   string `json:"upstream_model"`
-				Engine     string `json:"engine"`
-				EngineMode string `json:"engine_mode"`
-			}
+			var rows []managementModel
 			if e == nil {
 				e = decodeMap(catalog["data"], &rows)
 			}
@@ -289,7 +285,7 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 				}
 				seen[unique] = true
 				positions[row.Model]++
-				data = append(data, channelRoute{Provider: row.Provider, Model: row.Model, Upstream: row.Upstream, Engine: row.Engine, EngineMode: row.EngineMode, KeyID: key.ID, KeyPrefix: key.Prefix, KeyPosition: key.Position, Position: positions[row.Model]})
+				data = append(data, channelRoute{Provider: row.Provider, Model: row.Model, Upstream: row.Upstream, Engine: row.Engine, EngineMode: row.EngineMode, Protocol: row.Protocol, KeyID: key.ID, KeyPrefix: key.Prefix, KeyPosition: key.Position, Position: positions[row.Model]})
 			}
 		}()
 	}

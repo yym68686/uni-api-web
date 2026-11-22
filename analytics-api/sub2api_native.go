@@ -14,8 +14,12 @@ import (
 // Native protocols have no response.created. Keep their first response and
 // first visible text clocks separate from the Responses-specific field.
 func subProbeNative(ctx context.Context, client *http.Client, base, key, model string) (out subProbe) {
+	return subProbeNativeProtocol(ctx, client, base, key, model, subModelProtocol(model))
+}
+
+func subProbeNativeProtocol(ctx context.Context, client *http.Client, base, key, model, protocol string) (out subProbe) {
 	start := time.Now()
-	out = subProbe{ID: "subcheck-" + randomID(), StartedAt: start.Unix(), RequestedModel: model, Protocol: subModelProtocol(model), Status: "error", ModelMatch: "unavailable"}
+	out = subProbe{ID: "subcheck-" + randomID(), StartedAt: start.Unix(), RequestedModel: model, Protocol: protocol, Status: "error", ModelMatch: "unavailable"}
 	out.RequestIDs = []string{out.ID, "local:" + out.ID}
 	defer func() {
 		out.Duration = time.Since(start).Milliseconds()

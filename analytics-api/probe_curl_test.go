@@ -308,6 +308,30 @@ func TestUpstreamProbeSnapshotConvertsGatewayTextProbeToChannelProtocol(t *testi
 	}
 }
 
+func TestUpstreamProbeSnapshotUsesSelectedModelEndpointOrDiscovery(t *testing.T) {
+	ctx := context.Background()
+	provider := configuredProvider{
+		Base: "https://upstream.test/tenant%2Fwest/api/v1/responses",
+		API:  "upstream-secret",
+		ModelEndpoints: map[string]configuredModelEndpoint{
+			"alias": {Base: "https://upstream.test/tenant%2Fwest/api/v1/messages", Upstream: "real-claude"},
+		},
+	}
+	req, _ := newProbeRequest(ctx, "https://gateway.test", "gateway-secret", "alias", "responses", "say test", "probe")
+	snapshot, _ := snapshotProbeRequest(req, probeCurlScope{})
+	direct, err := upstreamProbeSnapshot(snapshot, "https://gateway.test", provider)
+	if err != nil || direct.URL != provider.ModelEndpoints["alias"].Base || !strings.Contains(direct.Body, `"model":"real-claude"`) || direct.Headers.Get("X-Api-Key") != "upstream-secret" {
+		t.Fatal("wrong saved model endpoint", direct.URL, err)
+	}
+	req, _ = newProbeRequest(ctx, "https://gateway.test", "gateway-secret", "alias", "chat", "say test", "probe")
+	req.Header.Set("X-Uni-API-Fingerprint-Protocol", "endpoint-chat")
+	snapshot, _ = snapshotProbeRequest(req, probeCurlScope{})
+	direct, err = upstreamProbeSnapshot(snapshot, "https://gateway.test", provider)
+	if err != nil || direct.URL != "https://upstream.test/tenant%2Fwest/api/v1/chat/completions" || direct.Headers.Get("X-Uni-API-Fingerprint-Protocol") != "" || direct.Headers.Get("Authorization") != "Bearer upstream-secret" {
+		t.Fatal("wrong detected model endpoint", direct.URL, err)
+	}
+}
+
 func TestProbeCurlLegacyQualityUsesItsActualPrompt(t *testing.T) {
 	probe := subProbe{ID: "quality", RequestedModel: checkModel}
 	raw := []byte(mustJSON(subResult{Availability: probe, Quality: probe}))

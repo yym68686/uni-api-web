@@ -248,7 +248,7 @@ func managementGatewayRoutes(facts managementGatewayFacts) managementQueryRoutes
 			seen[identity] = true
 			positions[row.Model]++
 			providers[row.Provider] = true
-			out.Data = append(out.Data, channelRoute{Provider: row.Provider, Model: row.Model, Upstream: row.Upstream, Engine: row.Engine, EngineMode: row.EngineMode, KeyID: key.ID, KeyPrefix: key.Prefix, KeyPosition: key.Position, Position: positions[row.Model]})
+			out.Data = append(out.Data, channelRoute{Provider: row.Provider, Model: row.Model, Upstream: row.Upstream, Engine: row.Engine, EngineMode: row.EngineMode, Protocol: row.Protocol, KeyID: key.ID, KeyPrefix: key.Prefix, KeyPosition: key.Position, Position: positions[row.Model]})
 		}
 	}
 	origins := map[string]string{}

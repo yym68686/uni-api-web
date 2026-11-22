@@ -273,6 +273,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	var caps struct {
 		Targeted     bool `json:"targeted_responses"`
 		Unconfigured bool `json:"targeted_unconfigured_models"`
+		Protocols    bool `json:"targeted_upstream_protocols"`
 	}
 	if err != nil || decodeMap(runtime["capabilities"], &caps) != nil || !caps.Targeted {
 		return errors.New("来源不支持渠道定向检测，请更新 uni-api 或检查来源权限")
@@ -342,6 +343,12 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 			out = subRunQualityProbe(ctx, client, src.Base, src.Key)
 		} else {
 			out.Availability = subProbeStream(ctx, client, src.Base, src.Key, "say test", c.Model)
+			if caps.Protocols && out.Availability.Status != "success" && ctx.Err() == nil {
+				if alternative := discoverConfiguredProtocol(ctx, src, c.Provider, c.Model, ""); alternative.Status == "success" {
+					alternative.SuggestedProtocol = alternative.Protocol
+					out.Availability = alternative
+				}
+			}
 			if withQuality {
 				out.Verdict = "error"
 				out.Quality = subProbe{Status: "skipped", Message: "可用性检测未通过"}

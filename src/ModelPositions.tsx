@@ -49,9 +49,10 @@ export function ModelPositions({
   return (
     <section className="model-positions">
       <div className="model-alias-heading">
-        <h4>{uniform ? "各模型路由位置" : "逐模型微调"}</h4>
+        <h4>各模型路由位置</h4>
         {actions}
       </div>
+      {uniform && <p className="muted">当前使用统一位置。切换到“逐模型微调”即可单独调整。</p>}
       <div className="model-position-list">
         {models.map((model) => {
           const max = modelPositionLimit(model, channels, provider),

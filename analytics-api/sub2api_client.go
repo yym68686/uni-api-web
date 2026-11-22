@@ -271,6 +271,7 @@ type subProbe struct {
 	ResponseCreatedMS *int64 `json:"response_created_ms"`
 	FirstResponseMS   *int64 `json:"first_response_ms,omitempty"`
 	Protocol          string `json:"protocol,omitempty"`
+	SuggestedProtocol string `json:"suggested_upstream_protocol,omitempty"`
 	Duration          int64  `json:"duration_ms"`
 	HTTPStatus        int    `json:"http_status,omitempty"`
 }

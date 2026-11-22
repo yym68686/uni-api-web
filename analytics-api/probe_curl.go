@@ -393,16 +393,61 @@ func upstreamProbeSnapshot(snapshot probeCurlSnapshot, sourceBase string, provid
 		return probeCurlSnapshot{}, errors.New("probe source changed")
 	}
 	endpoint := strings.TrimPrefix(probe.Path, strings.TrimRight(source.Path, "/"))
-	if endpoint != "/v1/responses" && endpoint != "/v1/messages" && !strings.HasPrefix(endpoint, "/v1beta/models/") {
+	if endpoint != "/v1/responses" && endpoint != "/v1/messages" && endpoint != "/v1/chat/completions" && !strings.HasPrefix(endpoint, "/v1beta/models/") {
 		return probeCurlSnapshot{}, errors.New("unknown probe endpoint")
 	}
+	var modelField struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal([]byte(snapshot.Body), &modelField)
+	if strings.HasPrefix(endpoint, "/v1beta/models/") {
+		modelField.Model = strings.TrimSuffix(strings.TrimPrefix(endpoint, "/v1beta/models/"), ":streamGenerateContent")
+	}
+	// A discovery capture deliberately used a sibling protocol, even before it
+	// was selected. Rebuild that same diagnostic endpoint on the current host.
+	if protocol, discovery := strings.CutPrefix(snapshot.Headers.Get("X-Uni-API-Fingerprint-Protocol"), "endpoint-"); discovery {
+		if spec, ok := protocolSpec(protocol); ok {
+			path := strings.TrimRight(base.EscapedPath(), "/")
+			prefix := path
+			for _, suffix := range []string{"/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1beta/models", "/v1beta", "/v1"} {
+				if strings.HasSuffix(path, suffix) {
+					prefix = strings.TrimSuffix(path, suffix)
+					break
+				}
+			}
+			if base.RawQuery != "" || (path != "" && prefix == path) {
+				return probeCurlSnapshot{}, errors.New("provider protocol endpoint unavailable")
+			}
+			base.RawPath = prefix + spec.Endpoint
+			base.Path, _ = url.PathUnescape(base.RawPath)
+		}
+	} else if configured, ok := provider.ModelEndpoints[modelField.Model]; ok {
+		override, parseErr := url.Parse(configured.Base)
+		if parseErr != nil || override.Host != base.Host || override.Scheme != base.Scheme || override.User != nil || override.RawQuery != "" {
+			return probeCurlSnapshot{}, errors.New("provider model endpoint unavailable")
+		}
+		base = override
+	}
+	if configured, ok := provider.ModelEndpoints[modelField.Model]; ok && configured.Upstream != "" && configured.Upstream != modelField.Model {
+		if strings.HasPrefix(endpoint, "/v1beta/models/") {
+			endpoint = "/v1beta/models/" + configured.Upstream + ":streamGenerateContent"
+		} else {
+			var body map[string]json.RawMessage
+			if json.Unmarshal([]byte(snapshot.Body), &body) != nil {
+				return probeCurlSnapshot{}, errors.New("probe model unavailable")
+			}
+			body["model"], _ = json.Marshal(configured.Upstream)
+			snapshot.Body = mustJSON(body)
+		}
+	}
 	path := strings.TrimRight(base.Path, "/")
+	escaped := strings.TrimRight(base.EscapedPath(), "/")
 	// Configured checks enter the gateway as Responses even when the installed
 	// channel uses another protocol. Rebuild only the simple text probe using the
 	// shared diagnostic templates; never pair a Responses body with a Chat URL.
 	mode := ""
 	switch {
-	case strings.HasSuffix(path, "/chat/completions"):
+	case strings.HasSuffix(path, "/chat/completions") && endpoint != "/v1/chat/completions":
 		mode = "chat"
 	case strings.HasSuffix(path, "/messages") && endpoint != "/v1/messages":
 		mode = "messages"
@@ -443,16 +488,20 @@ func upstreamProbeSnapshot(snapshot probeCurlSnapshot, sourceBase string, provid
 	switch {
 	case strings.HasSuffix(path, "/responses"), strings.HasSuffix(path, "/messages"), strings.HasSuffix(path, "/chat/completions"):
 		base.Path = path
+		base.RawPath = escaped
 	case strings.HasSuffix(path, "/v1beta/models"):
-		base.Path = path + strings.TrimPrefix(endpoint, "/v1beta/models")
+		suffix := strings.TrimPrefix(endpoint, "/v1beta/models")
+		base.Path, base.RawPath = path+suffix, escaped+suffix
 	case strings.HasSuffix(path, "/v1beta"):
-		base.Path = path + strings.TrimPrefix(endpoint, "/v1beta")
+		suffix := strings.TrimPrefix(endpoint, "/v1beta")
+		base.Path, base.RawPath = path+suffix, escaped+suffix
 	case strings.HasSuffix(path, "/v1") && strings.HasPrefix(endpoint, "/v1/"):
-		base.Path = path + strings.TrimPrefix(endpoint, "/v1")
+		suffix := strings.TrimPrefix(endpoint, "/v1")
+		base.Path, base.RawPath = path+suffix, escaped+suffix
 	default:
-		base.Path = path + endpoint
+		base.Path, base.RawPath = path+endpoint, escaped+endpoint
 	}
-	base.RawPath, base.Fragment = "", ""
+	base.Fragment = ""
 	query := base.Query()
 	for name, values := range probe.Query() {
 		if name == "alt" {
@@ -462,7 +511,7 @@ func upstreamProbeSnapshot(snapshot probeCurlSnapshot, sourceBase string, provid
 	base.RawQuery = query.Encode()
 	snapshot.URL = base.String()
 	snapshot.Headers = snapshot.Headers.Clone()
-	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Cookie", "Host", "Content-Length", "X-Uni-API-Provider", "X-Uni-API-Probe-Unconfigured-Model"} {
+	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Cookie", "Host", "Content-Length", "X-Uni-API-Provider", "X-Uni-API-Probe-Unconfigured-Model", "X-Uni-API-Fingerprint-Protocol"} {
 		snapshot.Headers.Del(name)
 	}
 	switch {

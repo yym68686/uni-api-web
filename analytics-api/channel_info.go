@@ -9,12 +9,18 @@ import (
 	"time"
 )
 
+type configuredModelEndpoint struct {
+	Base     string `json:"base_url"`
+	Upstream string `json:"upstream_model"`
+}
+
 type configuredProvider struct {
-	Temporary       bool   `json:"temporary,omitempty"`
-	IdentityChanged bool   `json:"identity_changed,omitempty"`
-	Provider        string `json:"provider"`
-	Base            string `json:"base_url"`
-	API             any    `json:"api"`
+	Temporary       bool                               `json:"temporary,omitempty"`
+	IdentityChanged bool                               `json:"identity_changed,omitempty"`
+	Provider        string                             `json:"provider"`
+	Base            string                             `json:"base_url"`
+	API             any                                `json:"api"`
+	ModelEndpoints  map[string]configuredModelEndpoint `json:"model_endpoints,omitempty"`
 }
 
 func configuredProviders(ctx context.Context, src controlSource) ([]configuredProvider, error) {

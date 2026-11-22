@@ -199,6 +199,10 @@
 .import-protocol-labels { background: var(--subtle); color: var(--muted); }
 .import-protocol-row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .import-protocol-row select { min-width: 0; width: 100%; height: 33px; padding-inline: 5px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--bg); text-overflow: ellipsis; }
+.route-workspace .import-protocols { margin: 0 0 20px; }
+.configured-protocol-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; border-bottom: 1px solid var(--line); }
+.configured-protocol-item .import-protocol-row { border: 0; padding-inline: 0; }
+.configured-protocol-item small { grid-column: 1 / -1; padding-bottom: 6px; overflow-wrap: anywhere; }
 .import-footer > .batch-apply-trigger { margin-right: auto; }
 .channel-import-workspace .import-error { display: flex; flex-wrap: wrap; gap: 5px 8px; align-items: center; flex-basis: 100%; margin: 0; max-height: 16dvh; overflow: auto; }
 @media (max-width: 440px) {

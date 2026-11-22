@@ -47,7 +47,7 @@ func previousSubOptionsData(ctx context.Context, src controlSource, query url.Va
 			}
 		}
 	}
-	return map[string]any{"batch_revisions": true, "revision": state["revision"], "supported": state["temporary_channel_import"] == true, "manageable": state["temporary_channel_management"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(query.Get("account_id"), int64Param(query.Get("group_id")), strings.TrimPrefix(query.Get("api_key_id"), src.ID+"::"))}, 200, nil
+	return map[string]any{"batch_revisions": true, "model_upstream_protocols": state["model_upstream_protocols"] == true, "revision": state["revision"], "supported": state["temporary_channel_import"] == true, "manageable": state["temporary_channel_management"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(query.Get("account_id"), int64Param(query.Get("group_id")), strings.TrimPrefix(query.Get("api_key_id"), src.ID+"::"))}, 200, nil
 }
 
 type optionsTestError string
@@ -57,7 +57,7 @@ func (e optionsTestError) Error() string { return string(e) }
 func TestSubOptionsPreservesSerialResultsAndErrors(t *testing.T) {
 	key := "key-" + strings.Repeat("a", 64)
 	controls := mustJSON(map[string]any{
-		"revision": "boot:23", "temporary_channel_import": true, "temporary_channel_management": true,
+		"revision": "boot:23", "temporary_channel_import": true, "temporary_channel_management": true, "model_upstream_protocols": true,
 		"rules": []retainedRule{{KeyID: key, Disabled: []string{"hidden"}}},
 	})
 	keys := `{"data":[{"key_id":"masked-id","prefix":"masked","position":2}]}`
@@ -74,7 +74,7 @@ func TestSubOptionsPreservesSerialResultsAndErrors(t *testing.T) {
 		{name: "empty data", key: key, keys: `{}`, catalog: `{}`},
 		{name: "null data", key: key, keys: `{"data":null}`, catalog: `{"data":null}`},
 		{name: "non array catalog", key: key, catalog: `{"data":{}}`},
-		{name: "strict capability booleans", key: key, controls: `{"revision":"r","temporary_channel_import":"true","temporary_channel_management":1}`},
+		{name: "strict capability booleans", key: key, controls: `{"revision":"r","temporary_channel_import":"true","temporary_channel_management":1,"model_upstream_protocols":"true"}`},
 		{name: "controls forbidden", key: key, controlCode: 403},
 		{name: "controls not supported", key: key, controlCode: 404},
 		{name: "controls json", key: key, controls: `{`},

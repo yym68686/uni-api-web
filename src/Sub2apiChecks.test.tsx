@@ -450,6 +450,52 @@ it("loads omitted model results on opening the drawer without reporting untested
   view.unmount();
 });
 
+it("edits manual-channel route positions and detected or explicit upstream protocols independently", async () => {
+  const models = ["gemini-4-carbon", "jev-latest"];
+  const channel = {kind:"configured", source_id:"primary", source_name:"Fugue", provider:"manual", name:"manual", models, account_ids:[]};
+  const rows = models.map(model => ({
+    provider:"manual", model, api_key_id:"key", key_position:1, key_prefix:"masked", position:2,
+    ...(model === "jev-latest" ? {upstream_protocol:"chat"} : {}),
+  }));
+  const writes: {path:string; body:any}[] = [];
+  const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body));
+      writes.push({path, body});
+      return Response.json(path.endsWith("detect-protocol") ? {protocol: "gemini"} : {message: "已保存"});
+    }
+    if (path.includes("channel-options")) return Response.json({
+      revision:"r1", model_upstream_protocols:true, keys:[{key_id:"key",position:1,prefix:"masked"}],
+      channels:[...models.map(model => ({provider:"peer", model})), ...rows],
+    });
+    return Response.json({
+      data: path.endsWith("/channel-management") ? [channel] : path.endsWith("/channel-routes") ? rows : [],
+      labels:{}, unavailable_keys:[], unavailable_sources:[],
+    });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  mount("manual-protocol-editor", new QueryClient({defaultOptions:{queries:{retry:false}}}));
+  await user.click(await screen.findByRole("button",{name:"已添加 · 1 个 key"}));
+  await user.click(await screen.findByRole("button",{name:"编辑 Key 1"}));
+  const panel = within(screen.getByRole("dialog"));
+  expect(panel.getByRole("heading",{ name:"各模型路由位置" })).toBeVisible();
+  const position = panel.getByRole("combobox",{ name:"gemini-4-carbon 的路由位置" });
+  await waitFor(() => expect(position).toBeEnabled());
+  expect(position).toHaveValue("2");
+  await user.selectOptions(position, "1");
+  const gemini = panel.getByRole("combobox",{name:"gemini-4-carbon 上游端点"});
+  const jev = panel.getByRole("combobox",{name:"jev-latest 上游端点"});
+  expect(jev).toHaveValue("chat");
+  await user.click(panel.getByRole("button",{name:"自动检测 gemini-4-carbon 的上游端点"}));
+  await waitFor(() => expect(gemini).toHaveValue("gemini"));
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatchObject({path:expect.stringContaining("/detect-protocol"),body:{revision:"r1",model:"gemini-4-carbon",provider:"manual"}});
+  await user.selectOptions(jev, "messages");
+  await user.click(panel.getByRole("button",{name:"保存更改"}));
+  await waitFor(() => expect(writes[1]?.body).toMatchObject({positions:{"gemini-4-carbon":1,"jev-latest":2},protocols:{"gemini-4-carbon":"gemini","jev-latest":"messages"},edit_provider:"manual"}));
+});
+
 it.each(["site", "native"])("keeps configured model-card price warnings consistent with the %s check and current prices", async evidence => {
   const data = fixtures().slice(0, 1);
   const target = data[0].targets[0];

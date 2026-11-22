@@ -18,6 +18,7 @@ export interface SiteChannelAddDraft extends ChannelAddDraft {
 
 export interface ConfiguredChannelAddDraft extends ChannelAddDraft {
   models: string[];
+  protocols?: Record<string, string>;
 }
 
 export interface ChannelAddRequest<D> {

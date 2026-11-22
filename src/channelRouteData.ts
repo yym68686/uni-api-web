@@ -10,6 +10,7 @@ export interface ChannelRoute {
   origin_provider?: string;
   model: string;
   upstream_model?: string;
+  upstream_protocol?: string;
   api_key_id: string;
   key_prefix: string;
   key_position: number;

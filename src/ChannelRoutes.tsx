@@ -27,6 +27,8 @@ import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import { configuredQualityResult } from "./channelManagement";
 import { ModelQualityWarning } from "./ModelQualityWarning";
 import { ModelPriceWarning } from "./Sub2apiPricing";
+import { ConfiguredModelProtocols } from "./ConfiguredModelProtocols";
+import { channelProtocols } from "./channelProtocol";
 import {
   managedRouteCount,
   providerRoutes,
@@ -180,11 +182,13 @@ export function RouteModelTable({
   rows: {
     model: string;
     upstream_model?: string;
+    upstream_protocol?: string;
     position?: number;
     channel?: string;
   }[];
   showChannel?: boolean;
 }) {
+  const showProtocol = rows.some(row => row.upstream_protocol);
   return (
     <div className="route-model-table">
       <table aria-label="当前模型路由">
@@ -194,6 +198,7 @@ export function RouteModelTable({
             <th>原来的名字</th>
             <th>重命名后的名字</th>
             <th>路由位置</th>
+            {showProtocol && <th>上游端点</th>}
           </tr>
         </thead>
         <tbody>
@@ -203,6 +208,7 @@ export function RouteModelTable({
               <td>{row.upstream_model || row.model}</td>
               <td>{row.model}</td>
               <td>{row.position ? `第 ${row.position} 位` : "默认顺序"}</td>
+              {showProtocol && <td>{channelProtocols.find(option => option.protocol === row.upstream_protocol)?.endpoint || "渠道默认"}</td>}
             </tr>
           ))}
         </tbody>
@@ -285,6 +291,8 @@ export function ConfiguredChannelDialog({
     initialAdd?.modelPositions || {},
   );
   const activePositions = perModel ? modelPositions : {};
+  const [protocolChoices, setProtocolChoices] = useState<Record<string, string>>(initialAdd?.protocols || {});
+  const [detecting, setDetecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(initialAdd?.error || "");
   const [success, setSuccess] = useState("");
@@ -297,6 +305,7 @@ export function ConfiguredChannelDialog({
     setKey(rows[0].api_key_id);
     setPosition(1);
     setPerModel(true);
+    setProtocolChoices({});
     setModelPositions(
       Object.fromEntries(rows.map((r) => [r.model, r.position])),
     );
@@ -318,11 +327,13 @@ export function ConfiguredChannelDialog({
     queryFn: ({ signal }) =>
       controlRequest<{
         revision: string;
+        model_upstream_protocols?: boolean;
         keys: KeyInfo[];
         channels: {
           provider: string;
           model: string;
           upstream_model?: string;
+          upstream_protocol?: string;
         }[];
       }>(
         "/v1/sub2api/channel-options?" +
@@ -336,6 +347,18 @@ export function ConfiguredChannelDialog({
   });
   const savedModels=Object.fromEntries((options.data?.channels||[]).filter(r=>!!editingProvider&&r.provider===editingProvider).map(r=>[r.model,r.upstream_model||item.model_mappings?.[r.model]||r.model]));
   const desiredModels=Object.fromEntries([...selected.map(m=>[m,item.model_mappings?.[m]||m]),...Object.entries(mapping.mappings).map(([name,m])=>[name,item.model_mappings?.[m]||m])]);
+  const savedProtocols = Object.fromEntries((options.data?.channels || []).filter(row => row.provider === (editingProvider || item.provider) && row.upstream_protocol).map(row => [row.upstream_model || row.model, row.upstream_protocol!]));
+  const protocolModels = [...new Map([...selected, ...Object.values(mapping.mappings)].map(model => {
+    const upstream = item.model_mappings?.[model] || model;
+    const existing = (options.data?.channels || []).find(row => row.provider === editingProvider && (row.upstream_model || row.model) === upstream);
+    return [upstream, { upstream, provider: existing ? editingProvider : item.provider, model: existing?.model || model }] as const;
+  })).values()];
+  const servingUpstreams = new Set(Object.values(savedModels));
+  const suggestedProtocols = Object.fromEntries(protocolModels.flatMap(({upstream}) => {
+    if (servingUpstreams.has(upstream) || savedProtocols[upstream]) return [];
+    const protocol = allChecks.find(check => (item.model_mappings?.[check.model] || check.model) === upstream && modelIsAvailable(check))?.result?.availability?.suggested_upstream_protocol;
+    return channelProtocols.some(option => option.protocol === protocol) ? [[upstream, protocol!]] : [];
+  }));
   const invalidModels=unavailableModelChanges(desiredModels,savedModels,upstream=>allChecks.some(c=>(item.model_mappings?.[c.model]||c.model)===upstream&&canSelectModel(c.model)));
   useEffect(() => {
     if (
@@ -387,12 +410,13 @@ export function ConfiguredChannelDialog({
   function batchButton(part:BatchPart,section?:string) {
     if(!editingProvider)return undefined;
     return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
-      disabled={busy||invalidModels.length>0||toolDefaultsPending||toolDefaultsError||inventory.isPending||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
+      disabled={busy||detecting||Object.keys(protocolChoices).length>0||invalidModels.length>0||toolDefaultsPending||toolDefaultsError||inventory.isPending||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
       onApplied={()=>{setSuccess("批量操作结果已更新，请核对各来源接入状态。");setAdding(false);if(initialEdit)close();}}/>;
   }
   async function save() {
     if (
       busy ||
+      detecting ||
       inventory.isPending ||
       toolDefaultsPending || toolDefaultsError ||
       mapping.error || invalidModels.length>0 ||
@@ -405,6 +429,7 @@ export function ConfiguredChannelDialog({
       !options.data
     )
       return;
+    const protocols = options.data.model_upstream_protocols ? Object.fromEntries(protocolModels.filter(({upstream}) => Object.hasOwn(protocolChoices, upstream) || Object.hasOwn(suggestedProtocols, upstream)).map(({upstream}) => [upstream, protocolChoices[upstream] ?? suggestedProtocols[upstream]])) : {};
     const body = JSON.stringify({
       source_id: item.source_id,
       provider: item.provider,
@@ -415,6 +440,7 @@ export function ConfiguredChannelDialog({
       model_mappings: mapping.mappings,
       position: Math.min(position, positions),
       positions: selectedModelPositions(mapping.models, activePositions, Math.min(position, positions)),
+      ...(Object.keys(protocols).length ? { protocols } : {}),
     });
     const refresh = () => {
       void Promise.all(
@@ -435,7 +461,7 @@ export function ConfiguredChannelDialog({
         label: `${item.source_name} / ${item.name}`,
         path: "/v1/channel-management",
         body,
-        draft: { source: item.source_id, key, models: selected, aliases, position, perModel, modelPositions },
+        draft: { source: item.source_id, key, models: selected, aliases, position, perModel, modelPositions, protocols },
         refresh,
       })) setError("此渠道已有添加请求在处理，请等待回执。");
       return;
@@ -521,6 +547,7 @@ export function ConfiguredChannelDialog({
                 setMemberId(members[0].source_id);
                 setPerModel(false);
                 setModelPositions({});
+                setProtocolChoices({});
                 setSelected(null);
                 setAliases([]);
                 setKey(null);
@@ -629,6 +656,7 @@ export function ConfiguredChannelDialog({
                         setPosition(1);
                         setPerModel(false);
                         setModelPositions({});
+                        setProtocolChoices({});
                         setError("");
                       }}
                     >
@@ -665,6 +693,7 @@ export function ConfiguredChannelDialog({
                           setPosition(1);
                           setPerModel(false);
                           setModelPositions({});
+                          setProtocolChoices({});
                         }
                       }}
                     >
@@ -716,6 +745,27 @@ export function ConfiguredChannelDialog({
                   </label>
                 </div>
                 {!!key && options.isFetching && <LoadingIndicator size="compact" label="读取所选 API key 的路由位置" />}
+                {mapping.models.length > 0 && <ModelPositions
+                  actions={batchButton("positions","路由位置")}
+                  models={mapping.models}
+                  channels={options.data?.channels || []}
+                  provider={editingProvider}
+                  positions={activePositions}
+                  defaultPosition={Math.min(position, positions)}
+                  onChange={setModelPositions}
+                  disabled={busy || options.isFetching || options.isError || !options.data || !key || !perModel}
+                  uniform={!perModel}
+                />}
+                {protocolModels.length > 0 && options.data?.model_upstream_protocols &&
+                  <ConfiguredModelProtocols key={JSON.stringify([item.source_id, key, editingProvider, options.data.revision])}
+                    source={item.source_id} revision={options.data.revision} models={protocolModels}
+                    saved={savedProtocols} choices={protocolChoices} suggested={suggestedProtocols}
+                    onChange={(model, protocol) => setProtocolChoices(old => ({ ...old, [model]: protocol }))}
+                    disabled={busy || options.isFetching || options.isError} onDetecting={setDetecting} />}
+                {protocolModels.length > 0 && options.data?.model_upstream_protocols === false &&
+                  <p className="muted">该来源的 uni-api 尚不支持按模型设置上游端点，现有端点不变。</p>}
+                {editingProvider && Object.keys(protocolChoices).length > 0 &&
+                  <p className="muted">端点设置只应用于当前 Key。请先保存，再执行跨渠道批量调整。</p>}
                 <ChannelModelSelection
                   models={modelOptions}
                   canSelect={canSelectModel}
@@ -747,17 +797,6 @@ export function ConfiguredChannelDialog({
                     {mapping.error}
                   </p>
                 )}
-                <ModelPositions
-                  actions={batchButton("positions","路由位置")}
-                  models={mapping.models}
-                  channels={options.data?.channels || []}
-                  provider={editingProvider}
-                  positions={activePositions}
-                  defaultPosition={Math.min(position, positions)}
-                  onChange={setModelPositions}
-                  disabled={busy || options.isFetching || !key || !perModel}
-                  uniform={!perModel}
-                />
                 <div className="sub-import-actions">
                   {batchButton("all")}
                   <button
@@ -772,6 +811,7 @@ export function ConfiguredChannelDialog({
                     className="button primary"
                     disabled={
                       busy ||
+                      detecting ||
                       inventory.isPending ||
                       toolDefaultsPending || toolDefaultsError ||
                       options.isFetching ||

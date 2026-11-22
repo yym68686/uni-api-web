@@ -129,6 +129,7 @@ export interface Probe {
   model_match?: "match" | "mismatch" | "missing" | "invalid" | "unavailable";
   status: string;
   terminal_status?: "complete" | "missing" | "missing_output";
+  suggested_upstream_protocol?: string;
   text: string;
   message?: string;
   ttft_ms: number | null;
