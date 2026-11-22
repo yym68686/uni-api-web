@@ -87,7 +87,7 @@ it("edits source global timeouts and hedging through the retained preview/apply 
   );
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "全局设置" }));
-  await screen.findByText("来源全局设置");
+  await screen.findByRole("button", { name: "校验与预览" });
   expect(screen.getByLabelText("规则 1 模型")).toHaveValue("gpt-5*, gpt-6*");
   expect(screen.getByLabelText("规则 1 流式状态")).toHaveValue("false");
   expect(screen.getByLabelText("规则 1 总时长超时（秒）")).toHaveValue(100);

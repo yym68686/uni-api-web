@@ -106,10 +106,6 @@ export function TimeoutPolicyField({
   }
   return (
     <div className="timeout-policy-editor">
-      <p className="muted">
-        按端点、流式状态或模型匹配。匹配条件最多的规则优先；条件数相同时使用靠前的规则。0
-        表示关闭对应超时，留空继续继承。
-      </p>
       <div className="timeout-phase-grid">
         {timeoutInputs(policy.default || {}, "默认", (next) =>
           onChange({ ...policy, default: next }),
@@ -211,13 +207,6 @@ export function TimeoutPolicyField({
               />
             </label>
           </div>
-          {Object.keys(rule.match || {}).some(
-            (k) => !["endpoint", "stream", "model"].includes(k),
-          ) && (
-            <p className="muted">
-              本规则还包含其他匹配条件，可在下方 JSON 中查看和编辑。
-            </p>
-          )}
           <div className="timeout-phase-grid">
             {timeoutInputs(rule.timeout || {}, `规则 ${index + 1}`, (next) =>
               update(index, { ...rule, timeout: next }),
@@ -296,10 +285,6 @@ export function HedgingField({
           }
         />
       </label>
-      <p className="muted">
-        等待较慢时尝试其他渠道，以首个有效成功响应为准。设为 1
-        时不发起并行尝试。并行请求可能增加上游消费。
-      </p>
     </div>
   );
 }

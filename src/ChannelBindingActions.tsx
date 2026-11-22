@@ -58,16 +58,20 @@ export function RemoveConfiguredBinding({
   target,
   keyId,
   keyPosition,
+  disabled,
+  onRemoved,
 }: {
   target: BindingTarget;
   keyId: string;
   keyPosition: number;
+  disabled?: boolean;
+  onRemoved?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
-        <button type="button" className="button small">
+        <button type="button" className="button small" disabled={disabled}>
           <Trash2 size={13} />
           删除
         </button>
@@ -78,6 +82,7 @@ export function RemoveConfiguredBinding({
           keyId={keyId}
           keyPosition={keyPosition}
           close={() => setOpen(false)}
+          onRemoved={onRemoved}
         />
       )}
     </Dialog.Root>
@@ -88,11 +93,13 @@ function RemoveDialog({
   keyId,
   keyPosition,
   close,
+  onRemoved,
 }: {
   target: BindingTarget;
   keyId: string;
   keyPosition: number;
   close: () => void;
+  onRemoved?: () => void;
 }) {
   const client = useQueryClient();
   const [busy, setBusy] = useState(false),
@@ -149,6 +156,7 @@ function RemoveDialog({
         ].map((name) => client.invalidateQueries({ queryKey: [name] })),
       );
       close();
+      onRemoved?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败");
     } finally {

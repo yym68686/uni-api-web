@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChannelSettings } from "./ChannelSettings";
@@ -26,6 +26,8 @@ it("saves the upstream catalog across reopening without attaching models, then a
   let probed = false;
   const catalogWrites: unknown[] = [];
   const routeWrites: Record<string, unknown>[] = [];
+  let releaseOptions!: () => void;
+  const optionsReady = new Promise<void>(resolve => { releaseOptions = resolve; });
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const path = new URL(input, "http://console.test").pathname;
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -42,7 +44,10 @@ it("saves the upstream catalog across reopening without attaching models, then a
         override_paths: [], affected_keys: [{ key_id: "k1", models: [existing] }], available_keys: keys,
         schema: { engines: ["openrouter"], fields: [{ path: "/base_url", type: "string", group: "基本与模型" }, { path: "/model", type: "models", group: "基本与模型" }] } });
     }
-    if (path.endsWith("/channel-options")) return Response.json({ revision: "r1", keys, channels: rows, model_upstream_protocols: true });
+    if (path.endsWith("/channel-options")) {
+      await optionsReady;
+      return Response.json({ revision: "r1", keys, channels: rows, model_upstream_protocols: true });
+    }
     if (path.endsWith("/channel-routes")) return Response.json({ data: rows, revision: "r1", snapshot_consistent: true, unavailable_keys: [] });
     if (path.endsWith("/api-keys") || path.endsWith("/channel-import-keys")) return Response.json({ keys, data: keys });
     if (path.endsWith("/channel-management/checks")) {
@@ -72,10 +77,22 @@ it("saves the upstream catalog across reopening without attaching models, then a
   await user.click(screen.getByRole("button", { name: "渠道设置" }));
   let dialog = within(screen.getByRole("dialog", { name: "渠道设置" }));
   const existingBox = await dialog.findByRole("checkbox", { name: `接入 ${existing}` });
-  await waitFor(() => expect(existingBox).toBeChecked());
+  expect(dialog.queryByText(/此 API key 专用渠道|仅作用于 Key/)).not.toBeInTheDocument();
+  const search = dialog.getByRole("searchbox");
+  await user.type(search, "carbon");
+  expect(existingBox).toBeDisabled();
+  await act(async () => { releaseOptions(); });
+  await waitFor(() => expect(existingBox).toBeEnabled());
+  expect(existingBox).toBeChecked();
+  expect(dialog.getByRole("searchbox")).toBe(search);
+  expect(search).toHaveValue("carbon");
+  await user.clear(search);
   expect(dialog.getByRole("button", { name: "应用接入变更" })).toBeDisabled();
+  expect(dialog.queryByRole("button", { name: "保存并应用" })).not.toBeInTheDocument();
+  expect(dialog.queryByRole("textbox", { name: "手工添加上游模型 ID" })).not.toBeInTheDocument();
   await user.click(dialog.getByRole("button", { name: "从上游读取模型" }));
   expect(await dialog.findByRole("checkbox", { name: `接入 ${model}` })).not.toBeChecked();
+  await user.click(dialog.getByRole("button", { name: "手工添加" }));
   await user.type(dialog.getByRole("textbox", { name: "手工添加上游模型 ID" }), "manual/one");
   await user.click(dialog.getByRole("button", { name: "添加到目录" }));
   expect(await dialog.findByText("manual/one")).toBeVisible();
@@ -92,9 +109,16 @@ it("saves the upstream catalog across reopening without attaching models, then a
   await user.click(dialog.getByRole("button", { name: `检测模型 ${model}` }));
   await waitFor(() => expect(dialog.getByRole("checkbox", { name: `接入 ${model}` })).toBeEnabled());
   await user.click(dialog.getByRole("checkbox", { name: `接入 ${model}` }));
+  await user.click(dialog.getByRole("button", { name: `配置 ${model}` }));
   const input = dialog.getByRole("textbox", { name: `${model} 公开名 1` });
   await user.clear(input);
   await user.type(input, "new-public");
+  await user.click(dialog.getByRole("button", { name: "基本设置" }));
+  expect(dialog.queryByRole("button", { name: "应用接入变更" })).not.toBeInTheDocument();
+  await user.click(dialog.getByRole("button", { name: "模型与接入" }));
+  expect(dialog.getByRole("textbox", { name: `${model} 公开名 1` })).toHaveValue("new-public");
+  await user.type(dialog.getByRole("searchbox"), "gemini");
+  await user.click(dialog.getByRole("button", { name: `配置 ${existing}` }));
   expect(dialog.getByLabelText(`${existing} 路由位置`)).toHaveValue("2");
   expect(dialog.getByLabelText(`${existing} 上游端点`)).toHaveValue("responses");
   await user.click(dialog.getByRole("button", { name: "应用接入变更" }));

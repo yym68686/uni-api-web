@@ -308,7 +308,10 @@ it("manages initial channels with account/unassigned filters and shows every cal
     if (init?.method === "POST") { writes.push(JSON.parse(String(init.body))); return new Response("{}", { status: 202 }); }
     if (input.includes("/channel-settings?")) return channelConfigurationFixture("initial-unassigned", ["custom-model"]);
     if (input.includes("/model-catalog?")) return Response.json({ models: [], refreshed_at: null });
-    if (input.includes("channel-options")) return Response.json({ revision: "r1", channels: [], keys: [{ key_id: "key-2", position: 2, prefix: "masked-two" }] });
+    if (input.includes("channel-options")) return Response.json({ revision: "r1", channels: [
+      { provider:"peer-1", model:"custom-model" }, { provider:"peer-2", model:"custom-model" },
+      { provider:"initial-unassigned", model:"custom-model" },
+    ], keys: [{ key_id: "key-2", position: 2, prefix: "masked-two" }] });
     const data = input.endsWith("/channel-management") ? configured : input.endsWith("/accounts") ? accounts : input.endsWith("/channels") ? configured : input.endsWith("/sources") ? [{id:"primary",name:"Fugue"},{id:"do",name:"DigitalOcean"}] : input.endsWith("/channel-routes") ? [
       { provider:"initial-bound", model:"gpt-6-astra", api_key_id:"key-1", key_prefix:"masked-one", key_position:1, position:2 },
       { provider:"initial-bound", model:"gpt-6-astra", api_key_id:"key-2", key_prefix:"masked-two", key_position:2, position:5 },
@@ -349,8 +352,8 @@ it("manages initial channels with account/unassigned filters and shows every cal
   expect(screen.getByText("initial-unassigned",{selector:"strong"})).toBeVisible();
   await user.click(screen.getByRole("button",{name:"已添加 · 1 个 key"}));
   const unified = within(screen.getByRole("dialog",{name:"渠道设置"}));
-  await user.click(await unified.findByRole("button",{name:/已接入 · 1 个 Key/}));
-  expect(await unified.findByText("第 3 位")).toBeVisible();
+  await user.click(await unified.findByRole("button",{name:"配置 custom-model"}));
+  await waitFor(() => expect(unified.getByRole("combobox",{name:"custom-model 路由位置"})).toHaveValue("3"));
   await user.click(unified.getByRole("button",{name:"关闭渠道设置"}));
   view.unmount();
   mount("management-fixture");
@@ -499,19 +502,15 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
   await user.click(await screen.findByRole("button",{name:"已添加 · 1 个 key"}));
   const panel = within(screen.getByRole("dialog",{name:"渠道设置"}));
   const positionRole = { name:"gemini-4-carbon 路由位置" };
+  await user.click(await panel.findByRole("button", {name:"配置 gemini-4-carbon"}));
   await waitFor(() => expect(panel.getByRole("combobox", positionRole)).toBeEnabled());
   const position = panel.getByRole("combobox", positionRole);
-  expect(panel.getByRole("columnheader",{ name:"路由位置" })).toBeVisible();
   expect(position).toHaveValue("2");
   await user.selectOptions(position, "1");
   const gemini = panel.getByRole("combobox",{name:"gemini-4-carbon 上游端点"});
-  const jev = panel.getByRole("combobox",{name:"jev-latest 上游端点"});
-  expect(jev).toHaveValue(openrouter ? "" : "chat");
   if (openrouter) {
     expect(within(gemini).getByRole("option", {name: /Claude Messages/})).toBeEnabled();
     expect(within(gemini).queryByRole("option", {name: /Gemini|System One/})).not.toBeInTheDocument();
-    expect(within(jev).getByRole("option", {name: /System One/})).toBeEnabled();
-    expect(within(jev).queryByRole("option", {name: /Chat Completions/})).not.toBeInTheDocument();
   }
   await user.click(panel.getByRole("button",{name:"自动检测 gemini-4-carbon 的上游端点"}));
   await waitFor(() => expect(gemini).toHaveValue(openrouter ? "chat" : "gemini"));
@@ -521,6 +520,14 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
   }
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({path:expect.stringContaining("/detect-protocol"),body:{revision:"r1",model:"gemini-4-carbon",provider}});
+  await user.click(panel.getByRole("button", {name:"配置 jev-latest"}));
+  expect(panel.queryByRole("combobox",{name:"gemini-4-carbon 上游端点"})).not.toBeInTheDocument();
+  const jev = panel.getByRole("combobox",{name:"jev-latest 上游端点"});
+  expect(jev).toHaveValue(openrouter ? "" : "chat");
+  if (openrouter) {
+    expect(within(jev).getByRole("option", {name: /System One/})).toBeEnabled();
+    expect(within(jev).queryByRole("option", {name: /Chat Completions/})).not.toBeInTheDocument();
+  }
   await user.selectOptions(jev, openrouter ? "systemone" : "messages");
   await user.click(panel.getByRole("button",{name:"应用接入变更"}));
   expect(screen.queryByRole("dialog",{name:"渠道设置"})).not.toBeInTheDocument();
@@ -599,10 +606,11 @@ it.each(["site", "native"])("keeps configured model-card price warnings consiste
   await user.click(screen.getByRole("button",{name:"已添加 · 1 个 key"}));
   if (evidence === "site") await user.click(await screen.findByRole("button",{name:"编辑 Key 1"}));
   const label = (model: string) => evidence === "site" ? model : `接入 ${model}`;
-  const container = evidence === "site" ? "label" : "tr";
+  const container = evidence === "site" ? "label" : "li";
   const luna = await screen.findByRole("checkbox",{name:label("gpt-6-luna")});
   await waitFor(() => expect(luna).toBeEnabled());
   expect(luna).toBeChecked();
+  if (evidence === "native") await user.click(screen.getByRole("button",{name:"配置 gpt-6-luna"}));
   expect(within(luna.closest(container)!).getByText("单价异常")).toHaveClass("negative");
   expect(screen.getByRole("checkbox",{name:label("gpt-6-sol")}).closest(container)).not.toHaveTextContent("单价异常");
   await user.click(luna);
@@ -1519,11 +1527,11 @@ it("filters compaction across all pages, queues groups independently of the sele
   expect(writes[0].targets.map(t => t.group_id)).toEqual(Array.from({length:27}, (_,i)=>i+1));
   expect(writes[0].targets.every(t => !t.models)).toBe(true);
   await user.click(screen.getAllByRole("button", {name:"添加到渠道"})[0]);
-  expect(within(screen.getByRole("dialog")).getByRole("checkbox", {name:"开启远程压缩"})).toBeChecked();
+  expect(await within(screen.getByRole("dialog")).findByRole("checkbox", {name:"开启远程压缩"})).toBeChecked();
   await user.click(screen.getByRole("button", {name:"关闭添加渠道"}));
   await user.selectOptions(filter,"unsupported");
   await user.click(screen.getByRole("button", {name:"添加到渠道"}));
-  expect(within(screen.getByRole("dialog")).getByRole("checkbox", {name:"开启远程压缩"})).not.toBeChecked();
+  expect(await within(screen.getByRole("dialog")).findByRole("checkbox", {name:"开启远程压缩"})).not.toBeChecked();
   await user.click(screen.getByRole("button", {name:"关闭添加渠道"}));
   view.unmount();
   mount("compaction-filter");

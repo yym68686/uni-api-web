@@ -12,6 +12,7 @@ import {
   Plus,
   Trash2,
   RotateCcw,
+  CornerUpLeft,
   SlidersHorizontal,
   KeyRound,
   Timer,
@@ -143,41 +144,19 @@ const labels: Record<string, string> = {
   aws_session_token: "AWS session token",
   cf_account_id: "Cloudflare 账号 ID",
 };
-const categories: Record<
-  string,
-  { icon: typeof Settings2; description: string }
-> = {
-  基本与模型: {
-    icon: SlidersHorizontal,
-    description: "设置上游地址和引擎。",
-  },
-  模型与接入: { icon: Layers, description: "在同一处管理上游模型目录与各 API key 的实际接入。" },
-  密钥: { icon: KeyRound, description: "管理上游密钥、调用顺序与限额。" },
-  并行请求: { icon: Layers, description: "设置较慢请求的并行尝试策略。" },
-  重试保护: {
-    icon: ShieldCheck,
-    description:
-      "为无法明确分类的上游400设置有限换渠道机会；默认关闭，不改变已有精确规则。",
-  },
-  超时与冷却: {
-    icon: Timer,
-    description: "调整请求等待时间与失败后的冷却策略。",
-  },
-  请求规则: { icon: Filter, description: "选择此渠道可接收的端点和请求类型。" },
-  请求改写: { icon: Braces, description: "配置请求头与发送至上游的参数。" },
-  网络与适配: { icon: Globe2, description: "管理渠道能力、代理与平台凭据。" },
-  高级配置: {
-    icon: FileCode2,
-    description: "以 JSON 或 YAML 编辑当前渠道的完整配置。",
-  },
-  模板与批量: {
-    icon: Layers,
-    description: "复用设置，或创建 API key 专用渠道。",
-  },
-  变更记录: {
-    icon: History,
-    description: "查看历史修改、核对应用结果与回滚。",
-  },
+const categories: Record<string, typeof Settings2> = {
+  基本与模型: SlidersHorizontal,
+  模型与接入: Layers,
+  密钥: KeyRound,
+  并行请求: Layers,
+  重试保护: ShieldCheck,
+  超时与冷却: Timer,
+  请求规则: Filter,
+  请求改写: Braces,
+  网络与适配: Globe2,
+  高级配置: FileCode2,
+  模板与批量: Layers,
+  变更记录: History,
 };
 const keyOf = (path: string) => path.split("/").at(-1)!;
 const requestTypes = (value: unknown): string[] =>
@@ -397,7 +376,6 @@ function Keys({
   return (
     <div className="settings-keys">
       <div className="settings-key-toolbar">
-        <p className="muted">可查看、复制或替换密钥，箭头可调整调用顺序。</p>
         <button
           className="button small ghost"
           disabled={loading}
@@ -524,6 +502,9 @@ export function Editor({
   const [resetOverride, setResetOverride] = useState(false);
   const isGlobal = row.provider === GLOBAL_SETTINGS_SCOPE;
   const [tab, setTab] = useState(isGlobal ? "超时与冷却" : initialModelTab ? "模型与接入" : "基本与模型");
+  const [modelVisited, setModelVisited] = useState(!isGlobal && !!initialModelTab);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -535,11 +516,11 @@ export function Editor({
   const [batch, setBatch] = useState<string[]>([]);
   const [copyToKey, setCopyToKey] = useState("");
   useEffect(() => {
-    const body = document.querySelector(
-      ".channel-settings-dialog .settings-body",
-    );
-    if (body) body.scrollTop = 0;
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
   }, [tab]);
+  useEffect(() => {
+    if (preview?.status === "validated") previewRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [preview]);
   const [sample, setSample] = useState<unknown>({
     model: row.model,
     endpoint: "/v1/responses",
@@ -651,7 +632,7 @@ export function Editor({
   async function run(apply: boolean, reset = false) {
     if (!view || !draft || busy) return;
     if (
-      document.querySelector('.channel-settings-dialog [aria-invalid="true"]')
+      bodyRef.current?.querySelector('[aria-invalid="true"]')
     ) {
       setError("请先修正无效的 JSON 字段");
       return;
@@ -687,7 +668,7 @@ export function Editor({
         });
         setPreview(result);
         setOperation(id);
-        setNotice("校验通过。请核对下方影响范围和差异。");
+        setNotice("校验通过");
       } else {
         setOperation(id);
         setPreview(undefined);
@@ -697,14 +678,12 @@ export function Editor({
         });
         setOperation(id);
         setPreview(result);
-        setNotice(
-          result.status === "applied"
-            ? "设置已保存并应用"
-            : result.message || "应用结果待确认，请核对操作状态",
-        );
         if (result.status === "applied") {
+          setNotice("设置已保存并应用");
           setOperation("");
           await refreshed();
+        } else {
+          setError(result.message || "应用结果待确认");
         }
       }
     } catch (e) {
@@ -718,20 +697,17 @@ export function Editor({
   }
   async function reconcile(id = operation) {
     setBusy(true);
+    setError("");
     try {
       const result = await controlRequest<Result>(
         path + "/operations/" + encodeURIComponent(id),
       );
-      setNotice(
-        result.status === "applied"
-          ? "已确认保存并应用"
-          : result.status === "rejected"
-            ? "修改被拒绝，请刷新设置后重试"
-            : "应用待确认，保留原恢复版本",
-      );
       if (result.status === "applied") {
+        setNotice("已确认保存并应用");
         setOperation("");
         await refreshed();
+      } else {
+        setError(result.status === "rejected" ? "修改被拒绝，请刷新设置后重试" : "应用待确认");
       }
     } catch (e) {
       setError(String(e));
@@ -742,6 +718,7 @@ export function Editor({
   async function rollback(id: string) {
     if (!view) return;
     setBusy(true);
+    setError("");
     try {
       const result = await controlRequest<Result>(path + "/rollback", {
         method: "POST",
@@ -751,20 +728,20 @@ export function Editor({
           operation_id: crypto.randomUUID(),
         }),
       });
-      setNotice(
-        result.status === "applied"
-          ? "已回滚并保存"
-          : result.message || "回滚待确认",
-      );
-      if (result.status === "applied") await refreshed();
+      if (result.status === "applied") {
+        setNotice("已回滚并保存");
+        await refreshed();
+      } else {
+        setError(result.message || "回滚待确认");
+      }
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
   }
-  if (query.isPending) return <DetailLoading kind="form" label="渠道设置" />;
-  if (query.isError || !view || !draft)
+  if (query.isPending || (query.isSuccess && !draft)) return <DetailLoading kind="form" label="渠道设置" />;
+  if (!view || !draft)
     return (
       <div className="settings-loading">
         <p role="alert" className="negative">
@@ -782,23 +759,25 @@ export function Editor({
     (channel) => channel.provider === row.provider,
   );
   const autoEngineLabel = !equal(draft.base_url, view.effective.base_url)
-    ? "自动识别（地址已修改，保存后重新判断）"
+    ? "自动识别"
     : view.effective.engine != null
-      ? "自动识别（保存后由 uni-api 判断）"
+      ? "自动识别"
       : savedEngine?.engine_mode === "auto" && savedEngine.engine
         ? `自动识别（实际：${savedEngine.engine}）`
-        : catalog.isPending
-          ? "自动识别（正在读取实际引擎…）"
-          : "自动识别（实际引擎未返回）";
+        : "自动识别";
   const visibleFields = view.schema.fields.filter(
     (f) =>
       f.path !== "/model" &&
       (f.path !== "/preferences/unknown_upstream_400_retries" ||
         view.schema.all_upstream_400_retries === true),
   );
+  const fieldGroups = [...new Set(visibleFields.map(f => f.group))];
   const groups = [
-    ...new Set(visibleFields.map((f) => f.group)),
-    ...(!isGlobal ? ["模型与接入"] : []),
+    ...(isGlobal ? fieldGroups : [
+      ...fieldGroups.filter(group => group === "基本与模型"),
+      "模型与接入",
+      ...fieldGroups.filter(group => group !== "基本与模型"),
+    ]),
     "高级配置",
     ...(!isGlobal ? ["模板与批量"] : []),
     "变更记录",
@@ -813,28 +792,32 @@ export function Editor({
         (format === "json"
           ? JSON.stringify(draft, null, 2)
           : stringify(draft)));
-  const ownerKey = view.available_keys?.find(
-    (k) => k.key_id === view.api_key_id,
-  );
+  const modelTab = tab === "模型与接入";
   return (
     <>
       <div className="settings-workspace">
         <aside className="settings-sidebar">
           <nav className="settings-tabs" aria-label="渠道设置类别">
             {groups.map((group) => {
-              const Icon = categories[group]?.icon || Settings2;
+              const Icon = categories[group] || Settings2;
               return (
                 <button
                   className={tab === group ? "active" : ""}
                   aria-pressed={tab === group}
                   key={group}
+                  disabled={busy}
                   onClick={() => {
+                    if (tab === group) return;
                     if (
-                      document.querySelector(
-                        '.channel-settings-dialog [aria-invalid="true"]',
+                      bodyRef.current?.querySelector(
+                        '[aria-invalid="true"]',
                       )
                     ) {
                       setError("请先修正无效的 JSON 字段");
+                      return;
+                    }
+                    if (group === "模型与接入" && dirty) {
+                      setError("请先保存其他设置，或撤销修改。");
                       return;
                     }
                     if (tab === "高级配置") {
@@ -851,6 +834,7 @@ export function Editor({
                           ? JSON.stringify(draft, null, 2)
                           : stringify(draft),
                       );
+                    if (group === "模型与接入") setModelVisited(true);
                     setTab(group);
                   }}
                 >
@@ -860,41 +844,22 @@ export function Editor({
               );
             })}
           </nav>
-          <div
-            className="settings-scope"
-            title={`渠道标识：${view.provider}\n配置版本：${view.revision}`}
-          >
-            <ShieldCheck size={17} />
-            <strong>
-              {view.kind === "global"
-                ? "来源全局设置"
-                : view.kind === "imported"
-                  ? "此 API key 专用渠道"
-                  : "来源共享渠道"}
-            </strong>
-            <span>
-              {view.api_key_id
-                ? `仅作用于 ${ownerKey ? `Key ${ownerKey.position}` : "绑定的 API key"}`
-                : `影响 ${view.affected_keys.length} 个调用 API key`}
-            </span>
-          </div>
         </aside>
-        <div className="settings-body">
+        <div className="settings-main">
+          {modelVisited && row.source_id && <div className="settings-model-panel" hidden={!modelTab}>
+            <ChannelModelCatalog key={row.provider} source={row.source_id} provider={row.provider} revision={view.revision}
+              member={member} prices={prices} ownerKey={view.api_key_id} close={onClose} onSettingsChanged={refreshed} submitAdd={submitAdd} />
+          </div>}
+          {!modelTab && <>
+        <div className="settings-body" ref={bodyRef}>
           <div className="settings-section-heading">
-            <h3>{tab}</h3>
-            <p>{categories[tab]?.description}</p>
+            <h3>{tab === "基本与模型" ? "基本设置" : tab}</h3>
           </div>
           {view.conflict && (
             <p role="alert" className="settings-feedback is-error">
               基础配置与覆盖冲突，正在沿用上次有效设置：{view.conflict}
             </p>
           )}
-          {tab === "模型与接入" && (dirty ? (
-            <p role="status" className="settings-feedback">请先保存其他渠道设置，再刷新目录或应用接入；也可以关闭并放弃未保存的设置。</p>
-          ) : row.source_id && (
-            <ChannelModelCatalog key={row.provider} source={row.source_id} provider={row.provider} revision={view.revision}
-              member={member} prices={prices} ownerKey={view.api_key_id} close={onClose} onSettingsChanged={refreshed} submitAdd={submitAdd} />
-          ))}
 
           {!isGlobal &&
             tab === "基本与模型" &&
@@ -920,55 +885,31 @@ export function Editor({
                     : ownValue,
                 label = labels[keyOf(f.path)] || keyOf(f.path);
               const inherited = ownValue === undefined;
-              const sourceLabel = resolved?.read_only
-                ? "调用 API key 设置"
-                : !resolved
-                  ? inherited
-                    ? "未设置"
-                    : view.override_paths.some(
-                          (p) => p === f.path || p.startsWith(f.path + "/"),
-                        )
-                      ? "渠道自定义"
-                      : "基础配置"
-                  : inherited
-                    ? isGlobal
-                      ? "运行时默认值"
-                      : resolved.inherited_source === "global"
-                        ? "继承全局设置"
-                        : "继承全局设置 · 运行时默认值"
-                    : isGlobal
-                      ? "全局自定义"
-                      : "渠道自定义";
+              const inheritLabel = `${label}：${isGlobal ? "使用运行时默认值" : "继承全局设置"}`;
               return (
                 <section
                   className={`settings-field ${["keys", "models", "json"].includes(f.type) || (value && typeof value === "object") ? "settings-field-wide" : ""}`}
                   key={f.path}
                 >
                   <header className="settings-field-heading">
-                    <div>
-                      <h4 title={f.path}>{label}</h4>
-                      <small>
-                        {f.type === "engine" && inherited
-                          ? "自动识别"
-                          : sourceLabel}
-                      </small>
-                      {(resolved?.note || f.note) && (
-                        <small>{resolved?.note || f.note}</small>
-                      )}
-                    </div>
-                    {resolved?.can_inherit && !inherited && (
+                    <h4>{label}</h4>
+                    <div className="settings-field-actions">
+                    {resolved?.can_inherit && (
                       <button
                         type="button"
-                        className="button small"
-                        aria-label={`${label}：${isGlobal ? "使用运行时默认值" : "继承全局设置"}`}
+                        className="settings-icon-button settings-reset-field"
+                        hidden={inherited}
+                        aria-label={inheritLabel}
+                        title={inheritLabel}
                         onClick={() => edit(set(draft, f.path, undefined))}
                       >
-                        {isGlobal ? "使用运行时默认值" : "继承全局设置"}
+                        <CornerUpLeft size={14} />
                       </button>
                     )}
-                    {!equal(ownValue, get(view.base, f.path)) && (
                       <button
+                        type="button"
                         className="settings-icon-button settings-reset-field"
+                        hidden={equal(ownValue, get(view.base, f.path))}
                         title="恢复基础值"
                         aria-label={`${label}：恢复基础值`}
                         onClick={() =>
@@ -977,7 +918,7 @@ export function Editor({
                       >
                         <RotateCcw size={15} />
                       </button>
-                    )}
+                    </div>
                   </header>
                   <div className="settings-field-control">
                     {resolved?.read_only ? (
@@ -1005,12 +946,6 @@ export function Editor({
                           />
                           移除生图参数
                         </label>
-                        <p className="muted">
-                          默认关闭。开启后移除 tools 中的 image_generation
-                          及对应的 tool_choice，保留其他工具和图片输入。
-                          适用于上游提示「Image generation is not enabled for
-                          this group」的渠道。
-                        </p>
                         <details>
                           <summary>请求体覆盖与删除（高级 JSON）</summary>
                           <JSONField
@@ -1054,18 +989,8 @@ export function Editor({
                             仅支持流式（非流式请求自动聚合）
                           </option>
                         </select>
-                        <small>
-                          适用于 Responses
-                          上游。客户端请求非流式时，收集完整结果后返回
-                          JSON；不影响 compact 等其他上游端点。
-                        </small>
                         <details>
                           <summary>按模型覆盖（高级 JSON）</summary>
-                          <p>
-                            可使用{" "}
-                            {`{"default":"follow_client","models":{"模型名":"stream_only"}}`}
-                            。优先匹配公开模型名，其次匹配上游模型名。
-                          </p>
                           <JSONField
                             label={label + "高级 JSON"}
                             value={value ?? "follow_client"}
@@ -1155,13 +1080,6 @@ export function Editor({
                             ? "仅允许压缩请求"
                             : "排除压缩请求"}
                         </label>
-                        <p className="muted">
-                          {f.path === "/only_request_types"
-                            ? "开启后仅接收 compaction 请求，普通请求跳过此渠道。"
-                            : "开启后跳过 compaction 请求，普通请求仍可使用此渠道。"}
-                          适用于 /v1/responses/compact 和包含 compaction_trigger
-                          的 Responses 请求。
-                        </p>
                         <details>
                           <summary>编辑请求类型列表</summary>
                           <JSONField
@@ -1311,9 +1229,6 @@ export function Editor({
                   <option value="yaml">YAML</option>
                 </select>
               </label>
-              <p className="muted">
-                密钥引用保持原值；填写新值可替换。只有支持字段的修改会应用，其他字段原样保留。
-              </p>
               <textarea
                 className="settings-raw"
                 aria-label="渠道高级配置"
@@ -1390,9 +1305,7 @@ export function Editor({
                       }),
                     });
                     await templates.refetch();
-                    setNotice(
-                      "模板已保存（超时和规则）；模型接入、凭据和自定义请求体不进入模板",
-                    );
+                    setNotice("模板已保存");
                   } catch (e) {
                     setError(String(e));
                   }
@@ -1401,9 +1314,6 @@ export function Editor({
                 将当前差异存为模板
               </button>
               <h4>同时应用到本来源其他渠道</h4>
-              <p className="muted">
-                只应用当前修改字段。每个来源单独原子提交，其他来源不受影响。
-              </p>
               {[...new Set(catalog.data?.data.map((c) => c.provider) || [])]
                 .filter((p) => p !== row.provider)
                 .map((p) => (
@@ -1486,7 +1396,7 @@ export function Editor({
             </details>
           )}
           {preview && (
-            <section className="settings-preview">
+            <section className="settings-preview" ref={previewRef}>
               <h4>校验与影响范围</h4>
               {preview.previews?.map((p) => (
                 <details key={p.provider} open>
@@ -1533,22 +1443,18 @@ export function Editor({
             </section>
           )}
         </div>
-      </div>
       {error && (
         <p role="alert" className="settings-feedback is-error">
           {error}
         </p>
       )}
-      {notice && (
-        <p role="status" className="settings-feedback">
-          <CircleCheck size={16} />
-          {notice}
-        </p>
-      )}
+      <span role="status" className="sr-only">{notice}</span>
       <footer className="settings-footer">
         <div className="settings-footer-secondary">
-          {tab !== "模型与接入" && <button
-            className="button ghost"
+          <button
+            className="settings-icon-button"
+            aria-label="恢复基础配置"
+            title="恢复基础配置"
             disabled={busy}
             onClick={() => {
               edit(resetDocument(view));
@@ -1558,24 +1464,21 @@ export function Editor({
             }}
           >
             <RotateCcw size={15} />
-            恢复基础配置
-          </button>}
-          <span className="settings-draft-state">
-            {dirty ? "有未保存的修改" : "已与来源同步"}
-          </span>
+          </button>
         </div>
         <div className="settings-footer-primary">
           <button
             className="button ghost"
-            disabled={busy}
+            disabled={busy || !dirty}
             onClick={() => {
-              setDraft(structuredClone(view.effective));
-              setPreview(undefined);
-              setOperation("");
-              onClose();
+              edit(structuredClone(view.effective));
+              setRaw(format === "json" ? JSON.stringify(view.effective, null, 2) : stringify(view.effective));
+              setResetOverride(false);
+              setCopyToKey("");
+              setBatch([]);
             }}
           >
-            {dirty ? "放弃修改" : "关闭"}
+            撤销修改
           </button>
           <button
             className="button"
@@ -1602,6 +1505,9 @@ export function Editor({
           )}
         </div>
       </footer>
+      </>}
+        </div>
+      </div>
     </>
   );
 }

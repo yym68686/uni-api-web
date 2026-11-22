@@ -95,7 +95,7 @@ async function setup(initial?: number, supported = true) {
   );
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "全局设置" }));
-  await screen.findByText("来源全局设置");
+  await screen.findByRole("button", { name: "校验与预览" });
   return { writes, user };
 }
 
@@ -113,7 +113,7 @@ it.each([0, 1, 3])(
         .getAllByRole("option")
         .map((o) => (o as HTMLOptionElement).value),
     ).toEqual(["", "0", "1", "2", "3"]);
-    expect(screen.getByText(/所有上游400统一计数/)).toBeInTheDocument();
+    expect(screen.queryByText(/所有上游400统一计数/)).not.toBeInTheDocument();
     const save = screen.getByRole("button", { name: "保存并应用" });
     expect(save).toBeDisabled();
     await user.selectOptions(select, String(n));

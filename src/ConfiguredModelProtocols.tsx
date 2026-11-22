@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { controlRequest } from "./api";
 import { configuredChannelProtocols } from "./channelProtocol";
+import { ScanLine } from "lucide-react";
+import { Spinner } from "./ui";
 
-export function ConfiguredModelProtocols({ source, revision, models, saved, choices, suggested, onChange, disabled, onDetecting, render }: {
+export function ConfiguredModelProtocols({ source, revision, scope, models, saved, choices, suggested, onChange, disabled, onDetecting, render }: {
   source: string;
   revision: string;
+  scope?: string;
   models: { upstream: string; provider: string; model: string; supported: string[] }[];
   saved: Record<string, string>;
   choices: Record<string, string>;
@@ -16,20 +19,27 @@ export function ConfiguredModelProtocols({ source, revision, models, saved, choi
   render?: (controls: (upstream: string) => ReactNode) => ReactNode;
 }) {
   const [testing, setTesting] = useState("");
-  const [messages, setMessages] = useState<Record<string, string>>({});
+  const [messages, setMessages] = useState<Record<string, { text: string; failed: boolean }>>({});
   const [confirmed, setConfirmed] = useState<Record<string, string[]>>({});
   const active = useRef<AbortController | null>(null);
-  useEffect(() => () => {
-    active.current?.abort();
-    onDetecting(false);
-  }, [onDetecting]);
+  useEffect(() => {
+    setTesting("");
+    setMessages({});
+    setConfirmed({});
+    return () => {
+      active.current?.abort();
+      active.current = null;
+      onDetecting(false);
+    };
+  }, [onDetecting, scope]);
   async function detect({ upstream, provider, model, supported }: typeof models[number]) {
     if (active.current || disabled) return;
     const abort = new AbortController();
     active.current = abort;
     setTesting(upstream);
     onDetecting(true);
-    setMessages(old => ({ ...old, [upstream]: "" }));
+    const clearMessage = () => setMessages(({ [upstream]: _, ...rest }) => rest);
+    clearMessage();
     try {
       const { protocol, confirmed_protocols } = await controlRequest<{ protocol: string; confirmed_protocols?: string[] }>("/v1/channel-management/detect-protocol", {
         method: "POST",
@@ -43,9 +53,9 @@ export function ConfiguredModelProtocols({ source, revision, models, saved, choi
       const match = configuredChannelProtocols.find(option => option.protocol === next);
       setConfirmed(old => ({ ...old, [upstream]: available }));
       if (match && next !== current) onChange(upstream, match.protocol);
-      setMessages(old => ({ ...old, [upstream]: match ? `已确认 ${available.length} 个可用端点；当前选择：${match.label}，保存后生效。` : "未确认可用端点，已保留当前选择。" }));
+      setMessages(old => ({ ...old, [upstream]: { text: match ? `已确认 ${available.length} 个可用端点；当前选择：${match.label}，保存后生效。` : "未确认可用端点", failed: !match } }));
     } catch (error) {
-      if (!abort.signal.aborted) setMessages(old => ({ ...old, [upstream]: error instanceof Error ? error.message : "端点检测失败" }));
+      if (!abort.signal.aborted) setMessages(old => ({ ...old, [upstream]: { text: error instanceof Error ? error.message : "端点检测失败", failed: true } }));
     } finally {
       if (!abort.signal.aborted) {
         active.current = null;
@@ -64,17 +74,19 @@ export function ConfiguredModelProtocols({ source, revision, models, saved, choi
               value={value}
               onChange={event => {
                 onChange(upstream, event.target.value);
-                setMessages(old => ({ ...old, [upstream]: "" }));
+                setMessages(({ [upstream]: _, ...rest }) => rest);
               }}>
-              <option value="">沿用渠道默认端点</option>
+              <option value="">{compact ? "渠道默认" : "沿用渠道默认端点"}</option>
               {configuredChannelProtocols.filter(({ protocol }) => supported.includes(protocol) || protocol === value).map(({ protocol, label, endpoint }) => <option key={protocol} value={protocol} disabled={!supported.includes(protocol)}>{label} · {endpoint}{!supported.includes(protocol) ? "（不可配置，请重选）" : confirmed[upstream]?.includes(protocol) ? "（实测可用）" : ""}</option>)}
             </select>
           </label>
-          <button className="button small" type="button" disabled={disabled || !!testing || !supported.length}
+          <button className={compact ? "settings-icon-button" : "button small"} type="button" disabled={disabled || !!testing || !supported.length}
+            title={compact ? "自动检测端点" : undefined}
             aria-label={`自动检测 ${upstream} 的上游端点`} onClick={() => void detect(item)}>
-            {testing === upstream ? "检测中…" : "自动检测"}
+            {compact ? (testing === upstream ? <Spinner small /> : <ScanLine size={16} />) : testing === upstream ? "检测中…" : "自动检测"}
           </button>
-          {!supported.length ? <small className="muted">此模型没有可切换的已知端点。</small> : messages[upstream] ? <small className="muted" role="status">{messages[upstream]}</small> :
+          {compact ? messages[upstream]?.failed && <small className="negative" role="alert">{messages[upstream].text}</small> :
+            !supported.length ? <small className="muted">此模型没有可切换的已知端点。</small> : messages[upstream] ? <small className="muted" role="status">{messages[upstream].text}</small> :
             suggested[upstream] && !Object.hasOwn(choices, upstream) && <small className="muted">已通过模型检测，保存后使用此端点。</small>}
         </div>;
   }

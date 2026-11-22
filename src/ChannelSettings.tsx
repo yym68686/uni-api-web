@@ -1,7 +1,7 @@
 import { DetailLoading } from "./PageLoading";
 import { lazy, Suspense, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Settings2, SlidersHorizontal, X } from "lucide-react";
+import { Settings2, X } from "lucide-react";
 import type { Channel, ModelPrice } from "./types";
 import type { ManagedChannel } from "./channelManagement";
 import type { ConfiguredChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
@@ -40,9 +40,6 @@ export function ChannelConfigurationDialog({ row, member, prices, initialModelTa
         <Dialog.Overlay className="dialog-overlay channel-settings-overlay" />
         <Dialog.Content className="channel-settings-dialog">
           <header className="settings-dialog-header">
-            <div className="settings-title-icon">
-              <SlidersHorizontal size={21} />
-            </div>
             <div className="settings-title-copy">
               <Dialog.Title>{title}</Dialog.Title>
               <Dialog.Description title={row.provider}>
@@ -55,7 +52,7 @@ export function ChannelConfigurationDialog({ row, member, prices, initialModelTa
               className="settings-icon-button settings-close"
               aria-label={`关闭${title}`}
             >
-              <X size={20} />
+              <X size={18} />
             </Dialog.Close>
           </header>
           {open && <Suspense fallback={<DetailLoading kind="form" label="渠道设置" />}>

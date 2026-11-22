@@ -5,7 +5,7 @@ import { useChannelImportKeys, useDefaultChannelChoice } from "./channelImportKe
 import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, X } from "lucide-react";
+import { Ellipsis, Plus, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";
@@ -240,7 +240,7 @@ export function ConfiguredChannelDialog({
   prices?: ModelPrice[];
   initialAdd?: ConfiguredChannelAddDraft;
   submitAdd?: SubmitChannelAdd<ConfiguredChannelAddDraft>;
-  catalog?: { models: CatalogModel[]; ownerKey?: string };
+  catalog?: { models: CatalogModel[]; ownerKey?: string; actions: ReactNode; extra: ReactNode; feedback: ReactNode; pending: boolean };
 }) {
   const client = useQueryClient();
   const members = channelMembers(group);
@@ -340,6 +340,7 @@ export function ConfiguredChannelDialog({
     if (first) beginEdit(item, relevant.filter(r => r.api_key_id === first.api_key_id && r.provider === first.provider));
     else {
       modeChosen.current = true;
+      setPerModel(true);
       setAdding(true);
     }
   }, [catalog, item, itemRoutes]);
@@ -393,7 +394,7 @@ export function ConfiguredChannelDialog({
   const invalidProtocol = !!options.data?.model_upstream_protocols && protocolModels.some(({upstream,supported}) => !!protocolChoices[upstream] && !supported.includes(protocolChoices[upstream]));
   const staleDraft = !!draftRevision && !!options.data && draftRevision !== options.data.revision;
   const invalidModels=unavailableModelChanges(desiredModels,savedModels,upstream=>allChecks.some(c=>(item.model_mappings?.[c.model]||c.model)===upstream&&canSelectModel(c.model)));
-  const routePending = !!catalog && (!options.data || options.isFetching || !!options.error || (!!editingProvider && initializedEdit.current !== `${item.source_id}:${key}:${editingProvider}`));
+  const routePending = !!catalog && (!adding || !key || !options.data || options.isFetching || !!options.error || (!!editingProvider && initializedEdit.current !== `${item.source_id}:${key}:${editingProvider}`));
   const currentPositions: Record<string, number> = Object.create(null);
   const positionCounts: Record<string, number> = Object.create(null);
   for (const row of options.data?.channels || []) {
@@ -448,10 +449,9 @@ export function ConfiguredChannelDialog({
     if(!editingProvider)return undefined;
     return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
       disabled={busy||detecting||staleDraft||Object.keys(protocolChoices).length>0||invalidModels.length>0||toolDefaultsPending||toolDefaultsError||inventory.isPending||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
-      onApplied={()=>{setSuccess("批量操作结果已更新，请核对各来源接入状态。");setAdding(false);if(initialEdit)close();}}/>;
+      onApplied={()=>{if (catalog || initialEdit) close(); else { setSuccess("批量操作结果已更新，请核对各来源接入状态。"); setAdding(false); }}}/>;
   }
-  async function save() {
-    if (
+  const saveDisabled = !!(
       busy ||
       routePending || !canSaveModels ||
       detecting ||
@@ -465,8 +465,9 @@ export function ConfiguredChannelDialog({
       !mapping.models.length ||
       mapping.models.some(m => (activePositions[m] ?? Math.min(position, positions)) > modelPositionLimit(m, options.data?.channels || [], editingProvider)) ||
       !options.data
-    )
-      return;
+    );
+  async function save() {
+    if (saveDisabled || !options.data) return;
     const protocols = options.data.model_upstream_protocols ? Object.fromEntries(protocolModels.filter(({upstream}) => Object.hasOwn(protocolChoices, upstream) || Object.hasOwn(suggestedProtocols, upstream)).map(({upstream}) => [upstream, protocolChoices[upstream] ?? suggestedProtocols[upstream]])) : {};
     const body = JSON.stringify({
       source_id: item.source_id,
@@ -538,7 +539,7 @@ export function ConfiguredChannelDialog({
       setError(error instanceof Error ? error.message : "模型检测启动失败");
     } finally { setProbing(""); }
   }
-  function renderModelAccess(protocol?: (upstream: string) => ReactNode) {
+  function renderModelAccess(protocol: (upstream: string) => ReactNode, toolbar: ReactNode, feedback: ReactNode) {
     type Entry = { name: string; original?: string; aliasIndex?: number };
     const namesByUpstream = new Map<string, Entry[]>();
     const upstreamOf = (model: string) => item.model_mappings?.[model] || model;
@@ -549,19 +550,21 @@ export function ConfiguredChannelDialog({
     };
     for (const model of selected) append(upstreamOf(model), { name: model, original: model });
     aliases.forEach((alias, aliasIndex) => append(upstreamOf(alias.upstream), { name: alias.public, aliasIndex }));
-    const catalogByModel = new Map(catalog?.models.map(m => [m.model, m]));
     const serving = new Set(Object.values(savedModels));
-    const upstreams = [...new Set([...catalogByModel.keys(), ...modelOptions.map(upstreamOf), ...namesByUpstream.keys()])].sort();
+    const upstreams = [...new Set([...(catalog?.models.map(m => m.model) || []), ...modelOptions.map(upstreamOf), ...namesByUpstream.keys()])].sort();
     const controlDisabled = busy || detecting || inventory.isPending || routePending;
     return <ChannelModelAccessTable disabled={busy || detecting} routePending={routePending || inventory.isPending} protocol={protocol}
+      loading={!!catalog?.pending || !itemRoutes && !routes[sources.indexOf(item.source_id)]?.isError}
+      toolbar={toolbar} feedback={feedback}
       rows={upstreams.map(upstream => {
         const check = checkByModel.get(upstream);
-        return { upstream, catalog: catalogByModel.get(upstream), names: (namesByUpstream.get(upstream) || []).map(m => m.name),
+        const status = check ? importModelLabel(check) : "未检测";
+        return { upstream, names: (namesByUpstream.get(upstream) || []).map(m => m.name),
           canEnable: canSelectModel(upstream) || serving.has(upstream),
           canRename: canSelectModel(upstream),
           checking: check?.state === "running" || check?.state === "queued" || probing === upstream,
-          status: <>{importModelLabel(check || { model: upstream, state: "idle", message: "", result: null }) || "检测通过"}
-            <ModelQualityWarning model={upstream} result={quality} />
+          status, tone: canSelectModel(upstream) ? "success" : status === "未检测" || status === "排队中" || status === "检测中" ? "idle" : "error",
+          diagnostics: <><ModelQualityWarning model={upstream} result={quality} />
             <ModelPriceWarning check={check} prices={prices} /></> };
       })}
       onToggle={({upstream}, checked) => {
@@ -612,8 +615,107 @@ export function ConfiguredChannelDialog({
       }}
     />;
   }
+  if (catalog) {
+    const directoryKeys = keyDirectory?.data?.keys.filter(k => !catalog.ownerKey || k.key_id === catalog.ownerKey) || [];
+    const routeQuery = routes[sources.indexOf(item.source_id)];
+    const selectedKey = directoryKeys.find(k => k.key_id === key);
+    const snapshotUnavailable = itemRoutes?.snapshot_consistent === false ||
+      (catalog.ownerKey ? itemRoutes?.unavailable_keys?.includes(catalog.ownerKey) : !!itemRoutes?.unavailable_keys?.length);
+    const loading = !adding && routeQuery?.isPending || !!key && options.isFetching || keyDirectory?.isPending || toolDefaultsPending;
+    const controlsBusy = busy || detecting || !adding;
+    function changeKey(id: string) {
+      const existing = providerRoutes(itemRoutes?.data || [], [item.provider]).filter(r => r.api_key_id === id);
+      const provider = existing.find(r => r.origin_provider)?.provider || existing[0]?.provider;
+      if (provider) beginEdit(item, existing.filter(r => r.provider === provider));
+      else {
+        setKey(id);
+        setEditingProvider("");
+        setDraftRevision(undefined);
+        setSelected([]);
+        setAliases([]);
+        setPosition(1);
+        setPerModel(true);
+        setModelPositions({});
+        setProtocolChoices({});
+        setError("");
+      }
+    }
+    const toolbar = <div className="channel-model-toolbar">
+      <div className="channel-model-target" aria-busy={!!loading}>
+        <label><span>API key</span>
+          <select aria-label="添加到 API key" value={selectedKey ? key : ""} disabled={controlsBusy || !directoryKeys.length || (!!selectedKey && directoryKeys.length === 1) || snapshotUnavailable}
+            onChange={e => changeKey(e.target.value)}>
+            {!selectedKey && <option value="" disabled>{loading ? "—" : directoryKeys.length ? "选择 API key" : "暂无 API key"}</option>}
+            {directoryKeys.map(k => <option key={k.key_id} value={k.key_id}>Key {k.position} · {k.prefix}</option>)}
+          </select>
+        </label>
+        <label><span>路由位置</span>
+          <select aria-label="渠道添加位置" value={perModel ? "per-model" : Math.min(position, positions)} disabled={controlsBusy || routePending}
+            onChange={e => {
+              const next = e.target.value;
+              if (next === "per-model") {
+                setPerModel(true);
+              } else {
+                setPosition(Number(next));
+                setPerModel(false);
+                setModelPositions({});
+              }
+            }}>
+            <option value="per-model">逐模型</option>
+            {Array.from({length: positions}, (_, i) => <option key={i} value={i+1}>统一第 {i+1} 位</option>)}
+          </select>
+        </label>
+        <span className="channel-model-progress">{loading && <LoadingIndicator size="inline" label="读取接入配置" />}</span>
+      </div>
+      <div className="channel-catalog-actions">{catalog.actions}</div>
+      {catalog.extra}
+    </div>;
+    const feedback = <>
+      {catalog.feedback}
+      {(error || staleDraft || options.error || routeQuery?.error || snapshotUnavailable || keyDirectory?.error || keyDirectory?.data?.refresh_failed) && <div role="alert" className="channel-model-error">
+        {staleDraft ? "配置已变化，请重新读取。" : error || options.error?.message || routeQuery?.error?.message || keyDirectory?.error?.message || "接入配置未完整读取。"}
+        <button type="button" className="button small" disabled={controlsBusy && adding || !!loading} onClick={() => {
+          initializedEdit.current = "";
+          setError("");
+          if (staleDraft) { setDraftRevision(undefined); setProtocolChoices({}); }
+          if (key) void options.refetch();
+          void routeQuery?.refetch();
+          void keyDirectory?.refetch();
+        }}>重新读取接入</button>
+      </div>}
+      {toolDefaultsError && <div role="alert" className="channel-model-error">模型检测记录读取失败。
+        <button type="button" className="button small" onClick={() => { void toolChecks.refetch(); void accounts.refetch(); }}>重试</button>
+      </div>}
+      {(mapping.error || invalidModels.length > 0 || invalidProtocol) && <div role="alert" className="channel-model-error">
+        {mapping.error || (invalidModels.length ? `未通过检测：${invalidModels.join("、")}` : "请选择有效的上游端点。")}
+      </div>}
+    </>;
+    return <section className="channel-model-route-workspace" aria-label="当前 Key 的接入配置">
+      <ConfiguredModelProtocols source={item.source_id} revision={options.data?.revision || ""}
+        scope={JSON.stringify([item.source_id, key, editingProvider, options.data?.revision])}
+        models={options.data?.model_upstream_protocols ? protocolModels : []}
+        saved={savedProtocols} choices={protocolChoices} suggested={suggestedProtocols}
+        onChange={(model, protocol) => setProtocolChoices(old => ({ ...old, [model]: protocol }))}
+        disabled={controlsBusy || routePending} onDetecting={setDetecting}
+        render={protocol => renderModelAccess(protocol, toolbar, feedback)} />
+      <footer className="settings-footer channel-model-footer">
+        {editingProvider && selectedKey && <details className="channel-model-more">
+          <summary className="settings-icon-button" aria-label="更多接入操作" title="更多接入操作"><Ellipsis size={19} /></summary>
+          <div>
+            {batchButton("all")}
+            <RemoveConfiguredBinding target={{ source_id: item.source_id, source_name: item.source_name, provider: editingProvider, name: item.name, model: item.models[0] || "" }}
+              keyId={key} keyPosition={selectedKey.position} disabled={controlsBusy || routePending} onRemoved={close} />
+            <ChannelBatchApply remove draft={() => batchDraft("delete")} disabled={controlsBusy || routePending || !counts?.count || counts.partial} onApplied={close} />
+          </div>
+        </details>}
+        <button type="button" className="button primary" disabled={saveDisabled} onClick={() => void save()}>
+          {busy && <Spinner small />}应用接入变更
+        </button>
+      </footer>
+    </section>;
+  }
   const content = <>
-          {!catalog && <header className="route-dialog-header">
+          <header className="route-dialog-header">
             <Dialog.Title>添加到渠道</Dialog.Title>
             <Dialog.Description>
               {group.name} · {group.source_name}
@@ -625,14 +727,13 @@ export function ConfiguredChannelDialog({
             >
               <X size={18} />
             </Dialog.Close>
-          </header>}
+          </header>
           <nav className="route-mode-tabs" aria-label="渠道接入视图">
             <button
               type="button"
               aria-pressed={!adding}
               disabled={busy}
               onClick={() => {
-                if (catalog && !modeChosen.current) return;
                 modeChosen.current = true;
                 setAdding(false);
                 setError("");
@@ -649,10 +750,6 @@ export function ConfiguredChannelDialog({
               disabled={busy}
               onClick={() => {
                 if (adding) return;
-                if (catalog) {
-                  if (modeChosen.current) setAdding(true);
-                  return;
-                }
                 modeChosen.current = true;
                 setAdding(true);
                 setEditingProvider("");
@@ -670,14 +767,10 @@ export function ConfiguredChannelDialog({
               }}
             >
               <Plus size={14} />
-              {catalog || (editingProvider && adding) ? "编辑接入" : "新增接入"}
+              {editingProvider && adding ? "编辑接入" : "新增接入"}
             </button>
           </nav>
-          <div className={catalog ? "channel-model-route-body" : "route-dialog-body"}>
-            {catalog && !adding && !modeChosen.current && itemRoutes &&
-              (itemRoutes.snapshot_consistent === false ||
-                (catalog.ownerKey ? itemRoutes.unavailable_keys?.includes(catalog.ownerKey) : !!itemRoutes.unavailable_keys?.length)) &&
-              renderModelAccess()}
+          <div className="route-dialog-body">
             {!adding && (
               <section
                 className="configured-source"
@@ -809,24 +902,7 @@ export function ConfiguredChannelDialog({
                               item,
                               candidates.filter((r) => r.provider === provider),
                             );
-                          else if (catalog) {
-                            setEditingProvider("");
-                            setDraftRevision(undefined);
-                            setSelected([]);
-                            setAliases([]);
-                            setKey(e.target.value);
-                            setPosition(1);
-                            setPerModel(true);
-                            setModelPositions({});
-                            setProtocolChoices({});
-                          }
                         } else {
-                          const existing = catalog && providerRoutes(itemRoutes?.data || [], [item.provider]).filter(r => r.api_key_id === e.target.value);
-                          if (existing && existing.length) {
-                            const provider = existing.find(r => r.origin_provider)?.provider || existing[0].provider;
-                            beginEdit(item, existing.filter(r => r.provider === provider));
-                            return;
-                          }
                           setKey(e.target.value);
                           setPosition(1);
                           setPerModel(false);
@@ -839,10 +915,9 @@ export function ConfiguredChannelDialog({
                         <option value="" disabled>{keyDirectory?.data ? keyDirectory.data.keys.length ? "选择 API key" : "暂无 API key" : keyDirectory?.isError ? "API key 加载失败" : "正在读取 API key…"}</option>
                       )}
                       {keyDirectory?.data?.keys
-                        .filter(k => !catalog?.ownerKey || k.key_id === catalog.ownerKey)
                         .filter(
                           (k) =>
-                            !!catalog || !editingProvider ||
+                            !editingProvider ||
                             providerRoutes(
                               routes[sources.indexOf(item.source_id)]?.data
                                 ?.data || [],
@@ -884,7 +959,7 @@ export function ConfiguredChannelDialog({
                   </label>
                 </div>
                 {!!key && options.isFetching && <LoadingIndicator size="compact" label="读取所选 API key 的路由位置" />}
-                {!catalog && mapping.models.length > 0 && <ModelPositions
+                {mapping.models.length > 0 && <ModelPositions
                   actions={batchButton("positions","路由位置")}
                   models={mapping.models}
                   channels={options.data?.channels || []}
@@ -895,19 +970,17 @@ export function ConfiguredChannelDialog({
                   disabled={busy || options.isFetching || options.isError || !options.data || !key || !perModel}
                   uniform={!perModel}
                 />}
-                {(catalog || protocolModels.length > 0) && options.data?.model_upstream_protocols &&
+                {protocolModels.length > 0 && options.data?.model_upstream_protocols &&
                   <ConfiguredModelProtocols key={JSON.stringify([item.source_id, key, editingProvider, options.data.revision])}
                     source={item.source_id} revision={options.data.revision} models={protocolModels}
                     saved={savedProtocols} choices={protocolChoices} suggested={suggestedProtocols}
                     onChange={(model, protocol) => setProtocolChoices(old => ({ ...old, [model]: protocol }))}
-                    disabled={busy || options.isFetching || options.isError} onDetecting={setDetecting}
-                    render={catalog ? renderModelAccess : undefined} />}
-                {catalog && !options.data?.model_upstream_protocols && renderModelAccess()}
+                    disabled={busy || options.isFetching || options.isError} onDetecting={setDetecting} />}
                 {protocolModels.length > 0 && options.data?.model_upstream_protocols === false &&
                   <p className="muted">该来源的 uni-api 尚不支持按模型设置上游端点，现有端点不变。</p>}
                 {editingProvider && Object.keys(protocolChoices).length > 0 &&
                   <p className="muted">端点设置只应用于当前 Key。请先保存，再执行跨渠道批量调整。</p>}
-                {!catalog && <ChannelModelSelection
+                {<ChannelModelSelection
                   models={modelOptions}
                   canSelect={canSelectModel}
                   selected={selected} onChange={setSelected} editing={!!editingProvider}
@@ -924,7 +997,7 @@ export function ConfiguredChannelDialog({
                     </>;
                   }}
                 />}
-                {!catalog && <ModelAliases
+                {<ModelAliases
                   actions={batchButton("aliases","模型重命名")}
                   models={modelOptions}
                   canSelect={canSelectModel}
@@ -950,40 +1023,16 @@ export function ConfiguredChannelDialog({
                   </button>
                   <button
                     className="button primary"
-                    disabled={
-                      busy || routePending || !canSaveModels ||
-                      detecting ||
-                      inventory.isPending ||
-                      toolDefaultsPending || toolDefaultsError ||
-                      options.isFetching ||
-                      options.isError ||
-                      !options.data ||
-                      !keyDirectory?.data?.keys.some(k => k.key_id === key) ||
-                      !options.data?.keys.some(k => k.key_id === key) ||
-                      mapping.models.some(
-                        (m) =>
-                          (activePositions[m] ??
-                            Math.min(position, positions)) >
-                          modelPositionLimit(
-                            m,
-                            options.data?.channels || [],
-                            editingProvider,
-                          ),
-                      ) ||
-                      !!mapping.error || invalidModels.length>0 || invalidProtocol || staleDraft ||
-                      !key ||
-                      !mapping.models.length
-                    }
+                    disabled={saveDisabled}
                   >
                     {busy ? <Spinner small /> : <Plus size={14} />}
-                    {catalog ? "应用接入变更" : editingProvider ? "保存更改" : "添加到渠道"}
+                    {editingProvider ? "保存更改" : "添加到渠道"}
                   </button>
                 </div>
               </form>
             )}
           </div>
   </>;
-  if (catalog) return <section className="channel-model-route-workspace" aria-label="当前 Key 的接入配置">{content}</section>;
   return (
     <Dialog.Root open onOpenChange={open => { if (!open && !busy) close(); }}>
       <Dialog.Portal>

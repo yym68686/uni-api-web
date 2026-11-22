@@ -144,7 +144,7 @@ async function mount() {
   );
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "渠道设置" }));
-  await screen.findByText("来源共享渠道");
+  await screen.findByRole("button", { name: "校验与预览" });
   return user;
 }
 it("keeps image removal off by default and previews only the requested removal rules", async () => {
@@ -196,7 +196,7 @@ it("leaves no pending changes when image removal is enabled then disabled", asyn
   const checkbox = screen.getByRole("checkbox", { name: "移除生图参数" });
   await user.click(checkbox);
   await user.click(checkbox);
-  expect(screen.getByText("已与来源同步")).toBeVisible();
+  expect(screen.getByRole("button", { name: "撤销修改" })).toBeDisabled();
   expect(writes).toHaveLength(0);
 });
 it("shows the gateway resolved engine for automatic settings without guessing from the URL", async () => {
@@ -212,9 +212,7 @@ it("shows the gateway resolved engine for automatic settings without guessing fr
     "https://other.example/v1/responses",
   );
   expect(
-    screen.getByRole("option", {
-      name: "自动识别（地址已修改，保存后重新判断）",
-    }),
+    screen.getByRole("option", { name: "自动识别" }),
   ).toBeVisible();
   expect(
     screen.queryByRole("option", { name: "自动识别（实际：claude）" }),
@@ -225,7 +223,7 @@ it("does not mislabel an unknown or explicit runtime engine as automatic", async
   catalog = [{ provider: "one", engine: "codex" }];
   await mount();
   expect(
-    await screen.findByRole("option", { name: "自动识别（实际引擎未返回）" }),
+    await screen.findByRole("option", { name: "自动识别" }),
   ).toBeVisible();
   expect(
     screen.queryByRole("option", { name: "自动识别（实际：codex）" }),
@@ -273,7 +271,7 @@ it("edits compaction request types without allowing contradictory checkboxes", a
 it("reset then edit applies the edited value over the base and never discards edits silently", async () => {
   const user = await mount();
   await user.click(screen.getByRole("button", { name: "恢复基础配置" }));
-  await screen.findByText("校验通过。请核对下方影响范围和差异。");
+  await waitFor(() => expect(screen.getByRole("button", {name:"保存并应用"})).toBeEnabled());
   await user.click(screen.getByRole("button", { name: "超时与冷却" }));
   const input = screen.getByLabelText("渠道冷却（秒）");
   await user.clear(input);
@@ -405,7 +403,7 @@ it("shows inherited current values without writing them back and removes only th
   await user.click(screen.getByRole("button", { name: "超时与冷却" }));
   const field = screen.getByLabelText("渠道冷却（秒）");
   expect(field).toHaveValue(42);
-  expect(screen.getByText("继承全局设置")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "渠道冷却（秒）：继承全局设置" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "校验与预览" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect((writes[0].changes as any[])[0]).toMatchObject({
@@ -415,7 +413,7 @@ it("shows inherited current values without writing them back and removes only th
   await user.clear(field);
   await user.type(field, "7");
   expect(field).toHaveValue(7);
-  expect(screen.getByText("渠道自定义")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "渠道冷却（秒）：继承全局设置" })).toBeEnabled();
   await user.click(
     screen.getByRole("button", { name: "渠道冷却（秒）：继承全局设置" }),
   );
