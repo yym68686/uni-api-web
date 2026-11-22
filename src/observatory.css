@@ -214,30 +214,6 @@
 .workspace .request-log-id {margin-top:3px;color:var(--accent);font-size:12px;overflow-wrap:anywhere}
 .workspace .request-logs-panel .workbench-popover .search-field {min-width:0;margin:0 0 7px}
 .workspace .request-log-window {padding:8px 0}
-.workspace .price-overview-table {width:100%;table-layout:fixed;border-spacing:0;background:var(--surface)}
-.workspace .price-overview-table :is(th,td) {
-  padding:9px 11px;border-bottom:1px solid var(--line);font-size:13px;text-align:right;overflow-wrap:anywhere;
-}
-.workspace .price-overview-table thead th {border-top:1px solid var(--line);background:var(--subtle);font-size:11px;color:var(--muted)}
-.workspace .price-overview-table :is(th,td):first-child {width:38%;text-align:left}
-.workspace .price-overview-table td {font-variant-numeric:tabular-nums}
-.workspace .price-overview-table tbody tr:hover {background:var(--subtle)}
-.workspace .price-model-open {display:block;padding:0;background:none;border:0;text-align:left;font-weight:650;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.workspace .price-overview-table :is(th,td) {white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.workspace .price-model-open:hover {color:var(--accent)}
-.workspace .price-overview-table small {display:block;color:var(--muted);font-size:11px;font-weight:400}
-.workspace .price-table-footer {padding:9px 0;border:0}
-.price-edit-dialog.connection-dialog {width:min(40rem,calc(100vw - 24px));max-height:90dvh;overflow:auto;border-radius:8px;padding:15px}
-.price-edit-dialog .price-field-unit {color:var(--muted);font-size:12px;margin-bottom:9px}
-.price-edit-dialog .price-table.price-edit-fields,.price-edit-dialog .price-edit-fields tbody {display:block;min-width:0;width:100%}
-.price-edit-dialog .price-edit-fields .price-table-row {
-  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:0;margin:0;
-}
-.price-edit-dialog .price-edit-fields :is(th,td) {display:block;position:static;min-width:0;padding:8px;font-size:12px}
-.price-edit-dialog .price-edit-fields .price-model-cell {grid-column:1/-1;border-right:0}
-.price-edit-dialog .price-edit-fields .price-save-cell {grid-column:1/-1;text-align:right}
-.price-edit-dialog .price-edit-fields td[data-label]::before {content:attr(data-label);display:block;text-align:left;color:var(--muted);margin-bottom:2px;font-size:11px}
-.price-edit-dialog .price-edit-fields .price-error-row {display:block}
 .sources-settings .source-item {display:grid;grid-template-columns:auto minmax(0,1fr) repeat(3,auto);padding:11px 9px;gap:8px;background:var(--surface)}
 .sources-settings .source-item > svg {color:var(--muted)}
 .sources-settings .source-item > .workbench-disclosure .workbench-popover {width:min(27rem,calc(100vw - 26px))}
@@ -502,11 +478,8 @@
   .workspace .workbench-disclosure > summary > svg:last-child {display:none}
   .workspace .workbench-popover .select-field select {max-width:65vw}
   .app-shell .workspace {padding-top:12px}
-  .workspace .price-reference-extra {display:none}
-  .price-edit-dialog .price-edit-fields .price-table-row {grid-template-columns:repeat(2,minmax(0,1fr))}
   .workspace .request-log-table :is(td,th) {padding-inline:6px;font-size:11px}
   .workspace .request-logs-panel .request-log-pagination {padding-inline:8px;gap:6px;flex-wrap:wrap}
-  .workspace .price-overview-table :is(th,td) {padding-inline:6px;font-size:12px}
   .sources-settings .source-item {column-gap:5px;padding-inline:6px}
   .workspace .request-logs-panel .workbench-tools .button {font-size:11px}
   .workspace .request-logs-panel .workbench-tools .button > svg:first-child {display:none}

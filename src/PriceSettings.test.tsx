@@ -34,9 +34,9 @@ it("shows official GPT 6.2 Standard prices and explains cache retention limits",
   expect(screen.getByRole('checkbox',{name:model+' 计算缓存写入费用'})).not.toBeChecked();
   expect(screen.getByLabelText(model+' 售卖价格百分比')).toHaveValue(2.5);
   expect(screen.getByRole('checkbox',{name:model+' 超过272k加价'})).toBeChecked();
-  expect(within(screen.getByLabelText(model+' 输入价格').closest('tr')!).getByText('官方参考价')).toBeVisible();
+  expect(within(screen.getByLabelText(model+' 输入价格').closest('form')!).getByText('官方参考价')).toBeVisible();
  }
- const sol=screen.getByLabelText('gpt-6.2-sol 输入价格').closest('tr')!;
+ const sol=screen.getByLabelText('gpt-6.2-sol 输入价格').closest('form')!;
  expect(within(sol).getByRole('button',{name:'采用参考价'})).toBeEnabled();
  await user.click(screen.getByRole('button',{name:'查看 gpt-6.2-sol 价格说明'}));
  const dialog=screen.getByRole('dialog',{name:'gpt-6.2-sol'});
@@ -57,7 +57,7 @@ it.each([
  for(const [label,value] of [['输入',input],['输出',output],['缓存读取',cacheRead]] as const){
   expect(screen.getByLabelText(`${model} ${label}价格`)).toHaveValue(value);
  }
- expect(within(screen.getByLabelText(model+' 输入价格').closest('tr')!).getAllByText('同输入')).toHaveLength(2);
+ expect(within(screen.getByLabelText(model+' 输入价格').closest('form')!).getByText(/缓存写入随输入单价/)).toBeVisible();
  expect(screen.getByRole('checkbox',{name:model+' 超过272k加价'})).not.toBeChecked();
  await user.click(screen.getByRole('button',{name:'查看 '+model+' 价格说明'}));
  const dialog=screen.getByRole('dialog',{name:model});
@@ -74,7 +74,7 @@ it('shows Carbon promotional pricing and its expiration without inventing cache 
  for(const [label,value] of [['输入',2],['输出',10],['缓存读取',.1]] as const){
   expect(screen.getByLabelText(`${model} ${label}价格`)).toHaveValue(value);
  }
- expect(within(screen.getByLabelText(model+' 输入价格').closest('tr')!).getAllByText('同输入')).toHaveLength(2);
+ expect(within(screen.getByLabelText(model+' 输入价格').closest('form')!).getByText(/缓存写入随输入单价/)).toBeVisible();
  await user.click(screen.getByRole('button',{name:'查看 '+model+' 价格说明'}));
  const dialog=within(screen.getByRole('dialog',{name:model}));
  expect(dialog.getByRole('link',{name:'查看官方价格来源'})).toHaveAttribute('href','https://ai.google.dev/gemini-api/docs/pricing#gemini-4-carbon');
@@ -156,7 +156,7 @@ it("defaults GPT write billing off and other models on, saves explicit choices w
     openEditor(model);
     const toggle = screen.getByRole("checkbox", { name: `${model} 计算缓存写入费用` });
     await user.click(toggle);
-    await user.click(within(toggle.closest("tr")!).getByRole("button", { name: "保存价格" }));
+    await user.click(within(toggle.closest("form")!).getByRole("button", { name: "保存价格" }));
   }
   await waitFor(() => expect(props.onSaved).toHaveBeenCalledTimes(2));
   expect(saved[0]).toMatchObject({ model: "gpt-6-astra", charge_cache_write: true, cache_write: 12.5, cache_read: 1 });
@@ -184,8 +184,8 @@ it("offers independent sales percentages with family defaults and persists decim
   for(const [model,value] of [["gpt-6-astra","0"],["claude-fable-5","18.75"],["gemini-3.1-pro","9"]]){
    openEditor(model);
    const input=screen.getByLabelText(`${model} 售卖价格百分比`);await user.clear(input);
-   expect(within(input.closest("tr")!).getByRole("button",{name:"保存价格"})).toBeDisabled();
-   await user.type(input,value);await user.click(within(input.closest("tr")!).getByRole("button",{name:"保存价格"}));
+   expect(within(input.closest("form")!).getByRole("button",{name:"保存价格"})).toBeDisabled();
+   await user.type(input,value);await user.click(within(input.closest("form")!).getByRole("button",{name:"保存价格"}));
   }
   await waitFor(()=>expect(props.onSaved).toHaveBeenCalledTimes(3));
   expect(saved.map(p=>p.sale_percent)).toEqual([0,18.75,9]);
@@ -202,6 +202,7 @@ it("keeps aligned table columns, searchable models and accessible pricing detail
   const props = { prices: [] as ModelPrice[], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
   render(<PriceSettings {...props} />);
   const table = screen.getByRole("table", { name: "模型价格" });
+  expect(screen.getByRole("button", { name: "编辑 gemini-4-argon" })).toHaveTextContent("编辑");
   expect(within(table).getAllByRole("columnheader")).toHaveLength(4);
   expect(within(table).getAllByRole("rowheader")).toHaveLength(MODEL_PRICE_CATALOG.length);
   for (const row of table.querySelectorAll("tbody tr")) expect(row.children).toHaveLength(4);
@@ -230,7 +231,43 @@ it("keeps aligned table columns, searchable models and accessible pricing detail
   expect(within(table).getByRole("cell")).toHaveTextContent("没有匹配的模型");
 });
 
-it("saves independent TTL prices and derived cache rates from the table", async () => {
+it("chooses price data columns in the filter, persists the choice and restores the defaults", async () => {
+  const key = "uni-console:price-columns:v1";
+  const props = { prices: [], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
+  const user = userEvent.setup();
+  const headers = () => within(screen.getByRole("table", { name: "模型价格" }))
+    .getAllByRole("columnheader").map(header => header.textContent);
+  const openColumns = async () => {
+    await user.click(screen.getByText("筛选", { selector: "summary" }));
+    await user.click(screen.getByText("数据列", { selector: "summary" }));
+  };
+  try {
+    const view = render(<PriceSettings {...props} />);
+    await openColumns();
+    await user.click(screen.getByRole("checkbox", { name: "输出" }));
+    await user.click(screen.getByRole("checkbox", { name: /缓存写入.*5 分钟/ }));
+    await user.click(screen.getByRole("checkbox", { name: /缓存写入.*1 小时/ }));
+    await user.click(screen.getByRole("checkbox", { name: "售卖比例" }));
+    const expected = ["模型", "输入", "缓存读取", "缓存写入 · 默认 / 5 分钟", "缓存写入 · 长时 / 1 小时", "售卖比例"];
+    expect(headers()).toEqual(expected);
+    const claudeRow = screen.getByRole("button", { name: "编辑 claude-opus-5-5" }).closest("tr")!;
+    expect(within(claudeRow).getAllByRole("cell").slice(2).map(cell => cell.textContent))
+      .toEqual(["$5", "$8", "15%"]);
+    view.unmount();
+    render(<PriceSettings {...props} />);
+    expect(headers()).toEqual(expected);
+    await openColumns();
+    for (const checkbox of screen.getAllByRole("checkbox", { checked: true })) await user.click(checkbox);
+    expect(headers()).toEqual(["模型"]);
+    expect(screen.getByRole("button", { name: "编辑 claude-opus-5-5" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "恢复默认列" }));
+    expect(headers()).toEqual(["模型", "输入", "输出", "缓存读取"]);
+  } finally {
+    localStorage.removeItem(key);
+  }
+});
+
+it("saves the grouped price fields including independent TTL rates and preserves derived cache rates", async () => {
   const saved: ModelPrice[] = [];
   vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
     const price = JSON.parse(init.body);
@@ -245,23 +282,30 @@ it("saves independent TTL prices and derived cache rates from the table", async 
     await user.type(input, value);
   };
   openEditor("claude-opus-5-5");
-  await edit("claude-opus-5-5 缓存写入 · 5 分钟价格", "6.25");
-  await edit("claude-opus-5-5 缓存写入 · 1 小时价格", "9.5");
+  const editor = within(screen.getByRole("dialog", { name: "claude-opus-5-5" }));
+  expect(editor.getByRole("group", { name: /基础单价/ })).toBeVisible();
+  expect(editor.getByRole("group", { name: /缓存单价/ })).toBeVisible();
+  expect(editor.getByRole("group", { name: "估算规则" })).toBeVisible();
+  expect(editor.getAllByRole("heading", { name: "claude-opus-5-5" })).toHaveLength(1);
+  for (const [label, value] of [["输入", "4.5"], ["输出", "21"], ["缓存读取", "0.35"],
+    ["缓存写入 · 5 分钟", "6.25"], ["缓存写入 · 1 小时", "9.5"]]) {
+    await edit(`claude-opus-5-5 ${label}价格`, value);
+  }
   await user.click(screen.getByLabelText("claude-opus-5-5 确认价格并用于估算"));
-  const claude = screen.getByLabelText("claude-opus-5-5 输入价格").closest("tr")!;
+  const claude = screen.getByLabelText("claude-opus-5-5 输入价格").closest("form")!;
   expect(claude).toHaveTextContent("未保存");
   await user.click(within(claude).getByRole("button", { name: "保存价格" }));
-  await waitFor(() => expect(saved[0]).toMatchObject({ model: "claude-opus-5-5", cache_write: 6.25, cache_write_1h: 9.5, verified: false }));
+  await waitFor(() => expect(saved[0]).toMatchObject({ model: "claude-opus-5-5", input: 4.5, output: 21, cache_read: .35, cache_write: 6.25, cache_write_1h: 9.5, verified: false }));
   expect(claude).not.toHaveTextContent("未保存");
   openEditor("grok-4.7");
   await edit("grok-4.7 输入价格", "3.25");
-  const grok = screen.getByLabelText("grok-4.7 输入价格").closest("tr")!;
-  expect(within(grok).getAllByText("同输入")).toHaveLength(2);
+  const grok = screen.getByLabelText("grok-4.7 输入价格").closest("form")!;
+  expect(within(grok).getByText(/缓存写入随输入单价/)).toBeVisible();
   await user.click(within(grok).getByRole("button", { name: "保存价格" }));
   await waitFor(() => expect(saved[1]).toMatchObject({ model: "grok-4.7", input: 3.25, cache_write: 3.25, cache_write_1h: 3.25 }));
 });
 
-it("keeps a failed save on its own row and leaves other prices editable", async () => {
+it("keeps the draft and failure inside the editor without affecting other models", async () => {
   let respond: (response: Response) => void = () => {};
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { respond = resolve; })));
   render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={vi.fn()} />);
@@ -269,12 +313,12 @@ it("keeps a failed save on its own row and leaves other prices editable", async 
   openEditor("grok-4.7");
   const input = screen.getByLabelText("grok-4.7 输入价格");
   await user.clear(input); await user.type(input, "3");
-  const row = input.closest("tr")!;
+  const row = input.closest("form")!;
   await user.click(within(row).getByRole("button", { name: "保存价格" }));
   expect(input).toBeDisabled();
   respond(new Response("保存暂不可用", { status: 503 }));
   expect(await screen.findByRole("alert")).toHaveTextContent("grok-4.7");
-  expect(row.nextElementSibling).toHaveClass("price-error-row");
+  expect(within(row).getByRole("alert")).toHaveTextContent("grok-4.7");
   expect(input).toHaveValue(3);
   expect(input).toBeEnabled();
   expect(row).toHaveTextContent("未保存");
@@ -299,7 +343,7 @@ it("uses catalog long-context defaults, persists independent toggles and can tur
   openEditor("gpt-6-sol");
   const toggle=screen.getByRole("checkbox",{name:"gpt-6-sol 超过272k加价"});
   await user.click(toggle);
-  await user.click(within(toggle.closest("tr")!).getByRole("button",{name:"保存价格"}));
+  await user.click(within(toggle.closest("form")!).getByRole("button",{name:"保存价格"}));
   await waitFor(()=>expect(props.onSaved).toHaveBeenCalledOnce());
   expect(saved[0]).toMatchObject({model:"gpt-6-sol",long_context_premium:true,input:2,output:10});
   view.unmount();
@@ -308,7 +352,7 @@ it("uses catalog long-context defaults, persists independent toggles and can tur
   const reloaded=screen.getByRole("checkbox",{name:"gpt-6-sol 超过272k加价"});
   expect(reloaded).toBeChecked();
   await user.click(reloaded);
-  await user.click(within(reloaded.closest("tr")!).getByRole("button",{name:"保存价格"}));
+  await user.click(within(reloaded.closest("form")!).getByRole("button",{name:"保存价格"}));
   await waitFor(()=>expect(saved[1]).toMatchObject({long_context_premium:false}));
 });
 
@@ -323,7 +367,7 @@ it("does not claim long-context settings were saved when the backend omits the f
   openEditor("gpt-6-sol");
   const toggle=screen.getByRole("checkbox",{name:"gpt-6-sol 超过272k加价"});
   await user.click(toggle);
-  await user.click(within(toggle.closest("tr")!).getByRole("button",{name:"保存价格"}));
+  await user.click(within(toggle.closest("form")!).getByRole("button",{name:"保存价格"}));
   expect(await screen.findByRole("alert")).toHaveTextContent("服务尚未确认长上下文加价设置");
   expect(onSaved).not.toHaveBeenCalled();
   expect(toggle).toBeChecked();
@@ -352,7 +396,7 @@ it("shows both Haiku prompt tiers, updates derived prices and preserves the poli
   const user = userEvent.setup();
   await user.type(screen.getByRole("textbox", { name: "搜索模型价格" }), "claude-haiku-5-5");
   openEditor("claude-haiku-5-5");
-  const row = screen.getByLabelText("claude-haiku-5-5 输入价格").closest("tr")!;
+  const row = screen.getByLabelText("claude-haiku-5-5 输入价格").closest("form")!;
   expect(row).toHaveTextContent("自动分档");
   expect(screen.queryByRole("checkbox", { name: "claude-haiku-5-5 超过272k加价" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("claude-haiku-5-5 输入价格")).toHaveValue(.1);
@@ -386,7 +430,7 @@ it("does not claim the automatic Haiku tier works against a backend that has not
   }));
   render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={onSaved} />);
   openEditor("claude-haiku-5-5");
-  const row = screen.getByLabelText("claude-haiku-5-5 输入价格").closest("tr")!;
+  const row = screen.getByLabelText("claude-haiku-5-5 输入价格").closest("form")!;
   await userEvent.setup().click(within(row).getByRole("button", { name: "采用参考价" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("服务尚未确认 100k 分档规则");
   expect(onSaved).not.toHaveBeenCalled();
@@ -410,6 +454,6 @@ it("preserves a draft across searches and renders confirmed prices read-only on 
   view.rerender(<PriceSettings {...props} error="读取失败" />);
   expect(restored).toBeDisabled();
   expect(screen.getByText(/参考价只读/)).toBeInTheDocument();
-  expect(within(restored.closest("tr")!).getByRole("button", { name: "保存价格" })).toBeDisabled();
+  expect(within(restored.closest("form")!).getByRole("button", { name: "保存价格" })).toBeDisabled();
 });
 import * as Tooltip from "@radix-ui/react-tooltip";
