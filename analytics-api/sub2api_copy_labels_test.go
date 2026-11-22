@@ -143,7 +143,7 @@ func TestConfiguredCopyDisplayLabelsRequireExactIdentityEvidence(t *testing.T) {
 			case "custom_provider":
 				b.Provider = "custom-name"
 			}
-			got := configuredCopyDisplayLabels(source, map[string]string{b.Provider: key}, []configuredDisplayIdentity{a, b}, nil)
+			got := configuredCopyDisplayLabels(source, map[string][]string{b.Provider: {key}}, []configuredDisplayIdentity{a, b}, nil)
 			if got[b.Provider] != want {
 				t.Fatalf("labels = %v, want %q", got, want)
 			}
@@ -170,30 +170,47 @@ func TestManagementCopyNameUsesLiveIdentityAndRetiredOriginWithoutBinding(t *tes
 	copy := native
 	copy.Provider, copy.Temporary = copyID, true
 	for _, tc := range []struct {
-		name, want                   string
-		missingKey, changed, rotated bool
+		name, origin, base, want      string
+		missingKey, promoted, rotated bool
 	}{
 		{name: "matching live copy", want: origin},
+		{name: "promoted copy with historical origin", want: origin, promoted: true},
+		{name: "promoted copy predating inventory", origin: "other-origin", base: "https://api.other-origin.test/v1", want: "other-origin", promoted: true},
+		{name: "unrelated hostname isn't proof", origin: "missing-origin", base: "https://api.other-origin.test/v1", promoted: true},
 		{name: "missing caller", want: copyID, missingKey: true},
-		{name: "changed definition", want: copyID, changed: true},
 		{name: "rotated upstream credential", want: copyID, rotated: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			live := copy
+			want := tc.want
+			if tc.origin != "" {
+				live.Provider = configuredImportName(tc.origin, caller)
+			}
+			if tc.base != "" {
+				live.Base = tc.base
+			}
+			if want == "" {
+				want = live.Provider
+			}
 			if tc.rotated {
 				live.API = "different-key"
 			}
+			live.Temporary = !tc.promoted
 			facts := managementGatewayFacts{Source: src, Providers: []configuredProvider{live},
-				Catalog: []managementModel{{Provider: copyID, Model: model, Engine: "gpt"}},
-				Controls: map[string]any{"temporary_channels": []any{map[string]any{
-					"provider": copyID, "api_key_id": caller, "identity_changed": tc.changed, "models": []string{model},
-				}}},
+				Catalog: []managementModel{{Provider: live.Provider, Model: model, Engine: "gpt"}},
 			}
+			if live.Temporary {
+				facts.Controls = map[string]any{"temporary_channels": []any{map[string]any{
+					"provider": live.Provider, "api_key_id": caller, "models": []string{model},
+				}}}
+			}
+			var keys []string
 			if !tc.missingKey {
+				keys = []string{"another-key", caller}
 				facts.Keys = []managementGatewayKey{{ID: caller, Position: 1}}
 				facts.Routes = map[string][]managementModel{caller: facts.Catalog}
 			}
-			labels, err := readManagementCopyLabels(ctx, s.control.db, src, managementSnapshotFromFacts(facts))
+			labels, err := readManagementCopyLabels(ctx, s.control.db, src, managementSnapshotFromFacts(facts), keys)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -206,12 +223,12 @@ func TestManagementCopyNameUsesLiveIdentityAndRetiredOriginWithoutBinding(t *tes
 				t.Fatalf("management rows=%d err=%v", len(rows), err)
 			}
 			row := rows[0]
-			if row.Configured == nil || row.Target.Name != tc.want || row.Configured.Name != tc.want || row.Target.Channel != copyID || len(row.AccountIDs) != 0 || len(view.Input.Imports) != 0 {
-				t.Fatalf("expected a display-only name %q, got %#v", tc.want, row.Target)
+			if row.Configured == nil || row.Target.Name != want || row.Configured.Name != want || row.Target.Channel != live.Provider || len(row.AccountIDs) != 0 || len(view.Input.Imports) != 0 {
+				t.Fatalf("expected a display-only name %q, got %#v", want, row.Target)
 			}
-			if tc.want == origin {
-				filtered := filterManagementQueryRows(rows, managementQueryFilters{Search: origin, GroupStatus: "all", AccountID: "__unassigned__"}, managementFilterEvidence{})
-				if len(filtered.Rows) != 1 || view.Input.Routes[src.ID].Data[0].Provider != copyID || view.Input.Routes[src.ID].Data[0].OriginProvider != "" {
+			if want != live.Provider {
+				filtered := filterManagementQueryRows(rows, managementQueryFilters{Search: want, GroupStatus: "all", AccountID: "__unassigned__"}, managementFilterEvidence{})
+				if len(filtered.Rows) != 1 || view.Input.Routes[src.ID].Data[0].Provider != live.Provider || view.Input.Routes[src.ID].Data[0].OriginProvider != "" {
 					t.Fatal("expected search by label without changing routing")
 				}
 			}

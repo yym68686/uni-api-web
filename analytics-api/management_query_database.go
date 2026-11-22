@@ -81,7 +81,11 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 			return out, err
 		}
 		out.EngineOrigins[source.Source.ID] = origins
-		labels, err := readManagementCopyLabels(ctx, db, source.Source, managementSnapshotFromFacts(source))
+		keys := make([]string, 0, len(source.Keys))
+		for _, key := range source.Keys {
+			keys = append(keys, key.ID)
+		}
+		labels, err := readManagementCopyLabels(ctx, db, source.Source, managementSnapshotFromFacts(source), keys)
 		if err != nil {
 			return out, err
 		}

@@ -190,7 +190,17 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 			}
 			var copyLabels map[string]string
 			if e == nil {
-				copyLabels, _ = readManagementCopyLabels(ctx, s.control.db, src, snapshot)
+				var keys []string
+				for _, row := range snapshot.Rows {
+					if !snapshot.Copies[row.Provider] && isConfiguredCopyID(row.Provider) {
+						directory, _ := s.savedImportKeys(ctx, src)
+						for _, key := range directory {
+							keys = append(keys, key.ID)
+						}
+						break
+					}
+				}
+				copyLabels, _ = readManagementCopyLabels(ctx, s.control.db, src, snapshot, keys)
 			}
 			mu.Lock()
 			defer mu.Unlock()

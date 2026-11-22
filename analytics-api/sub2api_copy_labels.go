@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -11,6 +13,11 @@ type configuredDisplayIdentity struct {
 	Provider, Site, Fingerprint string
 	Hashes                      []string
 	Active                      bool
+}
+
+func isConfiguredCopyID(provider string) bool {
+	const prefix = "sub2api-copy-"
+	return len(provider) == len(prefix)+20 && strings.HasPrefix(provider, prefix)
 }
 
 // A caller-owned copy may outlive its native provider's catalog entry. Retired
@@ -22,31 +29,43 @@ func (s *Service) observationCopyLabels(ctx context.Context, src controlSource, 
 	for _, key := range keys {
 		callers[key] = key != ""
 	}
-	labels, _ := readConfiguredCopyLabels(ctx, s.control.db, src, configuredCopyCallers(state, callers), nil)
+	wanted := map[string][]string{}
+	for provider, key := range configuredCopyCallers(state, callers) {
+		wanted[provider] = []string{key}
+	}
+	labels, _ := readConfiguredCopyLabels(ctx, s.control.db, src, wanted, nil)
 	return labels // Optional presentation metadata must not break the listing.
 }
 
 func configuredCopyCallers(state subGatewayControls, callers map[string]bool) map[string]string {
 	wanted := map[string]string{}
 	for _, channel := range state.Temporary {
-		if !channel.IdentityChanged && channel.KeyID != "" && (callers == nil || callers[channel.KeyID]) && strings.HasPrefix(channel.Provider, "sub2api-copy-") {
+		if !channel.IdentityChanged && channel.KeyID != "" && (callers == nil || callers[channel.KeyID]) && isConfiguredCopyID(channel.Provider) {
 			wanted[channel.Provider] = channel.KeyID
 		}
 	}
 	return wanted
 }
 
-func readManagementCopyLabels(ctx context.Context, db controlQueryDB, src controlSource, snapshot managementSnapshot) (map[string]string, error) {
-	wanted := map[string]string{}
-	for provider, key := range snapshot.CopyKeys {
-		if !snapshot.Copies[provider] && snapshot.Providers[provider].Fingerprint != "" {
-			wanted[provider] = key
+func readManagementCopyLabels(ctx context.Context, db controlQueryDB, src controlSource, snapshot managementSnapshot, keys []string) (map[string]string, error) {
+	wanted := map[string][]string{}
+	for _, row := range snapshot.Rows {
+		provider := row.Provider
+		if !isConfiguredCopyID(provider) || snapshot.Copies[provider] || snapshot.Providers[provider].Fingerprint == "" {
+			continue
+		}
+		if key := snapshot.CopyKeys[provider]; key != "" {
+			wanted[provider] = []string{key}
+		} else if len(keys) > 0 {
+			// Promoted definitions no longer appear in temporary_channels.
+			// Their generated ID can still prove an origin for a source key.
+			wanted[provider] = keys
 		}
 	}
 	return readConfiguredCopyLabels(ctx, db, src, wanted, snapshot.Providers)
 }
 
-func readConfiguredCopyLabels(ctx context.Context, db controlQueryDB, src controlSource, wanted map[string]string, live map[string]managementProvider) (map[string]string, error) {
+func readConfiguredCopyLabels(ctx context.Context, db controlQueryDB, src controlSource, wanted map[string][]string, live map[string]managementProvider) (map[string]string, error) {
 	if len(wanted) == 0 {
 		return nil, nil
 	}
@@ -73,10 +92,12 @@ func readConfiguredCopyLabels(ctx context.Context, db controlQueryDB, src contro
 	return configuredCopyDisplayLabels(src, wanted, identities, live), nil
 }
 
-func configuredCopyDisplayLabels(src controlSource, wanted map[string]string, identities []configuredDisplayIdentity, live map[string]managementProvider) map[string]string {
+func configuredCopyDisplayLabels(src controlSource, wanted map[string][]string, identities []configuredDisplayIdentity, live map[string]managementProvider) map[string]string {
 	target := controlTarget(src)
 	verified := map[string]configuredDisplayIdentity{}
+	known := map[string]bool{}
 	for _, item := range identities {
+		known[item.Provider] = true
 		if item.Provider == "" || item.Site == "" || len(item.Hashes) == 0 {
 			continue
 		}
@@ -87,12 +108,23 @@ func configuredCopyDisplayLabels(src controlSource, wanted map[string]string, id
 	}
 	labels := map[string]string{}
 	ambiguous := map[string]bool{}
+	add := func(provider, label string) {
+		if previous, exists := labels[provider]; exists && previous != label {
+			ambiguous[provider] = true
+		}
+		labels[provider] = label
+	}
+	matches := func(copyID, origin string, keys []string) bool {
+		return slices.ContainsFunc(keys, func(key string) bool {
+			return key != "" && copyID == configuredImportName(origin, key)
+		})
+	}
 	for _, origin := range verified {
 		if generatedSubProvider(origin.Provider) {
 			continue // Do not replace one generated ID with another.
 		}
-		for copyID, key := range wanted {
-			if key == "" || copyID != configuredImportName(origin.Provider, key) {
+		for copyID, keys := range wanted {
+			if !matches(copyID, origin.Provider, keys) {
 				continue
 			}
 			if live != nil {
@@ -109,10 +141,27 @@ func configuredCopyDisplayLabels(src controlSource, wanted map[string]string, id
 					continue
 				}
 			}
-			if previous, exists := labels[copyID]; exists && previous != origin.Provider {
-				ambiguous[copyID] = true
+			add(copyID, origin.Provider)
+		}
+	}
+	if live != nil {
+		for provider, keys := range wanted {
+			if labels[provider] != "" {
+				continue
 			}
-			labels[copyID] = origin.Provider
+			// Old copies may predate inventory. A DNS label is only evidence
+			// when it reproduces the exact ID with a key on this same source.
+			// Never use it to override contrary recorded credentials.
+			u, err := url.Parse(live[provider].Base)
+			if err != nil || net.ParseIP(u.Hostname()) != nil {
+				continue
+			}
+			parts := strings.Split(strings.TrimSuffix(strings.ToLower(u.Hostname()), "."), ".")
+			for _, name := range parts[:len(parts)-1] {
+				if name != "" && !known[name] && matches(provider, name, keys) {
+					add(provider, name)
+				}
+			}
 		}
 	}
 	for provider := range ambiguous {
