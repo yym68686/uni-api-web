@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -61,13 +60,12 @@ func (s *Service) newAPICreateOwnedKey(ctx context.Context, account, base, job, 
 	saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err == nil {
-		if strings.HasPrefix(name, "uni-console-check-"+account+"-") {
-			if _, saveErr := s.control.db.ExecContext(saveCtx, `UPDATE console_site_key_creates
+		if _, saveErr := s.control.db.ExecContext(saveCtx, `UPDATE console_site_key_creates
  SET acknowledged_at=clock_timestamp(),acknowledged_base=$4 WHERE account_id=$1 AND name=$2 AND created_at=$3`,
-				account, name, intent, base); saveErr != nil {
-				// The key can still be used, but an unproven key is not eligible for automatic reclamation.
-				log.Printf("event=site_test_key_ownership_ack_failed class=%s", databaseErrorClass(saveErr))
-			}
+			account, name, intent, base); saveErr != nil {
+			// Without a recorded acknowledgement the intent remains uncertain.
+			// Only acknowledged test-key names can qualify for reclamation.
+			log.Printf("event=site_key_create_ack_failed class=%s", databaseErrorClass(saveErr))
 		}
 		if _, saveErr := s.control.db.ExecContext(saveCtx, `UPDATE console_site_detection_limits
  SET create_rate_failures=0 WHERE scope=$1 AND create_rate_failures<>0`, scope); saveErr != nil {
@@ -75,7 +73,16 @@ func (s *Service) newAPICreateOwnedKey(ctx context.Context, account, base, job, 
 		}
 		return nil
 	}
-	if !errors.As(err, &remote) || remote.Status < 400 || remote.Status >= 500 {
+	if !errors.As(err, &remote) || remote.Status < 400 || remote.Status >= 500 || remote.Status == http.StatusRequestTimeout {
+		class, status := "response_unusable", 0
+		if remote != nil {
+			class, status = "ambiguous_http", remote.upstreamHTTPStatus
+		} else if ctx.Err() != nil {
+			class = "context_done"
+		} else if errors.Is(err, errNewAPIResponseUncertain) {
+			class = "transport"
+		}
+		log.Printf("event=newapi_key_create_uncertain class=%s upstream_http_status=%d request_id=%q", class, status, consoleRequestID(ctx))
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

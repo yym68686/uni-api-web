@@ -51,6 +51,8 @@ func detectSite(ctx context.Context, base string) (string, error) {
 	return "sub2api", nil
 }
 
+var errNewAPIResponseUncertain = errors.New("无法确认站点响应，请重新同步核对")
+
 // Cookie values are encrypted with the account auth. No shared cookie jar and
 // no redirects: cookies/bearer credentials can only reach this exact site.
 func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, body, out any) error {
@@ -89,7 +91,7 @@ func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, b
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return errors.New("无法确认站点响应，请重新同步核对")
+		return errNewAPIResponseUncertain
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))

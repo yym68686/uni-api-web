@@ -290,39 +290,71 @@ func (s *Service) newAPIReadTokenInventory(ctx context.Context, account, base st
 }
 
 func (s *Service) newAPIEnsureKey(ctx context.Context, account, base, name string, group int64) (subRemoteKey, error) {
-	if len(name) > 50 || !(name == subKeyName(account, group) || name == "uni-console-route-"+account+"-"+strconv.FormatInt(group, 10)) {
+	routing := name == "uni-console-route-"+account+"-"+strconv.FormatInt(group, 10)
+	if len(name) > 50 || !(name == subKeyName(account, group) || routing) {
 		return subRemoteKey{}, errors.New("专用 key 名称无效")
 	}
 	var remote string
 	if err := s.control.db.QueryRowContext(ctx, `SELECT remote_key FROM console_site_groups WHERE account_id=$1 AND id=$2`, account, group).Scan(&remote); err != nil {
 		return subRemoteKey{}, errors.New("分组不存在")
 	}
-	find := func() (subRemoteKey, bool, error) {
-		var found subRemoteKey
-		progress := keyPageProgress{}
-		for page := 1; ; page++ {
-			list, total, e := s.newAPIKeys(ctx, account, base, name, page)
-			if e != nil {
-				return found, false, e
-			}
-			if e = progress.advance(list); e != nil {
-				return found, false, e
-			}
-			for _, key := range list {
-				if key.Name == name {
-					if key.GroupID != group || (found.ID != 0 && found.ID != key.ID) {
-						return found, false, errors.New("同名专用 key 的分组不匹配或重复，请在原站核对")
-					}
-					found = key
-				}
-			}
-			if len(list) == 0 || (total > 0 && len(progress) >= total) || (total == 0 && len(list) < 100) {
-				return found, found.ID > 0, nil
-			}
+	find := func(readCtx context.Context) (newAPIToken, error) {
+		// A prefix match can be a different group's key (e.g. -4 vs -42).
+		// Decide existence and uniqueness from a complete metadata inventory
+		// before reading any secret or concluding it is safe to create.
+		tokens, err := s.newAPIReadTokenInventory(readCtx, account, base, true)
+		if err != nil {
+			return newAPIToken{}, err
 		}
+		var found newAPIToken
+		for _, token := range tokens {
+			if token.Name != name {
+				continue
+			}
+			if found.ID != 0 || (token.Group != "" && token.Group != remote) {
+				return newAPIToken{}, errors.New("同名专用 key 的分组不匹配或重复，请在原站核对")
+			}
+			found = token
+		}
+		return found, nil
 	}
-	if key, ok, e := find(); e != nil || ok {
-		return key, e
+	readKey := func(token newAPIToken) (subRemoteKey, error) {
+		if token.Group == "" {
+			// Resolve the upstream's implicit default group without revealing it.
+			metadata, err := s.newAPINormalizeKey(ctx, account, base, token, false)
+			if err != nil {
+				return subRemoteKey{}, err
+			}
+			if metadata.GroupID != group {
+				return subRemoteKey{}, errors.New("同名专用 key 的分组不匹配，请在原站核对")
+			}
+			token.Group = remote
+		}
+		if routing && (token.Status != 1 || token.Expires > 0 && !time.Unix(token.Expires, 0).After(time.Now())) {
+			return subRemoteKey{}, errors.New("专用业务 key 已失效，请在上游恢复后重试")
+		}
+		key, err := s.newAPINormalizeKey(ctx, account, base, token, true)
+		if err != nil && routing {
+			return subRemoteKey{}, fmt.Errorf("已找到同名专用业务 key，但读取失败：%w", err)
+		}
+		return key, err
+	}
+	if token, err := find(ctx); err != nil {
+		return subRemoteKey{}, err
+	} else if token.ID > 0 {
+		return readKey(token)
+	}
+
+	// A prior attempt needs only verification, not a new write reservation.
+	// The INSERT in newAPICreateOwnedKey still fences simultaneous attempts.
+	var acknowledged bool
+	err := s.control.db.QueryRowContext(ctx, `SELECT acknowledged_at IS NOT NULL AND acknowledged_base=$3
+ FROM console_site_key_creates WHERE account_id=$1 AND name=$2`, account, name, base).Scan(&acknowledged)
+	if err == nil {
+		return subRemoteKey{}, newAPIDedicatedKeyPending(routing, acknowledged, errNewAPIKeyCreatePending)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return subRemoteKey{}, err
 	}
 	// Refresh/validate before mutation; never retry a POST on authentication or
 	// network uncertainty. Persist intent first, so crashes cannot duplicate keys.
@@ -331,19 +363,69 @@ func (s *Service) newAPIEnsureKey(ctx context.Context, account, base, name strin
 		return subRemoteKey{}, err
 	}
 	job, _ := ctx.Value(newAPIKeyJobContext{}).(string)
-	err := s.newAPICreateWithReclaim(ctx, account, base, job, name, remote)
-	var upstream *subRemoteError
-	if err != nil && !errors.Is(err, errNewAPIKeyCreateUnconfirmed) && !errors.As(err, &upstream) {
+	err = s.newAPICreateWithReclaim(ctx, account, base, job, name, remote)
+	if err != nil && !errors.Is(err, errNewAPIKeyCreateUnconfirmed) && !errors.Is(err, errNewAPIKeyCreatePending) {
+		// Confirmed rejections (including limits) should keep their own error.
 		return subRemoteKey{}, err
 	}
-	if key, ok, e := find(); e == nil && ok {
-		return key, nil
+	acknowledged = err == nil
+	if acknowledged {
+		err = errNewAPIKeyCreateUnconfirmed
 	}
-	if upstream != nil {
-		return subRemoteKey{}, err
+	// Creation acknowledgement is not necessarily read-after-write visibility.
+	// Bound confirmation separately from key reveal and route application, and
+	// never issue a second create on an ambiguous or successful response.
+	confirmCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	var inventoryErr error
+	for _, delay := range []time.Duration{0, 350 * time.Millisecond, time.Second} {
+		if !waitStartup(confirmCtx, delay) {
+			break
+		}
+		token, readErr := find(confirmCtx)
+		inventoryErr = readErr
+		if readErr != nil {
+			var upstream *subRemoteError
+			if errors.Is(readErr, errNewAPIResponseUncertain) || (errors.As(readErr, &upstream) && upstream.Status >= 500 && upstream.RetryAfter == 0 && !upstream.requiresBrowser()) {
+				continue // Transient read error; do not replay a write or bypass a server cooldown.
+			}
+			break
+		}
+		if token.ID > 0 {
+			return readKey(token)
+		}
 	}
-	return subRemoteKey{}, errNewAPIKeyCreateUnconfirmed
+	if inventoryErr != nil {
+		if routing {
+			state := "专用业务 key 的创建结果尚未确认"
+			if acknowledged {
+				state = "站点已确认创建专用业务 key"
+			}
+			return subRemoteKey{}, fmt.Errorf("%s，但核对令牌列表失败：%w；重新提交会先核对，不会重复创建", state, inventoryErr)
+		}
+		return subRemoteKey{}, inventoryErr
+	}
+	return subRemoteKey{}, newAPIDedicatedKeyPending(routing, acknowledged, err)
 }
+
+func newAPIDedicatedKeyPending(routing, acknowledged bool, cause error) error {
+	if !routing {
+		return cause
+	}
+	if acknowledged {
+		return &newAPIRouteKeyPending{cause, "站点已确认创建专用业务 key，但暂未在列表找到；请恢复添加配置后重试，不会重复创建"}
+	}
+	return &newAPIRouteKeyPending{cause, "专用业务 key 的创建结果尚未确认；请恢复添加配置后重试，系统会先核对，不会重复创建"}
+}
+
+type newAPIRouteKeyPending struct {
+	cause   error
+	message string
+}
+
+func (e *newAPIRouteKeyPending) Error() string { return e.message }
+func (e *newAPIRouteKeyPending) Unwrap() error { return e.cause }
+
 func (s *Service) newAPIAdapterCall(ctx context.Context, account, base, method, path string, body, out any) error {
 	u, err := url.Parse(path)
 	if err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -177,7 +178,7 @@ func TestNewAPIKeyInventoryFiltersBeforeRevealingAndPaginatesMatches(t *testing.
 }
 
 func TestNewAPIEnsureKeyDoesNotCreateAfterIncompleteInventory(t *testing.T) {
-	for _, failure := range []string{"repeated_page", "rate_limit", "invalid_identity"} {
+	for _, failure := range []string{"repeated_page", "rate_limit", "invalid_identity", "premature_empty_page"} {
 		t.Run(failure, func(t *testing.T) {
 			s, account, _ := newAPITestService(t)
 			ctx := context.Background()
@@ -195,6 +196,10 @@ func TestNewAPIEnsureKeyDoesNotCreateAfterIncompleteInventory(t *testing.T) {
 					w.WriteHeader(http.StatusTooManyRequests)
 					return
 				}
+				if failure == "premature_empty_page" {
+					newAPIOK(w, map[string]any{"items": []newAPIToken{}, "total": 2})
+					return
+				}
 				id := int64(1)
 				if failure == "invalid_identity" {
 					id = 0
@@ -208,6 +213,102 @@ func TestNewAPIEnsureKeyDoesNotCreateAfterIncompleteInventory(t *testing.T) {
 			var intents int
 			if err := s.control.db.QueryRow(`SELECT count(*) FROM console_site_key_creates WHERE account_id=$1`, account).Scan(&intents); err != nil || intents != 0 {
 				t.Fatalf("partial inventory claimed creation: count=%d err=%v", intents, err)
+			}
+		})
+	}
+}
+
+func TestNewAPIRouteKeyRetriesOnlyReadsAfterCreation(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		createResponse int
+		acknowledged   bool
+	}{
+		{"acknowledged", 200, true},
+		{"unrecognized_response", 202, false},
+		{"request_timeout", 408, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, account, _ := newAPITestService(t)
+			ctx := context.Background()
+			const base, remoteGroup = "https://usage.example", "gemini-稳定4"
+			group, err := s.newAPIGroupID(ctx, account, remoteGroup)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := fmt.Sprintf("uni-console-route-%s-%d", account, group)
+			creates, lists, revealStatus := 0, 0, 0
+			visible := false
+			var mu sync.Mutex
+			withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				switch {
+				case r.URL.Path == "/api/user/self":
+					newAPIOK(w, newAPIUser{ID: 7})
+				case r.URL.Path == "/api/token/" && r.Method == "POST":
+					creates++
+					if tc.acknowledged {
+						newAPIOK(w, nil)
+					} else {
+						w.WriteHeader(tc.createResponse)
+					}
+				case r.URL.Path == "/api/token/" && r.Method == "GET":
+					lists++
+					items := []newAPIToken{}
+					if visible {
+						items = append(items, newAPIToken{ID: 61, UserID: 7, Name: name, Group: remoteGroup, Status: 1, Key: "sk-****"})
+					}
+					newAPIOK(w, map[string]any{"items": items, "total": len(items)})
+				case r.URL.Path == "/api/token/61/key" && r.Method == "POST":
+					if revealStatus != 0 {
+						w.WriteHeader(revealStatus)
+						return
+					}
+					newAPIOK(w, map[string]string{"key": "fixture-business"})
+				default:
+					t.Error("unexpected upstream request", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			ensure := func() (subRemoteKey, error) { return s.newAPIEnsureKey(ctx, account, base, name, group) }
+			_, err = ensure()
+			if !errors.Is(err, errNewAPIKeyCreateUnconfirmed) || !strings.Contains(err.Error(), "恢复添加配置") || strings.Contains(err.Error(), "站点已确认创建") != tc.acknowledged {
+				t.Fatalf("wrong receipt for missing token: %v", err)
+			}
+			mu.Lock()
+			if creates != 1 || lists != 4 {
+				t.Errorf("creates=%d lists=%d; want one POST, one preflight and three verification reads", creates, lists)
+			}
+			mu.Unlock()
+			// Verification of a durable intent should work even if the shared
+			// creation budget is currently blocked by an unrelated rejection.
+			if _, err := s.control.db.Exec(`UPDATE console_site_detection_limits SET retry_at=now()+interval '1 minute' WHERE scope=$1`, newAPIKeyCreateScope(base)); err != nil {
+				t.Fatal(err)
+			}
+			_, err = ensure()
+			if !errors.Is(err, errNewAPIKeyCreatePending) || strings.Contains(err.Error(), "站点已确认创建") != tc.acknowledged {
+				t.Fatalf("wrong receipt for an existing intent: %v", err)
+			}
+			mu.Lock()
+			visible, revealStatus = true, http.StatusForbidden
+			mu.Unlock()
+			_, err = ensure()
+			var remote *subRemoteError
+			if !errors.As(err, &remote) || remote.Status != http.StatusForbidden || !strings.Contains(err.Error(), "读取失败") {
+				t.Fatalf("secret read failure disguised as an uncertain POST: %v", err)
+			}
+			mu.Lock()
+			revealStatus = 0
+			mu.Unlock()
+			key, err := ensure()
+			if err != nil || key.Key != "sk-fixture-business" || key.ID != 61 || key.GroupID != group {
+				t.Fatalf("existing credential not recovered: id=%d err=%v", key.ID, err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if creates != 1 {
+				t.Fatalf("recovery repeated POST: %d", creates)
 			}
 		})
 	}

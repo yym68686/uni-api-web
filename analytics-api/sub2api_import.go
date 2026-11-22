@@ -264,9 +264,9 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	in.Protocols = protocols
 	// Claim account to serialize refresh-token rotation, key creation and stop.
 	job := randomID()
-	var base, auth string
+	var base, auth, providerKind string
 	var synced int64
-	err = s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$3,job_kind='import',lease_until=now()+interval '90 seconds',message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('running','queued') RETURNING base,encrypted_auth,synced_at`, in.AccountID, owner, job).Scan(&base, &auth, &synced)
+	err = s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$3,job_kind='import',lease_until=now()+interval '90 seconds',message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('running','queued') RETURNING base,encrypted_auth,synced_at,provider_kind`, in.AccountID, owner, job).Scan(&base, &auth, &synced, &providerKind)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			subImportAccountError(w, err)
@@ -327,11 +327,18 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	routeName := "uni-console-route-" + in.AccountID + "-" + strconv.FormatInt(in.GroupID, 10)
 	var routeKey subRemoteKey
+	ensureRouteKey := func() error {
+		return call("POST", "/api/v1/keys", map[string]any{"name": routeName, "group_id": in.GroupID}, &routeKey, "route-"+in.AccountID+"-"+strconv.FormatInt(in.GroupID, 10))
+	}
 	if storedKey != "" {
 		// Read the dedicated upstream record, so revoked/disabled keys cannot be silently imported.
 		var remoteID int64
 		s.control.db.QueryRowContext(ctx, `SELECT routing_key_id FROM console_sub_targets WHERE account_id=$1 AND group_id=$2`, in.AccountID, in.GroupID).Scan(&remoteID)
 		err = call("GET", "/api/v1/keys/"+strconv.FormatInt(remoteID, 10), nil, &routeKey, "")
+	} else if providerKind == "newapi" {
+		// New API's adapter atomically fences creation and looks up the exact
+		// business key first; a prefix search needlessly reveals sibling keys.
+		err = ensureRouteKey()
 	} else {
 		progress := keyPageProgress{}
 		for page := 1; ; page++ {
@@ -357,7 +364,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err == nil && routeKey.ID == 0 {
-			err = call("POST", "/api/v1/keys", map[string]any{"name": routeName, "group_id": in.GroupID}, &routeKey, "route-"+in.AccountID+"-"+strconv.FormatInt(in.GroupID, 10))
+			err = ensureRouteKey()
 		}
 	}
 	if err != nil {

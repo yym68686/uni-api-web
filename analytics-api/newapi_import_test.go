@@ -29,7 +29,7 @@ func TestNewAPIImportReportsTokenLimitThenAppliesExactlyOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	groupsRead, creates, reveals, applies := 0, 0, 0, 0
+	groupsRead, creates, reveals, applies, afterCreateLists := 0, 0, 0, 0, 0
 	routeName := "uni-console-route-" + account + "-" + fmt.Sprint(group)
 	var created newAPIToken
 	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -45,9 +45,19 @@ func TestNewAPIImportReportsTokenLimitThenAppliesExactlyOnce(t *testing.T) {
 		case r.URL.Path == "/api/user/self":
 			newAPIOK(w, map[string]any{"id": 7, "username": "fixture"})
 		case r.URL.Path == "/api/token/" && r.Method == "GET":
-			tokens := []newAPIToken{{ID: 42, UserID: 7, Name: subKeyName(account, group), Group: "中转pro分组", Status: 1, Key: "sk-****"}}
+			tokens := []newAPIToken{
+				{ID: 42, UserID: 7, Name: subKeyName(account, group), Group: "中转pro分组", Status: 1, Key: "sk-****"},
+				{ID: 43, UserID: 7, Name: routeName + "2", Group: "another-group", Status: 1, Key: "sk-****"},
+			}
 			if created.ID > 0 {
-				tokens = append(tokens, created)
+				afterCreateLists++
+				if afterCreateLists == 1 {
+					w.WriteHeader(http.StatusBadGateway)
+					return
+				}
+				if afterCreateLists > 2 { // The new key is not visible immediately.
+					tokens = append(tokens, created)
+				}
 			}
 			newAPIOK(w, map[string]any{"items": tokens, "total": len(tokens)})
 		case r.URL.Path == "/api/token/" && r.Method == "POST":
@@ -132,8 +142,8 @@ func TestNewAPIImportReportsTokenLimitThenAppliesExactlyOnce(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if groupsRead != 3 || creates != 2 || reveals != 2 || applies != 1 {
-		t.Fatalf("groups=%d creates=%d reveals=%d applies=%d", groupsRead, creates, reveals, applies)
+	if groupsRead != 3 || creates != 2 || afterCreateLists != 3 || reveals != 2 || applies != 1 {
+		t.Fatalf("groups=%d creates=%d confirmations=%d reveals=%d applies=%d", groupsRead, creates, afterCreateLists, reveals, applies)
 	}
 	var encrypted string
 	var key int64
