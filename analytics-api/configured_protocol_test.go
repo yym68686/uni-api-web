@@ -123,7 +123,8 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serve := (&Service{control: store}).Handler()
+	service := &Service{control: store}
+	serve := service.Handler()
 	var state map[string]any
 	for until := time.Now().Add(5 * time.Second); time.Now().Before(until); {
 		state, _, err = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
@@ -137,7 +138,10 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 	}
 	post := func(path string, body map[string]any, want int) map[string]any {
 		t.Helper()
-		body["source_id"], body["provider"], body["revision"] = src.ID, provider, state["revision"]
+		body["source_id"], body["revision"] = src.ID, state["revision"]
+		if _, ok := body["provider"]; !ok {
+			body["provider"] = provider
+		}
 		req := httptest.NewRequest("POST", path, strings.NewReader(mustJSON(body))).WithContext(ctx)
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
@@ -145,6 +149,9 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 		serve.ServeHTTP(w, req)
 		if w.Code != want || strings.Contains(w.Body.String(), "fixture-private-upstream") {
 			t.Fatalf("%s: got %d %s", path, w.Code, w.Body.String())
+		}
+		if want == 400 && !strings.Contains(w.Body.String(), "此渠道不支持所选上游端点") {
+			t.Fatalf("gateway protocol rejection was masked: %s", w.Body.String())
 		}
 		var result map[string]any
 		_ = json.Unmarshal(w.Body.Bytes(), &result)
@@ -241,5 +248,49 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 		if row.Provider == configuredImportName(provider, key) && ((row.Model == claude && row.Protocol != "") || (row.Model == gemini && row.Protocol != "gemini")) {
 			t.Fatal("reset changed a different model or did not restore defaults", row)
 		}
+	}
+
+	// Exact legacy OpenRouter shape from the affected edit. No request goes to
+	// OpenRouter: this verifies catalog capability and the atomic save itself.
+	const openrouter, jev = "openrouter", "jev-latest"
+	const base = "https://openrouter.ai/api/v1/systemone"
+	state, _, err = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := state["revision"].(string)
+	snapshot, _, err := service.importSnapshot(ctx, src, state, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := retainedChannel{Provider: openrouter, KeyID: key, Base: base, Key: "fixture-openrouter", Models: []string{gemini, jev},
+		Definition: json.RawMessage(mustJSON(map[string]any{"provider": openrouter, "base_url": base, "api": "fixture-openrouter", "model": []string{gemini, jev}}))}
+	state, _, err = service.applyImportSnapshot(ctx, src, snapshot, revision, legacy, 1, map[string]int{gemini: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.saveLiveControls(ctx, src, state); err != nil {
+		t.Fatal(err)
+	}
+	edit := func(protocol string, want int) map[string]any {
+		return post("/v1/channel-management", map[string]any{"provider": openrouter, "api_key_id": key, "edit_provider": openrouter, "models": []string{gemini, jev},
+			"position": 1, "positions": map[string]int{gemini: 2, jev: 1}, "protocols": map[string]string{gemini: protocol}}, want)
+	}
+	edit("gemini", 400)
+	if result := edit("chat", 200); result["provider"] != openrouter {
+		t.Fatal("save changed the existing key-owned channel identity", result)
+	}
+	got := map[string]string{}
+	for _, row := range catalog(key) {
+		if row.Provider != openrouter {
+			continue
+		}
+		if row.ProtocolOptions == nil || strings.Join(*row.ProtocolOptions, ",") != "responses,chat" {
+			t.Fatal("incorrect OpenRouter capability", row)
+		}
+		got[row.Model] = row.Protocol
+	}
+	if len(got) != 2 || got[gemini] != "chat" || got[jev] != "" {
+		t.Fatal("save did not preserve the other model's default", got)
 	}
 }

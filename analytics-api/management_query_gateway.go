@@ -462,7 +462,7 @@ func assembleManagementChannels(src controlSource, snapshot managementSnapshot, 
 				binding.Base = live.Base
 			}
 			binding.EngineMode = row.EngineMode
-			item = &managementChannel{subInstalledChannel: binding, Engine: row.Engine, AccountIDs: []string{}}
+			item = &managementChannel{subInstalledChannel: binding, Engine: row.Engine, ProtocolOptions: row.ProtocolOptions, AccountIDs: []string{}}
 			if live, ok := snapshot.Providers[row.Provider]; ok {
 				item.ProbeFingerprint = live.ProbeFingerprint
 				item.CredentialCount = live.CredentialCount

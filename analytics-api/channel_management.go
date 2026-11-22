@@ -12,19 +12,21 @@ import (
 
 type managementChannel struct {
 	subInstalledChannel
-	Engine           string   `json:"engine"`
-	AccountIDs       []string `json:"account_ids"`
-	ProbeFingerprint string   `json:"probe_fingerprint"`
-	CredentialCount  int      `json:"credential_count,omitempty"`
+	Engine           string    `json:"engine"`
+	ProtocolOptions  *[]string `json:"upstream_protocol_options,omitempty"`
+	AccountIDs       []string  `json:"account_ids"`
+	ProbeFingerprint string    `json:"probe_fingerprint"`
+	CredentialCount  int       `json:"credential_count,omitempty"`
 }
 
 type managementModel struct {
-	Provider   string `json:"provider"`
-	Model      string `json:"model"`
-	Upstream   string `json:"upstream_model"`
-	Engine     string `json:"engine"`
-	EngineMode string `json:"engine_mode"`
-	Protocol   string `json:"upstream_protocol,omitempty"`
+	Provider        string    `json:"provider"`
+	Model           string    `json:"model"`
+	Upstream        string    `json:"upstream_model"`
+	Engine          string    `json:"engine"`
+	EngineMode      string    `json:"engine_mode"`
+	Protocol        string    `json:"upstream_protocol,omitempty"`
+	ProtocolOptions *[]string `json:"upstream_protocol_options,omitempty"`
 }
 type managementProvider struct {
 	Base             string `json:"base"`

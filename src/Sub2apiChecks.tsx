@@ -852,6 +852,7 @@ type ChannelAddReceipt = {
   label: string;
   message: string;
   state: "pending" | "success" | "error";
+  action?: "save";
   recovery?: { site: SiteImportDialog } | { configured: ConfiguredImportDialog };
 };
 const noAddReceipts: ChannelAddReceipt[] = [];
@@ -1011,23 +1012,24 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   ) {
     const id = request.id;
     if (client.getQueryData<ChannelAddReceipt[]>(receiptKey)?.some(item => item.id === id && item.state === "pending")) return false;
-    const base = { id, label: request.label };
+    const base = { id, label: request.label, action: request.action };
+    const verb = request.action === "save" ? "保存" : "添加";
     const report = (receipt: ChannelAddReceipt) =>
       client.setQueryData<ChannelAddReceipt[]>(receiptKey, (previous = []) =>
         [...previous.filter(item => item.id !== id), receipt]);
-    report({ ...base, state: "pending", message: "正在后台添加…" });
+    report({ ...base, state: "pending", message: `正在后台${verb}…` });
     close();
     void (async () => {
       try {
         const result = await controlRequest<{ message?: string }>(request.path, {
           method: "POST", body: request.body, signal: AbortSignal.timeout(60000),
         }, { backgroundChannelAdd: true });
-        report({ ...base, state: "success", message: result?.message || "渠道添加成功。" });
+        report({ ...base, state: "success", message: result?.message || `渠道${verb}成功。` });
       } catch (error) {
         const message = error instanceof Error ? error.message : "未收到服务端回执。";
         const rejected = error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408;
         report({
-          ...base, state: "error", message: rejected ? `添加失败：${message}` : `添加结果未确认：${message} 请先核对接入状态。`,
+          ...base, state: "error", message: rejected ? `${verb}失败：${message}` : `${verb}结果未确认：${message} 请先核对接入状态。`,
           recovery: rejected ? recovery({ ...request.draft, error: message }) : undefined,
         });
       } finally {
@@ -1347,7 +1349,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             const recovery = receipt.recovery!;
             if ("site" in recovery) setImporting(recovery.site);
             else setConfiguredDialog(recovery.configured);
-          }}>恢复添加配置</button>}
+          }}>{receipt.action === "save" ? "恢复编辑草稿" : "恢复添加配置"}</button>}
           {receipt.state !== "pending" && <button type="button" className="icon-button" aria-label={`关闭 ${receipt.label} 的添加回执`} onClick={() =>
             client.setQueryData<ChannelAddReceipt[]>(receiptKey, (previous = []) => previous.filter(item => item.id !== receipt.id))}><X size={14} /></button>}
         </div>)}

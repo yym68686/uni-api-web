@@ -72,6 +72,7 @@ export function configuredQualityResult(member: ManagedChannel, accounts: SubAcc
 export const UNASSIGNED_ACCOUNT = "__unassigned__";
 export interface ManagedChannel extends InstalledChannel {
   engine: string;
+  upstream_protocol_options?: string[];
   account_ids: string[];
   probe_fingerprint?: string;
   credential_count?: number;

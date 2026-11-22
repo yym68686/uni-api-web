@@ -5,7 +5,7 @@ import { channelProtocols } from "./channelProtocol";
 export function ConfiguredModelProtocols({ source, revision, models, saved, choices, suggested, onChange, disabled, onDetecting }: {
   source: string;
   revision: string;
-  models: { upstream: string; provider: string; model: string }[];
+  models: { upstream: string; provider: string; model: string; supported: string[] }[];
   saved: Record<string, string>;
   choices: Record<string, string>;
   suggested: Record<string, string>;
@@ -20,7 +20,7 @@ export function ConfiguredModelProtocols({ source, revision, models, saved, choi
     active.current?.abort();
     onDetecting(false);
   }, [onDetecting]);
-  async function detect({ upstream, provider, model }: typeof models[number]) {
+  async function detect({ upstream, provider, model, supported }: typeof models[number]) {
     if (active.current || disabled) return;
     const abort = new AbortController();
     active.current = abort;
@@ -34,7 +34,7 @@ export function ConfiguredModelProtocols({ source, revision, models, saved, choi
         body: JSON.stringify({ source_id: source, revision, provider, model, upstream_model: upstream }),
       });
       if (abort.signal.aborted) return;
-      const match = channelProtocols.find(option => option.protocol === protocol);
+      const match = channelProtocols.find(option => option.protocol === protocol && supported.includes(protocol));
       if (match) onChange(upstream, match.protocol);
       setMessages(old => ({ ...old, [upstream]: match ? `已检测到 ${match.label}，保存后生效` : "未确认可用端点，已保留当前选择。" }));
     } catch (error) {
@@ -52,25 +52,26 @@ export function ConfiguredModelProtocols({ source, revision, models, saved, choi
       <div className="route-section-heading"><h3>各模型上游端点</h3></div>
       <p className="muted">可手动选协议，或自动检测后再保存。检测会向上游发送测试请求；端点设置按实际模型共享，同一模型的别名使用相同端点。</p>
       {models.map(item => {
-        const { upstream } = item;
+        const { upstream, supported } = item;
+        const value = choices[upstream] ?? saved[upstream] ?? suggested[upstream] ?? "";
         return <div className="configured-protocol-item" key={upstream}>
           <label className="import-protocol-row">
             <span title={upstream}>{upstream}</span>
             <select aria-label={`${upstream} 上游端点`} disabled={disabled || !!testing}
-              value={choices[upstream] ?? saved[upstream] ?? suggested[upstream] ?? ""}
+              value={value}
               onChange={event => {
                 onChange(upstream, event.target.value);
                 setMessages(old => ({ ...old, [upstream]: "" }));
               }}>
               <option value="">沿用渠道默认端点</option>
-              {channelProtocols.map(({ protocol, label, endpoint }) => <option key={protocol} value={protocol}>{label} · {endpoint}</option>)}
+              {channelProtocols.filter(({ protocol }) => supported.includes(protocol) || protocol === value).map(({ protocol, label, endpoint }) => <option key={protocol} value={protocol} disabled={!supported.includes(protocol)}>{label} · {endpoint}{!supported.includes(protocol) ? "（不支持，请重选）" : ""}</option>)}
             </select>
           </label>
-          <button className="button small" type="button" disabled={disabled || !!testing}
+          <button className="button small" type="button" disabled={disabled || !!testing || !supported.length}
             aria-label={`自动检测 ${upstream} 的上游端点`} onClick={() => void detect(item)}>
             {testing === upstream ? "检测中…" : "自动检测"}
           </button>
-          {messages[upstream] ? <small className="muted" role="status">{messages[upstream]}</small> :
+          {!supported.length ? <small className="muted">此渠道只支持默认端点。</small> : messages[upstream] ? <small className="muted" role="status">{messages[upstream]}</small> :
             suggested[upstream] && !Object.hasOwn(choices, upstream) && <small className="muted">已通过模型检测，保存后使用此端点。</small>}
         </div>;
       })}

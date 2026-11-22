@@ -19,10 +19,13 @@ export interface SiteChannelAddDraft extends ChannelAddDraft {
 export interface ConfiguredChannelAddDraft extends ChannelAddDraft {
   models: string[];
   protocols?: Record<string, string>;
+  editingProvider?: string;
+  revision?: string;
 }
 
 export interface ChannelAddRequest<D> {
   id: string;
+  action?: "save";
   label: string;
   path: "/v1/sub2api/channels" | "/v1/channel-management";
   body: string;

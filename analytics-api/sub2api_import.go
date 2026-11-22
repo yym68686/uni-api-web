@@ -93,6 +93,10 @@ func subGateway(ctx context.Context, src controlSource, method, path string, bod
 				return nil, 400, errors.New("来源拒绝配置快照，可能已达到路由规则或临时渠道数量上限；未提交本来源修改，请核对配置容量")
 			case "Retained rule references an unavailable channel":
 				return nil, 400, errors.New("来源路由引用的渠道或模型已变化；未提交本来源修改，请重新核对")
+			case "Model protocol requires a standard HTTP API-key provider and base path":
+				return nil, 400, errors.New("此渠道不支持所选上游端点。请选择一个可用端点，或沿用渠道默认端点。配置未更改")
+			case "Invalid Gemini upstream model path":
+				return nil, 400, errors.New("该上游模型名称不能用于 Gemini 原生端点。配置未更改")
 			}
 			return nil, 400, errors.New("所选 key、模型或位置已失效，请刷新弹窗后重试")
 		}

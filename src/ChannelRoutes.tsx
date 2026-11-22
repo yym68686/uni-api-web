@@ -263,10 +263,10 @@ export function ConfiguredChannelDialog({
       modeChosen.current = true;
     }
   }, [counts]);
-  const [editingProvider, setEditingProvider] = useState("");
+  const [editingProvider, setEditingProvider] = useState(initialAdd?.editingProvider || "");
   const toolDefaultsPending=toolChecks.isPending || accounts.isPending;
   const toolDefaultsError=toolChecks.isError || accounts.isError;
-  const initializedEdit = useRef("");
+  const initializedEdit = useRef(initialAdd?.editingProvider ? `${initialAdd.source}:${initialAdd.key}:${initialAdd.editingProvider}` : "");
   const [selectedOverride, setSelected] = useState<string[]|null>(initialAdd?.models || null);
   const [aliases, setAliases] = useState<ModelAlias[]>(initialAdd?.aliases || []);
   const modelOptions = [
@@ -292,6 +292,7 @@ export function ConfiguredChannelDialog({
   );
   const activePositions = perModel ? modelPositions : {};
   const [protocolChoices, setProtocolChoices] = useState<Record<string, string>>(initialAdd?.protocols || {});
+  const [draftRevision, setDraftRevision] = useState(initialAdd?.editingProvider ? initialAdd.revision : undefined);
   const [detecting, setDetecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(initialAdd?.error || "");
@@ -306,6 +307,7 @@ export function ConfiguredChannelDialog({
     setPosition(1);
     setPerModel(true);
     setProtocolChoices({});
+    setDraftRevision(undefined);
     setModelPositions(
       Object.fromEntries(rows.map((r) => [r.model, r.position])),
     );
@@ -334,6 +336,7 @@ export function ConfiguredChannelDialog({
           model: string;
           upstream_model?: string;
           upstream_protocol?: string;
+          upstream_protocol_options?: string[];
         }[];
       }>(
         "/v1/sub2api/channel-options?" +
@@ -348,17 +351,22 @@ export function ConfiguredChannelDialog({
   const savedModels=Object.fromEntries((options.data?.channels||[]).filter(r=>!!editingProvider&&r.provider===editingProvider).map(r=>[r.model,r.upstream_model||item.model_mappings?.[r.model]||r.model]));
   const desiredModels=Object.fromEntries([...selected.map(m=>[m,item.model_mappings?.[m]||m]),...Object.entries(mapping.mappings).map(([name,m])=>[name,item.model_mappings?.[m]||m])]);
   const savedProtocols = Object.fromEntries((options.data?.channels || []).filter(row => row.provider === (editingProvider || item.provider) && row.upstream_protocol).map(row => [row.upstream_model || row.model, row.upstream_protocol!]));
+  const supportedProtocols = options.data?.channels.find(row => row.provider === (editingProvider || item.provider))?.upstream_protocol_options
+    ?? item.upstream_protocol_options ?? (["gpt", "codex", "claude", "gemini", "openrouter"].includes(item.engine) ? channelProtocols.map(option => option.protocol) : []);
   const protocolModels = [...new Map([...selected, ...Object.values(mapping.mappings)].map(model => {
     const upstream = item.model_mappings?.[model] || model;
     const existing = (options.data?.channels || []).find(row => row.provider === editingProvider && (row.upstream_model || row.model) === upstream);
-    return [upstream, { upstream, provider: existing ? editingProvider : item.provider, model: existing?.model || model }] as const;
+    const supported = supportedProtocols.filter(protocol => protocol !== "gemini" || upstream.split("/").every(part => /^[a-zA-Z0-9._-]+$/.test(part) && part !== "." && part !== ".."));
+    return [upstream, { upstream, provider: existing ? editingProvider : item.provider, model: existing?.model || model, supported }] as const;
   })).values()];
   const servingUpstreams = new Set(Object.values(savedModels));
-  const suggestedProtocols = Object.fromEntries(protocolModels.flatMap(({upstream}) => {
+  const suggestedProtocols = Object.fromEntries(protocolModels.flatMap(({upstream,supported}) => {
     if (servingUpstreams.has(upstream) || savedProtocols[upstream]) return [];
     const protocol = allChecks.find(check => (item.model_mappings?.[check.model] || check.model) === upstream && modelIsAvailable(check))?.result?.availability?.suggested_upstream_protocol;
-    return channelProtocols.some(option => option.protocol === protocol) ? [[upstream, protocol!]] : [];
+    return protocol && supported.includes(protocol) ? [[upstream, protocol]] : [];
   }));
+  const invalidProtocol = !!options.data?.model_upstream_protocols && protocolModels.some(({upstream,supported}) => !!protocolChoices[upstream] && !supported.includes(protocolChoices[upstream]));
+  const staleDraft = !!draftRevision && !!options.data && draftRevision !== options.data.revision;
   const invalidModels=unavailableModelChanges(desiredModels,savedModels,upstream=>allChecks.some(c=>(item.model_mappings?.[c.model]||c.model)===upstream&&canSelectModel(c.model)));
   useEffect(() => {
     if (
@@ -410,7 +418,7 @@ export function ConfiguredChannelDialog({
   function batchButton(part:BatchPart,section?:string) {
     if(!editingProvider)return undefined;
     return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
-      disabled={busy||detecting||Object.keys(protocolChoices).length>0||invalidModels.length>0||toolDefaultsPending||toolDefaultsError||inventory.isPending||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
+      disabled={busy||detecting||staleDraft||Object.keys(protocolChoices).length>0||invalidModels.length>0||toolDefaultsPending||toolDefaultsError||inventory.isPending||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
       onApplied={()=>{setSuccess("批量操作结果已更新，请核对各来源接入状态。");setAdding(false);if(initialEdit)close();}}/>;
   }
   async function save() {
@@ -419,7 +427,7 @@ export function ConfiguredChannelDialog({
       detecting ||
       inventory.isPending ||
       toolDefaultsPending || toolDefaultsError ||
-      mapping.error || invalidModels.length>0 ||
+      mapping.error || invalidModels.length>0 || invalidProtocol || staleDraft ||
       !key ||
       options.isFetching || options.isError ||
       !keyDirectory?.data?.keys.some(k => k.key_id === key) ||
@@ -455,15 +463,16 @@ export function ConfiguredChannelDialog({
         ].map((name) => client.invalidateQueries({ queryKey: [name] })),
       );
     };
-    if (!editingProvider && submitAdd) {
+    if (submitAdd) {
       if (!submitAdd({
         id: JSON.stringify(["configured", item.source_id, item.provider, key]),
+        ...(editingProvider ? { action: "save" as const } : {}),
         label: `${item.source_name} / ${item.name}`,
         path: "/v1/channel-management",
         body,
-        draft: { source: item.source_id, key, models: selected, aliases, position, perModel, modelPositions, protocols },
+        draft: { source: item.source_id, key, models: selected, aliases, position, perModel, modelPositions, protocols, editingProvider, revision: options.data.revision },
         refresh,
-      })) setError("此渠道已有添加请求在处理，请等待回执。");
+      })) setError("此渠道已有请求在处理，请等待回执。");
       return;
     }
     setBusy(true);
@@ -548,6 +557,7 @@ export function ConfiguredChannelDialog({
                 setPerModel(false);
                 setModelPositions({});
                 setProtocolChoices({});
+                setDraftRevision(undefined);
                 setSelected(null);
                 setAliases([]);
                 setKey(null);
@@ -606,15 +616,19 @@ export function ConfiguredChannelDialog({
                 {success}
               </p>
             )}
-            {(error || options.error) && (
+            {(error || options.error || staleDraft) && (
               <p role="alert" className="negative">
-                {error || options.error?.message}
+                {staleDraft ? "配置已变化。请重新读取当前配置，再核对并应用更改。" : error || options.error?.message}
                 <button
                   className="button small"
                   disabled={busy || options.isFetching || inventory.isPending}
                   onClick={() => {
                     initializedEdit.current = "";
                     setError("");
+                    if (staleDraft) {
+                      setDraftRevision(undefined);
+                      setProtocolChoices({});
+                    }
                     void options.refetch();
                     void keyDirectory?.refetch();
                   }}
@@ -829,7 +843,7 @@ export function ConfiguredChannelDialog({
                             editingProvider,
                           ),
                       ) ||
-                      !!mapping.error || invalidModels.length>0 ||
+                      !!mapping.error || invalidModels.length>0 || invalidProtocol || staleDraft ||
                       !key ||
                       !mapping.models.length
                     }
