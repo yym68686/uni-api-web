@@ -1,5 +1,6 @@
 import { modelProgressDetails, useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
 import type { SyncProgress } from "./subSyncProgress";
+import { useConfiguredCheckResultRefresh } from "./configuredCheckProgress";
 import { fingerprintTargets, fingerprintLabels, fingerprintBusy, useModelFingerprints, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintColumnHeader, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
@@ -888,6 +889,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     setCursorState({ filter: filterKey, cursor: token });
   };
   const pageData=pageQuery.data;
+  useConfiguredCheckResultRefresh(user, section === "channels" ? pageData : undefined);
   const displayedPage=pageQuery.displayPage;
   const usablePage=pageQuery.interactivePage;
   const tablePending=!!displayedPage && !usablePage;

@@ -413,9 +413,10 @@ still hide old rows. Older backends use full no-store pages. This avoids repeate
 transfer of verified-identical bytes, rather than serving an unvalidated saved
 snapshot. Full operation selection remains an independent no-store read.
 
-Channel management does not poll or refetch on window focus/reconnection. It
-reads on initial mount, manual refresh, filter changes and accepted write
-invalidation. Account balance widgets follow the same manual-page policy.
+Channel management does not periodically reread the channel list or refetch
+it on window focus/reconnection. It reads on initial mount, manual refresh,
+filter changes, accepted write invalidation and observed job completion. Account
+balance widgets follow the same manual-page policy.
 This avoids automatically clearing the current page during unrelated tab changes.
 
 The process-local current computation retains one canonical, complete column
@@ -434,6 +435,11 @@ The model selection stored with the submitted sync job defines its scope; changi
 checkboxes later does not change that job. Full historical results remain available
 in channel details. Built-in and channel-extra model selections have independent
 select-all/clear actions.
+
+Visible configured channels without a site account use a separate scoped read
+for active check identities. Only rows showing queued/running work are watched,
+using their actual source/provider members. When a displayed check leaves the
+active set, the current page is revalidated for its results; no probe is replayed.
 
 Sync initialization queues all models in one ordered source statement. This avoids
 holding statement revision counters from one model while trying to acquire the

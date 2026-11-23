@@ -366,6 +366,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/model-fingerprints/settings", s.fingerprintSettings)
 	mux.HandleFunc("PUT /v1/model-fingerprints/settings", s.fingerprintSettings)
 	mux.HandleFunc("GET /v1/channel-management/checks", s.configuredChecks)
+	mux.HandleFunc("GET /v1/channel-management/checks/progress", s.configuredCheckProgress)
 	mux.HandleFunc("POST /v1/channel-management/checks", s.queueConfiguredChecks)
 	mux.HandleFunc("GET /v1/channel-management/detection-settings", s.channelDetectionSettings)
 	mux.HandleFunc("PATCH /v1/channel-management/detection-settings", s.channelDetectionSettings)

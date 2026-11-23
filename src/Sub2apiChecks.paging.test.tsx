@@ -195,6 +195,94 @@ it("reconciles queued rows with the first completed progress read even when acco
   expect(pageReads).toBe(2);
 });
 
+it("updates native channel results as the visible models finish and stops reading progress", async () => {
+  const owner = "native-check-progress";
+  const [carbon, argon] = ["gemini-4-carbon", "gemini-4-argon"] as const;
+  saveSubModels(owner, [carbon, argon]);
+  const member: ManagedChannel = {
+    kind: "configured", source_id: "gateway", source_name: "Gateway", provider: "sub2api-copy-banana", name: "bananarouter",
+    models: [carbon, argon], engine: "openai", account_ids: [], account_id: "", group_id: 0, api_key_id: "", key_position: 0,
+    key_prefix: "", positions: {}, revision: "native", manageable: false, probe_fingerprint: "current-credential",
+  };
+  const secondMember = { ...member, source_id: "second", provider: "bananarouter" };
+  let stage = 0;
+  const pageReads: string[] = [];
+  let progressReads = 0;
+  const snapshot = () => {
+    const checks = [carbon, argon].map((model, index) => {
+      const finished = index < stage;
+      return { model, state: finished ? "done" : "queued", message: "", result: finished ? {
+        model, checked_at: stage + 1, verdict: index === 0 ? "pass" : "fail",
+        availability: {status: index === 0 ? "success" : "error", text: "", ttft_ms: 1, duration_ms: 1, http_status: index === 0 ? 200 : 429},
+        quality: {status: "skipped", text: "", ttft_ms: null, duration_ms: 0},
+      } as Result : null };
+    });
+    const base = page(25);
+    return { ...base, accounts: [], rows: [
+      { ...base.rows[0], account: { ...account, id: "", name: "未归属渠道" }, accountIds: [],
+        configured: { ...member, provider: "bananarouter", members: [member, secondMember] },
+        target: { ...base.rows[0].target, name: "bananarouter", models: checks }, checks },
+      ...base.rows.slice(1),
+    ] };
+  };
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    expect(init?.method || "GET").toBe("GET");
+    const url = new URL(input);
+    if (url.pathname.endsWith("/channel-management/query")) {
+      const cursor = url.searchParams.get("cursor") || "";
+      pageReads.push(cursor);
+      return Response.json(cursor ? snapshot() : page());
+    }
+    if (url.pathname.endsWith("/checks/progress")) {
+      progressReads++;
+      expect(JSON.parse(url.searchParams.get("targets")!)).toEqual([
+        { source_id: "gateway", provider: "sub2api-copy-banana" }, { source_id: "second", provider: "bananarouter" },
+      ]);
+      const active = (model: string, fingerprint = "") => ({
+        source_id: member.source_id, provider: member.provider, kind: "model", model, fingerprint,
+      });
+      return Response.json({ data: [
+        ...[carbon, argon].slice(stage).map(model => active(model)),
+        active("unrelated-model"),
+        // The surviving job on an old credential must not hide completion.
+        { ...active(argon, "old-credential"), source_id: secondMember.source_id, provider: secondMember.provider },
+      ] });
+    }
+    if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
+    return Response.json({ data: [] });
+  }));
+  const view = mount(owner);
+  await screen.findByText("Channel 1", {selector:"strong"});
+  vi.useFakeTimers();
+  const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await advance(100);
+    const row = screen.getByRole("row", { name: "查看 未归属渠道 bananarouter 渠道详情" });
+    const button = within(row).getByRole("button", { name: "检测 未归属渠道 bananarouter" });
+    expect(button).toBeDisabled();
+    expect(within(row).getByText("0/2 可用")).toBeVisible();
+    await advance(3100);
+    expect(progressReads).toBe(1);
+    expect(pageReads).toEqual(["", "25"]);
+    stage = 1;
+    await advance(3100);
+    expect(within(row).getByText("1/2 可用")).toBeVisible();
+    expect(button).toBeDisabled();
+    stage = 2;
+    await advance(3100);
+    expect(button).toBeEnabled();
+    expect(within(row).getByText("1/2 可用")).toBeVisible();
+    expect(pageReads).toEqual(["", "25", "25", "25"]);
+    expect(progressReads).toBe(3);
+    await advance(30_000);
+    expect(progressReads).toBe(3);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
 it("hides unverified results and disables detection when the completion result read fails, without a retry loop", async () => {
   const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
   let pageReads = 0, progressReads = 0;
