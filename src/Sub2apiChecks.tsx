@@ -880,7 +880,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [managementPreset, setManagementPreset] = useState<keyof typeof managementPresets>("operations");
   const [customColumns, setCustomColumns] = useTableColumns(managementColumnsStorageKey, managementColumnChoices);
   const activeColumns: readonly ManagementColumn[] = customColumns ?? managementPresets[managementPreset];
-  const includePrices = activeColumns.includes("price");
+  const includePrices = activeColumns.includes("price") || !!filters.priceStatus;
   const overview = managementOverviewForColumns(filters.model, activeColumns);
   const pageQuery=useManagementPage(user,filters,cursor,navigation,includePrices,overview);
   const navigatePage = (action: "previous" | "next", token?: string) => {
@@ -889,7 +889,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     setCursorState({ filter: filterKey, cursor: token });
   };
   const pageData=pageQuery.data;
-  useConfiguredCheckResultRefresh(user, section === "channels" ? pageData : undefined);
+  const configuredResults=useConfiguredCheckResultRefresh(user, filters, section === "channels" ? pageData : undefined);
   const displayedPage=pageQuery.displayPage;
   const usablePage=pageQuery.interactivePage;
   const tablePending=!!displayedPage && !usablePage;
@@ -1061,7 +1061,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   );
   const syncBatchBlocked = !!batchAccountAction || syncableAccounts.some(account => accountBusy(account.id));
   const [removing, setRemoving] = useState<SubAccount | null>(null);
-  const rows=displayedPage?.rows || [], rates=metadata?.rates || [], platforms=metadata?.platforms || [];
+  const rows=configuredResults.displayRows(displayedPage), rates=metadata?.rates || [], platforms=metadata?.platforms || [];
   const total=displayedPage?.total || 0, eligibleCount=displayedPage?.eligible_count || 0;
   const effectiveMaxRate=maxRate;
   const availableModels=metadata?.detectionModels || SUB_MODELS;
@@ -1177,6 +1177,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     if (account.id && accountBusy(account.id)) return true;
     if (pending(current.state) && current.job_kind === "sync") return true;
     if (checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key))) return true;
+    if (configuredResults.awaiting(configured)) return true;
     if (kind === "compaction") return pending(target.compaction_state || "");
     if (kind === "tool-use") return pending(target.tool_use_state || "");
     const models = kind === "quality" ? ["gpt-6-astra"] : requestedModels();
@@ -1206,8 +1207,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     const scope = selectionScope.current;
     try {
       const site = targets.filter(t => !!t.account.id);
-      const native = targets.filter(t => !t.account.id && t.configured).flatMap(({configured}) => {
-        const members = channelMembers(configured!);
+      const nativeChannels = targets.flatMap(t => !t.account.id && t.configured ? [t.configured] : []);
+      const localConfiguredCheck = nativeChannels.length > 0 && !site.length;
+      const native = nativeChannels.flatMap(configured => {
+        const members = channelMembers(configured);
         // Probe every selected model once. Prefer an existing mapping; use the
         // first source for models not yet configured on any member.
         const models = kind === "check" ? requestedModels() : kind === "quality" ? ["gpt-6-astra"] : [];
@@ -1225,7 +1228,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       if (site.length) requests.push({label:`站点渠道（${site.length} 个分组）`,request:controlRequest(`/v1/sub2api/${kind === "check" ? "checks" : `${kind}-checks`}`, {
         method:"POST", body:JSON.stringify({...(manual?{manual:true}:{}),targets:site.map(({account,target}) => ({account_id:account.id,group_id:target.group_id,...(kind === "check" ? {models:modelsToCheck} : {})}))}),
       })});
-      if (native.length) requests.push({label:`原生渠道（${native.length} 个来源成员）`,request:controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,...(manual?{manual:true}:{}),targets:native})})});
+      if (native.length) requests.push({label:`原生渠道（${native.length} 个来源成员）`,request:controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,...(manual?{manual:true}:{}),targets:native})}, { localConfiguredCheck })});
       const results = await Promise.allSettled(requests.map(item => item.request));
       const receipts = results.map((result,index) => ({
         label:requests[index].label,
@@ -1235,12 +1238,20 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           : `未确认提交 · ${result.reason instanceof Error ? result.reason.message : "读取失败"}`,
       }));
       if (!manual) setBatchReceipts(receipts);
+      if (localConfiguredCheck) {
+        const result = results[0];
+        const rejected = result?.status === "rejected" && result.reason instanceof ApiError &&
+          result.reason.status >= 400 && result.reason.status < 500 && result.reason.status !== 408;
+        // A lost response may have committed. Verify scoped state without
+        // repeating the paid operation or reloading the list.
+        if (!rejected) configuredResults.afterSubmission(scope === selectionScope.current ? native : []);
+      }
       await Promise.all([
-        client.invalidateQueries({queryKey:["sub2api"]}),
-        client.invalidateQueries({queryKey:["configured-checks"]}),
+        ...(site.length ? [client.invalidateQueries({queryKey:["sub2api"]})] : []),
+        ...(native.length ? [client.invalidateQueries({queryKey:["configured-checks"], ...(localConfiguredCheck ? { refetchType: "none" as const } : {})})] : []),
         // Hold only these targets until the queued state is read. The server
         // still deduplicates repeats if that read fails or navigation wins.
-        ...(scope === selectionScope.current && receipts.some(receipt => receipt.accepted)
+        ...(!localConfiguredCheck && scope === selectionScope.current && receipts.some(receipt => receipt.accepted)
           ? [pageQuery.waitForRefresh()] : []),
       ]);
       const failed = results.find(r => r.status === "rejected");
@@ -2161,7 +2172,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       })()}
       {managementDetail && (
         <ManagementChannelDrawer
-          row={managementDetail}
+          row={rows.find(row => row.id === managementDetail.id) || managementDetail}
           prices={prices.data?.data}
           close={() => setManagementDetail(null)}
           onOpenChannel={() => {

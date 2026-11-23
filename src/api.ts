@@ -187,7 +187,7 @@ function managementWriteImpact(path: string, method: string, backgroundChannelAd
  return "blocking";
 }
 
-export async function controlRequest<T>(path:string,init:RequestInit={}, { backgroundChannelAdd = false } = {}):Promise<T>{
+export async function controlRequest<T>(path:string,init:RequestInit={}, { backgroundChannelAdd = false, localConfiguredCheck = false } = {}):Promise<T>{
  const method=init.method?.toUpperCase() || "GET";
  const read=method==="GET";
  return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId, responseReceived) => {
@@ -201,7 +201,8 @@ export async function controlRequest<T>(path:string,init:RequestInit={}, { backg
  status=response.status;
  responseReceived();
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
- const impact = read ? "none" : managementWriteImpact(path, method, backgroundChannelAdd);
+ const impact = read || (localConfiguredCheck && method === "POST" && path === "/v1/channel-management/checks")
+   ? "none" : managementWriteImpact(path, method, backgroundChannelAdd);
  if(impact !== "none" && typeof window !== "undefined") {
    controlWriteGeneration++;
    if (impact === "blocking") blockingControlWriteGeneration = controlWriteGeneration;

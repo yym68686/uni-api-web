@@ -388,7 +388,8 @@ export function useManagementPage(
     ...query,
     data: current ? query.data : undefined,
     readCurrentPage: async (): Promise<ManagementPage> => {
-      if (current && query.data && managementPageGeneration.get(query.data) === currentControlWriteGeneration())
+      if (current && query.data && !client.getQueryState(queryKey)?.isInvalidated &&
+          managementPageGeneration.get(query.data) === currentControlWriteGeneration())
         return query.data;
       const result = await query.refetch({ cancelRefetch: false, throwOnError: true });
       if (!result.data || managementPageGeneration.get(result.data) !== currentControlWriteGeneration())

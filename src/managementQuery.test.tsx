@@ -571,3 +571,19 @@ it.each(["idle","running","queued"])("does not clear or reread management on foc
     expect(hook.result.current.data?.rows).toHaveLength(25);
   } finally {hook.unmount();client.clear();vi.useRealTimers();focusManager.setFocused(undefined);onlineManager.setOnline(true);}
 });
+
+it("revalidates a selection revision marked stale by a scoped update only when requested", async () => {
+  let reads = 0;
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({...page(), revision: `r${++reads}`})));
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  const wrapper = ({children}: {children:ReactNode}) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const hook = renderHook(() => useManagementPage("owner", subFilterDefaults), {wrapper});
+  await waitFor(() => expect(hook.result.current.data?.revision).toBe("r1"));
+  await act(async () => { await client.invalidateQueries({ queryKey: ["management-query", "owner"], refetchType: "none" }); });
+  expect(reads).toBe(1);
+  expect(hook.result.current.interactivePage?.revision).toBe("r1");
+  await act(async () => { expect((await hook.result.current.readCurrentPage()).revision).toBe("r2"); });
+  expect(reads).toBe(2);
+  hook.unmount();
+  client.clear();
+});

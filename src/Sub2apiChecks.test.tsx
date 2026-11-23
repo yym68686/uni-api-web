@@ -2643,7 +2643,12 @@ it("detects unassigned configured channels without site keys and isolates busy s
       if(body.kind === "check") states=body.targets.flatMap((t:any)=>t.models.map((m:string)=>({source_id:t.source_id,provider:t.provider,model:m,kind:"model",fingerprint:"same",state:"done",message:"",history:{total:1,successful:1,passed:1},result:{model:m,checked_at:42,availability:{status:"success",text:"test",ttft_ms:10,duration_ms:15},quality:{status:"success",text:"21",duration_ms:15,ttft_ms:10},verdict:"pass"}})));
       return Response.json({queued:body.targets.length});
     }
-    return Response.json({data:input.endsWith("/channel-management/checks")?states:input.endsWith("/channel-management")?channels:input.endsWith("/sources")?[{id:"fugue",name:"Fugue"},{id:"do",name:"DigitalOcean"}]:[],labels:{},unavailable_sources:[],unavailable_keys:[]});
+    const url = new URL(input);
+    if (url.pathname.endsWith("/channel-management/checks")) {
+      const source = url.searchParams.get("source_id"), provider = url.searchParams.get("provider");
+      return Response.json({data: states.filter(state => (!source || state.source_id === source) && (!provider || state.provider === provider))});
+    }
+    return Response.json({data:input.endsWith("/channel-management")?channels:input.endsWith("/sources")?[{id:"fugue",name:"Fugue"},{id:"do",name:"DigitalOcean"}]:[],labels:{},unavailable_sources:[],unavailable_keys:[]});
   }));
   const user=userEvent.setup();mount("unassigned-detection");
   await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"),"__unassigned__");

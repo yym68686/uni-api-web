@@ -438,8 +438,13 @@ select-all/clear actions.
 
 Visible configured channels without a site account use a separate scoped read
 for active check identities. Only rows showing queued/running work are watched,
-using their actual source/provider members. When a displayed check leaves the
-active set, the current page is revalidated for its results; no probe is replayed.
+using their actual source/provider members. Submitting native-only checks
+does not immediately reread the full page. It reads the affected providers'
+compact results and patches only their visible row; each completing row is
+updated independently. If a result moves a row out of the active filters, the
+server rereads the page to replace that row and recalculate its cursor/counts.
+Cached selection revisions are marked stale and revalidated only when a
+full-selection action is requested. No probe is replayed.
 
 Sync initialization queues all models in one ordered source statement. This avoids
 holding statement revision counters from one model while trying to acquire the

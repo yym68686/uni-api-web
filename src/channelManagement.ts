@@ -145,7 +145,7 @@ export function groupManagedChannels(
     // keep addresses, credentials, model definitions and writes source-scoped.
     const id = JSON.stringify([item.provider, item.engine]);
     const members = groups.get(id) || [];
-    members.push(item);
+    members.push(...channelMembers(item));
     groups.set(id, members);
   }
   return [...groups.values()].map((members) => ({

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -12,6 +12,7 @@ import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPref
 import { controlRequest } from "./api";
 import { useState } from "react";
 import type { ManagementPagePosition } from "./managementQuery";
+import { useConfiguredCheckResultRefresh } from "./configuredCheckProgress";
 
 afterEach(() => vi.unstubAllGlobals());
 const target = (n: number): SubTarget => ({
@@ -195,7 +196,7 @@ it("reconciles queued rows with the first completed progress read even when acco
   expect(pageReads).toBe(2);
 });
 
-it("updates native channel results as the visible models finish and stops reading progress", async () => {
+it("only updates the native row on submission and as its models finish", async () => {
   const owner = "native-check-progress";
   const [carbon, argon] = ["gemini-4-carbon", "gemini-4-argon"] as const;
   saveSubModels(owner, [carbon, argon]);
@@ -205,13 +206,16 @@ it("updates native channel results as the visible models finish and stops readin
     key_prefix: "", positions: {}, revision: "native", manageable: false, probe_fingerprint: "current-credential",
   };
   const secondMember = { ...member, source_id: "second", provider: "bananarouter" };
-  let stage = 0;
+  let stage = -1;
   const pageReads: string[] = [];
   let progressReads = 0;
+  let submissions = 0;
+  const scopedReads: string[] = [];
   const snapshot = () => {
-    const checks = [carbon, argon].map((model, index) => {
-      const finished = index < stage;
-      return { model, state: finished ? "done" : "queued", message: "", result: finished ? {
+    const checks = SUB_MODELS.map(model => {
+      const index = [carbon, argon].indexOf(model as typeof carbon | typeof argon);
+      const finished = index >= 0 && index < stage;
+      return { model, state: finished ? "done" : (index >= 0 && stage >= 0 ? "queued" : "idle"), message: "", result: finished ? {
         model, checked_at: stage + 1, verdict: index === 0 ? "pass" : "fail",
         availability: {status: index === 0 ? "success" : "error", text: "", ttft_ms: 1, duration_ms: 1, http_status: index === 0 ? 200 : 429},
         quality: {status: "skipped", text: "", ttft_ms: null, duration_ms: 0},
@@ -226,12 +230,32 @@ it("updates native channel results as the visible models finish and stops readin
     ] };
   };
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
-    expect(init?.method || "GET").toBe("GET");
     const url = new URL(input);
+    if (init?.method === "POST") {
+      expect(url.pathname).toBe("/analytics/v1/channel-management/checks");
+      expect(JSON.parse(String(init.body)).targets).toEqual([{ source_id: member.source_id, provider: member.provider, models: [carbon, argon] }]);
+      submissions++;
+      stage = 0;
+      return Response.json({queued:2},{status:202});
+    }
+    expect(init?.method || "GET").toBe("GET");
     if (url.pathname.endsWith("/channel-management/query")) {
       const cursor = url.searchParams.get("cursor") || "";
       pageReads.push(cursor);
       return Response.json(cursor ? snapshot() : page());
+    }
+    if (url.pathname.endsWith("/channel-management/checks")) {
+      const provider = url.searchParams.get("provider");
+      scopedReads.push(provider!);
+      if (provider === secondMember.provider) {
+        expect(url.searchParams.get("source_id")).toBe(secondMember.source_id);
+        return Response.json({data:[]});
+      }
+      expect(provider).toBe(member.provider);
+      expect(url.searchParams.get("source_id")).toBe(member.source_id);
+      return Response.json({ data: snapshot().rows[0].checks.filter(check => check.state !== "idle").map(check => ({
+        ...check, source_id: member.source_id, provider: member.provider, kind: "model", fingerprint: "",
+      })) });
     }
     if (url.pathname.endsWith("/checks/progress")) {
       progressReads++;
@@ -260,25 +284,82 @@ it("updates native channel results as the visible models finish and stops readin
     await advance(100);
     const row = screen.getByRole("row", { name: "查看 未归属渠道 bananarouter 渠道详情" });
     const button = within(row).getByRole("button", { name: "检测 未归属渠道 bananarouter" });
+    const other = screen.getByRole("row", { name: "查看 Owned site Channel 27 渠道详情" });
+    const otherButton = within(other).getByRole("button", { name: "检测 Owned site Channel 27" });
+    expect(button).toBeEnabled();
+    expect(otherButton).toBeEnabled();
+    fireEvent.click(button);
+    await advance(100);
+    await advance(100);
     expect(button).toBeDisabled();
-    expect(within(row).getByText("0/2 可用")).toBeVisible();
+    expect(otherButton).toBeEnabled();
+    expect(within(row).getByText(`0/${SUB_MODELS.length} 可用`)).toBeVisible();
+    expect(scopedReads).toEqual([member.provider, secondMember.provider]);
     await advance(3100);
     expect(progressReads).toBe(1);
     expect(pageReads).toEqual(["", "25"]);
     stage = 1;
     await advance(3100);
-    expect(within(row).getByText("1/2 可用")).toBeVisible();
+    expect(within(row).getByText(`1/${SUB_MODELS.length} 可用`)).toBeVisible();
     expect(button).toBeDisabled();
     stage = 2;
     await advance(3100);
     expect(button).toBeEnabled();
-    expect(within(row).getByText("1/2 可用")).toBeVisible();
-    expect(pageReads).toEqual(["", "25", "25", "25"]);
+    expect(within(row).getByText(`1/${SUB_MODELS.length} 可用`)).toBeVisible();
+    expect(pageReads).toEqual(["", "25"]);
+    expect(screen.getByRole("row", { name: "查看 Owned site Channel 27 渠道详情" })).toBe(other);
+    expect(submissions).toBe(1);
+    expect(scopedReads).toEqual(Array.from({length:3}, () => [member.provider, secondMember.provider]).flat());
     expect(progressReads).toBe(3);
     await advance(30_000);
     expect(progressReads).toBe(3);
   } finally {
     view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it("reconciles the current page if a completed native row no longer matches its result filter", async () => {
+  const owner = "native-check-filter", model = "gemini-4-carbon";
+  const filters = { ...subFilterDefaults, model, availability: "untested" };
+  const client = new QueryClient();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const value = page();
+  const pending = { model, state: "queued", message: "", result: null };
+  const config: ManagedChannel = {
+    kind: "configured", source_id: "gateway", source_name: "Gateway", provider: "native", name: "Native",
+    models: [model], engine: "openai", account_ids: [], account_id: "", group_id: 0, api_key_id: "", key_position: 0,
+    key_prefix: "", positions: {}, revision: "native", manageable: false,
+  };
+  value.rows[0] = { ...value.rows[0], account: {...account,id:""}, configured: config, checks: [pending], selected: pending };
+  const key = ["management-query", owner, filters, ""];
+  client.setQueryData(key, value);
+  const snapshot = client.getQueryData<ManagementPage>(key)!;
+  const record = {
+    ...pending, state: "done", source_id: config.source_id, provider: config.provider, kind: "model", fingerprint: "",
+    result: { model, checked_at: 3, verdict: "pass", availability: { status: "success" }, quality: { status: "skipped" } },
+  };
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/progress")) return Response.json({data:[]});
+    expect(url.searchParams.get("provider")).toBe(config.provider);
+    return Response.json({format:"summary-v1",version:"v1",base_version:"",data:[{id:"record",value:record}],removed:[],order:["record"]});
+  }));
+  vi.useFakeTimers();
+  const hook = renderHook(() => useConfiguredCheckResultRefresh(owner, filters, snapshot), {
+    wrapper: ({children}) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    const [match, options] = invalidate.mock.calls[0];
+    expect(match?.queryKey).toEqual(["management-query", owner]);
+    expect(options).toEqual({cancelRefetch:false});
+    expect(match?.predicate?.(client.getQueryCache().find({queryKey:key})!)).toBe(true);
+    expect(hook.result.current.displayRows(snapshot)[0]).toBe(snapshot.rows[0]);
+  } finally {
+    hook.unmount();
+    client.clear();
     vi.useRealTimers();
   }
 });
