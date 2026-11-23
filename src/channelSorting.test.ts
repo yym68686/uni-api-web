@@ -136,6 +136,15 @@ it("groups latest quality first and then sorts probability within both groups, i
   ]);
 });
 
+it("uses the displayed native body clock for latency sorting, never unscoped clocks", () => {
+  const rows = [
+    row("unknown", { first_text: { sample_count: 1, p50_ms: 1 } }),
+    row("native", { successful_first_text: { sample_count: 2, p50_ms: 200 } }),
+    row("responses", { successful_response_created: { sample_count: 1, p50_ms: 100 }, successful_first_text: { sample_count: 1, p50_ms: 300 } }),
+  ];
+  expect(names(sortChannels(rows, [{ field: "latency", direction: "asc" }], { checks: new Map() }))).toEqual(["responses", "native", "unknown"]);
+});
+
 it("uses channel metrics, zero values and source-specific billing, while missing data stays last", () => {
   const rows = [
     row("a", {

@@ -137,6 +137,11 @@ it("keeps missing samples and gaps empty while plotting real zero success", asyn
       ...point(240), success: 0, failed: 2, covered: false, cache_rate: 0,
       successful_response_created: { sample_count: 0, p50_ms: null, p95_ms: null },
     },
+    {
+      ...point(300), success: 2, failed: 0, cache_rate: null,
+      successful_response_created: { sample_count: 0, p50_ms: null, p95_ms: null },
+      successful_first_text: { sample_count: 2, p50_ms: 500, p95_ms: 900 },
+    },
     point(420),
   ];
   vi.stubGlobal(
@@ -157,7 +162,7 @@ it("keeps missing samples and gaps empty while plotting real zero success", asyn
     ),
     success = within(screen.getByRole("region", { name: "成功率趋势" }));
   await waitFor(() => expect(latency.getAllByRole("img")).toHaveLength(2));
-  expect(success.getAllByRole("img")).toHaveLength(3);
+  expect(success.getAllByRole("img")).toHaveLength(4);
   expect(success.getAllByRole("img")[1]).toHaveAttribute(
     "aria-label",
     expect.stringContaining("成功率 0.0%"),
@@ -173,6 +178,26 @@ it("keeps missing samples and gaps empty while plotting real zero success", asyn
   expect(within(rows[2]).getAllByText("未记录")).toHaveLength(3);
   expect(within(rows[3]).getAllByText("0.0%")).toHaveLength(2);
   expect(rows[3]).toHaveTextContent("覆盖不完整");
+  expect(within(rows[4]).getAllByText("未记录")).toHaveLength(2);
+});
+
+it("plots and tabulates the successful body clock when the scoped stream has no creation events", async () => {
+  const noCreated = { sample_count: 0, p50_ms: null, p95_ms: null };
+  const points = [
+    { ...point(120), successful_response_created: noCreated,
+      successful_first_text: { sample_count: 3, p50_ms: 500, p95_ms: 800 } },
+    { ...point(180), success: 0, successful_response_created: noCreated },
+  ];
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ total: {}, from: 120, to: 240, bucket_seconds: 60, data: [{ ...props.row, points }] })));
+  mount();
+  const latency = within(await screen.findByRole("region", { name: "正文首字延迟趋势" }));
+  expect(latency.getAllByRole("img")).toHaveLength(1);
+  expect(latency.getByRole("img")).toHaveAccessibleName(/p50 500 ms \/ p95 800 ms · 3 个成功尝试正文首字样本/);
+  fireEvent.click(screen.getByRole("button", { name: "数据表" }));
+  const table = within(screen.getByRole("table", { name: "渠道分时数据" }));
+  expect(table.getByRole("columnheader", { name: "正文首字延迟" })).toBeVisible();
+  expect(table.getAllByRole("row")[1]).toHaveTextContent("p50 500 ms");
+  expect(table.getAllByRole("row")[2]).toHaveTextContent("未记录");
 });
 it("does not fabricate zero measurements for empty history", async () => {
   vi.stubGlobal(

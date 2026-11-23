@@ -48,6 +48,7 @@ export interface Stats {
   successful_response_created?: Distribution;
   failed_response_created?: Distribution;
   first_text?: Distribution;
+  successful_first_text?: Distribution;
   request_to_dispatch?: Distribution;
   duration?: Distribution;
   last_success_at: number | null;

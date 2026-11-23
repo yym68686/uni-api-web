@@ -45,7 +45,7 @@ Only the selected filter key's opaque ID is stored, never the access credential.
   cache and explicit unsupported/error/unknown states. Shared balances are never
   summed. An exhausted channel requires all upstream keys to be known and empty.
 - Optional one-minute traffic buckets from the timeseries API; no synthetic charts.
-- Channel drawers share one scoped history request for response-created p50/p95,
+- Channel drawers share one scoped history request for first-response p50/p95,
   success-rate and cache-rate curves. Gaps stay empty. Independent availability,
   current-model Tool use, Astra quality and automatic-model compaction checks
   target the selected source/provider through the gateway, including key-owned
@@ -302,7 +302,7 @@ Haiku 5.5 按单次总输入（含缓存）自动采用 ≤100k / >100k 两档�
 
 倍率优先读取专用 key 的 `/v1/sub2api/billing` 有效倍率（包含上游用户专属与高峰规则）。旧版不支持时，只有用户倍率接口成功且未启用高峰倍率才使用分组/专属倍率；不能确定则显示缺失。界面只显示上游数字，不做汇率换算，悬停可见同步时间。
 
-渠道观测与 Responses 单次检测的首字以首个 `response.created` 计时。渠道观测 p50/p95、排序与趋势只使用成功尝试的创建事件，主列标注样本数，失败尝试的分布单独留在悬浮提示中。首个正文片段仍独立采集和展示；没有创建事件时，不以旧首输出值填充。p50 与单次检测延迟使用统一 badge：≤5 秒绿色、>5 秒且≤10 秒黄色、>10 秒红色；缺失值、请求前等待、p95 不着色。
+Responses 单次检测的首字以首个 `response.created` 计时。渠道观测 p50/p95、手动排序和趋势仅使用成功尝试的计时：优先显示创建事件；没有创建事件样本时，显示首个上游正文片段，并标注「正文」。趋势整段使用同一种时钟。失败尝试的创建事件分布单独留在悬浮提示中；不会以推理、工具调用、旧首输出或总耗时代替正文。p50 与单次检测延迟使用统一 badge：≤5 秒绿色、>5 秒且≤10 秒黄色、>10 秒红色；缺失值、请求前等待、p95 不着色。
 
 「添加到渠道」弹窗默认勾选该分组最新检测成功且没有已确认单价异常的模型；异常模型默认不勾选并显示提示，仍可由用户手动选择。选择 uni-api 来源、目标 API key 和从 1 开始的位置。仅允许添加已测可用模型；由后端创建并复用独立 `uni-console-route-*` 业务 key（采用上游默认额度），加密保存并直接传到网关，浏览器不接触凭据。不会把 $1 检测 key 用于生产调用。
 

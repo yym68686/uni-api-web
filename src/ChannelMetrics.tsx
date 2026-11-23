@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { channelLatency } from "./channelLatency";
+import { channelLatency, channelLatencyKind } from "./channelLatency";
 import { FailureCounts } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
@@ -117,11 +117,12 @@ const timingDetail = (value?: Distribution) =>
   `p50 ${ms(value?.p50_ms)} · p95 ${ms(value?.p95_ms)} · 最近 ${ms(value?.last_ms)}`;
 
 export function ChannelFirstResponse({ stats, showP95 = false }: { stats?: Stats; showP95?: boolean }) {
-  const value = channelLatency(stats);
+  const kind = channelLatencyKind(stats);
+  const value = channelLatency(stats, kind);
   const failed = stats?.failed_response_created;
   const samples = value?.sample_count ?? 0;
   return <Tip text={<>
-    <strong>渠道请求发起 → 首个 response.created</strong>
+    <strong>渠道请求发起 → {kind === "text" ? "首个上游正文片段" : "首个 response.created"}</strong>
     <br />
     仅统计成功完成的渠道尝试 · {count(samples)} 次首字样本
     <br />
@@ -136,13 +137,13 @@ export function ChannelFirstResponse({ stats, showP95 = false }: { stats?: Stats
       首个上游输出（含正文、推理或工具调用）：{count(stats.first_output.sample_count)} 次 · {timingDetail(stats.first_output)}
     </>}
     <br />
-    首个上游正文片段：{count(stats?.first_text?.sample_count || 0)} 次 · {timingDetail(stats?.first_text)}
+    首个上游正文片段（所有尝试）：{count(stats?.first_text?.sample_count || 0)} 次 · {timingDetail(stats?.first_text)}
   </>}>
     <span className="dual-metric">
       {samples > 0 ? <>
         <LatencyBadge value={value?.p50_ms} />
         {showP95 && <span className="muted mono">{ms(value?.p95_ms)}</span>}
-        <small className="muted">{count(samples)} 次样本</small>
+        <small className="muted">{count(samples)} 次样本{kind === "text" ? " · 正文" : ""}</small>
       </> : <span className="muted">
         {!value ? "未记录" : stats?.success === 0 ? "无成功样本" : "无首字样本"}
       </span>}
@@ -212,7 +213,7 @@ export function ChannelMetricHeaders({
         </Tip>
       </th>;
       case "latency": return <th className="column-run">
-        <Tip keyboard={false} text="仅统计成功完成、且记录到首个 response.created 的渠道尝试。">首字 <small>p50 / p95</small></Tip>
+        <Tip keyboard={false} text="仅统计成功完成的渠道尝试。优先使用首个 response.created；无创建事件样本时，显示首个上游正文片段的延迟。">首字 <small>p50 / p95</small></Tip>
       </th>;
       case "duration": return <th className="column-quality">
         <Tip text="当前渠道单次尝试从开始到离开的总时间，包含成功、失败和取消；流式请求计到流结束。不包含前序重试和后续渠道耗时，跳过及进行中的尝试不计入。p50 / p95 为直方图上界估计。">

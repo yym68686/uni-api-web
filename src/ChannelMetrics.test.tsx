@@ -39,6 +39,21 @@ it("renders the successful subset, and distinguishes missing clocks and an old e
   expect(screen.getByText("未记录")).toBeVisible();
 });
 
+it("shows real body timing and its source for successful native streams without creation events", async () => {
+  const stats = { ...emptyStats(), success: 4, failed: 20,
+    successful_response_created: noCreated, successful_first_text: duration,
+    first_text: failedCreated, first_output: failedCreated };
+  render(<Tooltip.Provider delayDuration={0}><ChannelFirstResponse stats={stats} showP95 /></Tooltip.Provider>);
+  expect(screen.getByText("3.00 s")).toBeVisible();
+  expect(screen.getByText("10.00 s")).toBeVisible();
+  expect(screen.getByText("4 次样本 · 正文")).toBeVisible();
+  expect(screen.queryByText("无首字样本")).not.toBeInTheDocument();
+  fireEvent.focus(screen.getByText("4 次样本 · 正文").closest("[tabindex]")!);
+  const tip = await screen.findByRole("tooltip");
+  expect(tip).toHaveTextContent("渠道请求发起 → 首个上游正文片段");
+  expect(tip).toHaveTextContent("仅统计成功完成的渠道尝试 · 4 次首字样本");
+});
+
 it("only colors first-response p50, not p95 or dispatch waiting", () => {
   const row = { provider: "channel", stats: { ...emptyStats(), success: 4,
     successful_response_created: { ...duration, p50_ms: 5001 }, request_to_dispatch: duration } } as Channel;

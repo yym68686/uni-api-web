@@ -52,12 +52,12 @@ type Summary struct {
 	LastDuration              *float64         `json:"-"`
 	LastDurationMS            int64            `json:"-"`
 
-	SuccessCreated, FailedCreated createdSamples `json:"-"`
+	SuccessCreated, FailedCreated, SuccessText timingSamples `json:"-"`
 }
 
 // The rollup rows already retain kind and normalized outcome. Partition the
 // existing histograms at read time, without a fact scan, migration or backfill.
-type createdSamples struct {
+type timingSamples struct {
 	bins   []int64
 	n      int64
 	sum    float64
@@ -65,7 +65,7 @@ type createdSamples struct {
 	lastAt int64
 }
 
-func (s *createdSamples) merge(other createdSamples) {
+func (s *timingSamples) merge(other timingSamples) {
 	if other.n == 0 {
 		return
 	}
@@ -82,7 +82,7 @@ func (s *createdSamples) merge(other createdSamples) {
 	}
 }
 
-func (s createdSamples) distribution() map[string]any {
+func (s timingSamples) distribution() map[string]any {
 	return distribution(s.bins, s.n, s.sum, s.last)
 }
 
@@ -139,6 +139,7 @@ func (s *Summary) merge(x Summary) {
 	mergeBins(&s.DurationBins, x.DurationBins)
 	s.SuccessCreated.merge(x.SuccessCreated)
 	s.FailedCreated.merge(x.FailedCreated)
+	s.SuccessText.merge(x.SuccessText)
 	if x.LastDuration != nil && (x.LastDurationMS > s.LastDurationMS || (x.LastDurationMS == s.LastDurationMS && (s.LastDuration == nil || *x.LastDuration > *s.LastDuration))) {
 		s.LastDuration = x.LastDuration
 		s.LastDurationMS = x.LastDurationMS
@@ -207,6 +208,7 @@ func (s Summary) JSON() map[string]any {
 	out["successful_response_created"] = s.SuccessCreated.distribution()
 	out["failed_response_created"] = s.FailedCreated.distribution()
 	out["first_text"] = distribution(s.TextBins, s.TextCount, s.TextSum, s.LastText)
+	out["successful_first_text"] = s.SuccessText.distribution()
 	out["request_to_dispatch"] = distribution(s.DispatchBins, s.DispatchCount, s.DispatchSum, s.LastDispatch)
 	out["duration"] = distribution(s.DurationBins, s.DurationCount, s.DurationSum, s.LastDuration)
 	out["last_success_at"] = nil
@@ -441,12 +443,13 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 			identities[key] = [4]string{sourceID, provider, model, upstream}
 		}
 		if kind == "attempt" {
-			created := createdSamples{bins: s.CreatedBins, n: s.CreatedCount, sum: s.CreatedSum, last: s.LastCreated, lastAt: s.LastCreatedMS}
+			created := timingSamples{bins: s.CreatedBins, n: s.CreatedCount, sum: s.CreatedSum, last: s.LastCreated, lastAt: s.LastCreatedMS}
 			switch outcome {
 			case "success", "completed":
 				s.Attempts = n
 				s.Success = n
 				s.SuccessCreated = created
+				s.SuccessText = timingSamples{bins: s.TextBins, n: s.TextCount, sum: s.TextSum, last: s.LastText, lastAt: s.LastTextMS}
 			case "skipped":
 				s.Skipped = n
 			case "cancelled", "client_cancelled", "hedge_cancelled":
@@ -635,7 +638,11 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
       to_json(`+mergeHistogramSQL("(CASE WHEN "+successfulAttemptSQL+" THEN created_bins ELSE ARRAY[]::BIGINT[] END)")+`),
       coalesce(sum(created_count) FILTER (WHERE `+successfulAttemptSQL+`),0)::BIGINT,
       coalesce(sum(created_sum) FILTER (WHERE `+successfulAttemptSQL+`),0),
-      (max(ARRAY[last_created_ms::DOUBLE PRECISION,last_created]) FILTER(WHERE last_created IS NOT NULL AND last_created_ms IS NOT NULL AND `+successfulAttemptSQL+`))[2]
+      (max(ARRAY[last_created_ms::DOUBLE PRECISION,last_created]) FILTER(WHERE last_created IS NOT NULL AND last_created_ms IS NOT NULL AND `+successfulAttemptSQL+`))[2],
+      to_json(`+mergeHistogramSQL("(CASE WHEN "+successfulAttemptSQL+" THEN text_bins ELSE ARRAY[]::BIGINT[] END)")+`),
+      coalesce(sum(text_count) FILTER (WHERE `+successfulAttemptSQL+`),0)::BIGINT,
+      coalesce(sum(text_sum) FILTER (WHERE `+successfulAttemptSQL+`),0),
+      (max(ARRAY[last_text_ms::DOUBLE PRECISION,last_text]) FILTER(WHERE last_text IS NOT NULL AND last_text_ms IS NOT NULL AND `+successfulAttemptSQL+`))[2]
       FROM `+rollupReadSQL(where)+` GROUP BY bucket ORDER BY bucket`, args...)
 	if err != nil {
 		return err
@@ -644,8 +651,12 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 	for rows.Next() {
 		var period, success, failed, input, cached, samples int64
 		var latency Summary
-		var createdBins, textBins, successBins any
-		if err = rows.Scan(&period, &success, &failed, &input, &cached, &samples, &createdBins, &latency.CreatedCount, &latency.CreatedSum, &latency.LastCreated, &textBins, &latency.TextCount, &latency.TextSum, &latency.LastText, &successBins, &latency.SuccessCreated.n, &latency.SuccessCreated.sum, &latency.SuccessCreated.last); err != nil {
+		var createdBins, textBins, successCreatedBins, successTextBins any
+		if err = rows.Scan(&period, &success, &failed, &input, &cached, &samples,
+			&createdBins, &latency.CreatedCount, &latency.CreatedSum, &latency.LastCreated,
+			&textBins, &latency.TextCount, &latency.TextSum, &latency.LastText,
+			&successCreatedBins, &latency.SuccessCreated.n, &latency.SuccessCreated.sum, &latency.SuccessCreated.last,
+			&successTextBins, &latency.SuccessText.n, &latency.SuccessText.sum, &latency.SuccessText.last); err != nil {
 			return err
 		}
 		var rate any
@@ -656,9 +667,11 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 		// Merge the stored histograms before computing percentiles; never average
 		// p50/p95 or count the winning request's copy of an attempt a second time.
 		point["response_created"] = distribution(histogramValues(createdBins), latency.CreatedCount, latency.CreatedSum, latency.LastCreated)
-		latency.SuccessCreated.bins = histogramValues(successBins)
+		latency.SuccessCreated.bins = histogramValues(successCreatedBins)
 		point["successful_response_created"] = latency.SuccessCreated.distribution()
 		point["first_text"] = distribution(histogramValues(textBins), latency.TextCount, latency.TextSum, latency.LastText)
+		latency.SuccessText.bins = histogramValues(successTextBins)
+		point["successful_first_text"] = latency.SuccessText.distribution()
 		point["success_rate_denominator"] = success + failed
 		point["success_rate"] = nil
 		if success+failed > 0 {

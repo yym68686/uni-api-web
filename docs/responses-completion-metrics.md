@@ -26,12 +26,14 @@ recovered from output token counts or null first-output measurements. Explicit
 historical `incomplete` outcomes are classified as failures, including cached
 rollups, without a data rewrite. Success-rate tooltips show scoped success/failure counts and failure reasons.
 
-Channel observatory first-response p50/p95, sorting, trends, and automation use
-only `response.created` timings from successful attempts, not from request
-copies, failed or cancelled attempts. A successful attempt without that clock
-does not supply a latency sample. The observatory tooltip shows failed-attempt
-`response.created` timings separately for diagnosis; the existing unscoped
-distribution and the separate first-text timing remain available.
+Channel observatory first-response p50/p95, manual sorting and trends prefer
+`response.created` timings from successful attempts. If the channel scope has
+no creation samples (for example native Messages streams), they can display
+the successful attempts' separately labelled first-text timings. The entire
+trend uses one clock, and neither clock includes failed or cancelled attempts
+or the winning request's duplicate fact. Failed-attempt `response.created`
+timings remain available in the observatory tooltip. Automation continues to
+require successful `response.created` samples for latency decisions.
 
 No database schema or configuration migration is needed. Settings, retained
 routing intent and rollup/checkpoint formats remain independent of this policy.

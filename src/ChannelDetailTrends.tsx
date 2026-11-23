@@ -1,4 +1,4 @@
-import { channelLatency } from "./channelLatency";
+import { channelLatency, type ChannelLatencyKind } from "./channelLatency";
 import { DetailLoading } from "./PageLoading";
 import { FailureCounts } from "./FailureCounts";
 import { useMemo, useState } from "react";
@@ -33,15 +33,15 @@ interface Series {
   value: (point: Point) => number | null;
   color: string;
 }
-const latencySeries: Series[] = [
+const latencySeries = (kind: ChannelLatencyKind): Series[] => [
   {
     label: "p50",
-    value: (p) => channelLatency(p)?.p50_ms ?? null,
+    value: (p) => channelLatency(p, kind)?.p50_ms ?? null,
     color: "var(--green)",
   },
   {
     label: "p95",
-    value: (p) => channelLatency(p)?.p95_ms ?? null,
+    value: (p) => channelLatency(p, kind)?.p95_ms ?? null,
     color: "var(--danger)",
   },
 ];
@@ -55,9 +55,12 @@ const cacheSeries: Series[] = [
     color: "var(--accent)",
   },
 ];
-const latencyDetail = (p: Point) => {
-  const latency = channelLatency(p);
-  return `${count(latency?.sample_count || 0)} 个成功尝试首字样本 · 正文首字 p50 ${ms(p.first_text?.p50_ms)}`;
+const latencyTitle = (kind: ChannelLatencyKind) => kind === "text" ? "正文首字延迟" : "首字延迟";
+const latencyDetail = (p: Point, kind: ChannelLatencyKind) => {
+  const samples = count(channelLatency(p, kind)?.sample_count || 0);
+  return kind === "text"
+    ? `${samples} 个成功尝试正文首字样本`
+    : `${samples} 个成功尝试首字样本 · 所有尝试正文首字 p50 ${ms(p.first_text?.p50_ms)}`;
 };
 const successDetail = (p: Point) =>
   `成功 ${count(p.success || 0)} / 失败 ${count(p.failed || 0)} · ${count((p.success || 0) + (p.failed || 0))} 次有效尝试`;
@@ -237,14 +240,14 @@ function Curve({
   );
 }
 
-function ChannelTrendTable({ points }: { points: Point[] }) {
+function ChannelTrendTable({ points, kind }: { points: Point[]; kind: ChannelLatencyKind }) {
   return (
     <TrendDataTable
       label="渠道分时数据"
-      columns={["时间段", "首字延迟", "成功率", "缓存率"]}
+      columns={["时间段", latencyTitle(kind), "成功率", "缓存率"]}
     >
       {points.map((p) => {
-        const latency = channelLatency(p);
+        const latency = channelLatency(p, kind);
         const success = successRate(p);
         return (
           <tr key={p.timestamp}>
@@ -270,8 +273,8 @@ function ChannelTrendTable({ points }: { points: Point[] }) {
                   </span>
                 </>
               )}
-              {(!!latency?.sample_count || p.first_text?.p50_ms != null) && (
-                <small>{latencyDetail(p)}</small>
+              {(!!latency?.sample_count || (kind === "created" && p.first_text?.p50_ms != null)) && (
+                <small>{latencyDetail(p, kind)}</small>
               )}
             </td>
             <td>
@@ -319,6 +322,10 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
   );
   const to = Math.max(from + 1, query.data?.to || 0);
   const bucket = query.data?.bucket_seconds || 60;
+  // Use one clock across the entire chart so adjacent buckets never mix
+  // protocol creation events with actual text timings.
+  const kind = points.some(p => p.successful_response_created?.sample_count) ||
+    !points.some(p => p.successful_first_text?.sample_count) ? "created" : "text";
   const ready = !query.isPending && !query.isError;
   const cacheRate = query.data?.total?.cache_rate;
   return (
@@ -354,13 +361,13 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
             hidden={mode === "table" && points.length > 0}
           >
             <Curve
-              title="首字延迟"
+              title={latencyTitle(kind)}
               points={points}
-              series={latencySeries}
+              series={latencySeries(kind)}
               from={from}
               to={to}
               bucket={bucket}
-              detail={latencyDetail}
+              detail={p => latencyDetail(p, kind)}
             />
             <Curve
               title="成功率"
@@ -385,7 +392,7 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
             />
           </div>
           {mode === "table" && points.length > 0 && (
-            <ChannelTrendTable points={points} />
+            <ChannelTrendTable points={points} kind={kind} />
           )}
           {cacheRate != null && (
             <p className="detail-trends-cache muted">

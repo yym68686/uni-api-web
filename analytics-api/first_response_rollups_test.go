@@ -86,3 +86,63 @@ func TestFirstResponseRollupsSeparateSuccessAndFailure(t *testing.T) {
 		t.Fatalf("automation used failed latency: %#v", m)
 	}
 }
+
+func TestNativeFirstTextRollupsOnlyUseScopedSuccessfulAttempts(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Minute)
+	base := Fact{Schema: 1, Kind: "attempt", SourceID: "source", KeyID: "caller", Provider: "native", Model: "claude-opus-5-5", UpstreamModel: "claude-opus-5-5", Endpoint: "/v1/messages", Stream: true, Outcome: "success"}
+	add := func(id string, at time.Time, ms float64) Fact {
+		f := base
+		f.EventID, f.AtMS, f.FirstTextMS = id, at.UnixMilli(), &ms
+		return f
+	}
+	recent, older := now.Add(-2*time.Minute), now.Add(-72*time.Hour)
+	completed := add("completed", recent.Add(time.Second), 500)
+	completed.Outcome = "completed"
+	requestCopy := add("request-copy", recent, 20)
+	requestCopy.Kind = "request"
+	failed := add("failed", recent, 7500)
+	failed.Outcome = "failed"
+	cancelled := add("cancelled", recent, 10000)
+	cancelled.Outcome = "hedge_cancelled"
+	wrongStream := add("nonstream", recent, 50)
+	wrongStream.Stream = false
+	wrongKey := add("other-key", recent, 50)
+	wrongKey.KeyID = "other"
+	toolOnly := add("no-text", recent, 20)
+	toolOnly.FirstOutputMS, toolOnly.FirstTextMS = toolOnly.FirstTextMS, nil
+	facts := []Fact{add("older", older, 100), add("recent", recent, 200), completed, requestCopy, failed, cancelled, wrongStream, wrongKey, toolOnly}
+	if err := e.Import(ctx, "native-first-text", "one", facts); err != nil {
+		t.Fatal(err)
+	}
+	check := func(stats map[string]any, n int64, p50, p95, last float64) {
+		t.Helper()
+		created := stats["successful_response_created"].(map[string]any)
+		got := stats["successful_first_text"].(map[string]any)
+		lastValue, ok := got["last_ms"].(*float64)
+		if created["sample_count"] != int64(0) || got["sample_count"] != n || got["p50_ms"] != p50 || got["p95_ms"] != p95 || !ok || lastValue == nil || *lastValue != last {
+			t.Fatalf("created: %#v; text: %#v; want %d text samples, %v / %v, last %v", created, got, n, p50, p95, last)
+		}
+	}
+	filter := QueryFilter{Range: "24h", Timeseries: true, To: now.Unix(), SourceID: base.SourceID, KeyID: base.KeyID, Provider: base.Provider, Model: base.Model, Endpoint: base.Endpoint, Stream: "true"}
+	query := func(wantPoints int) AnalyticChannel {
+		t.Helper()
+		result, err := e.Query(ctx, filter)
+		if err != nil || len(result.Data) != 1 || len(result.Data[0].Points) != wantPoints {
+			t.Fatal(err, result.Data)
+		}
+		return result.Data[0]
+	}
+	row := query(1)
+	check(row.Stats, 2, 200, 500, 500)
+	check(row.Points[0], 2, 200, 500, 500)
+	if row.Stats["success"] != float64(3) || row.Stats["first_text"].(map[string]any)["sample_count"] != int64(4) {
+		t.Fatalf("unexpected attempt populations: %#v", row.Stats)
+	}
+	filter.Range = "all"
+	row = query(2)
+	check(row.Stats, 3, 200, 500, 500)
+	check(row.Points[0], 1, 100, 100, 100)
+	check(row.Points[1], 2, 200, 500, 500)
+}
