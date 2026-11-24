@@ -173,6 +173,8 @@
 .management-query:has(.management-availability-filter) .search-field {flex-basis:9rem}
 .management-query .management-availability-filter {flex:none;background:var(--selection);color:var(--accent)}
 .management-actions {flex:0 1 auto;flex-wrap:wrap}
+.management-batch-feedback {margin:0 0 8px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;overflow-wrap:anywhere}
+.management-batch-feedback p {margin:0}
 .channel-add-receipts {display:grid;gap:6px;margin-block:0 12px}
 .channel-add-receipt {display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px}
 .channel-add-receipt > span {flex:1;min-width:min(180px,100%);overflow-wrap:anywhere}

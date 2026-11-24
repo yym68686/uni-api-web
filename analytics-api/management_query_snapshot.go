@@ -119,13 +119,15 @@ func (s *Service) readManagementResetDirectory(ctx context.Context, owner string
 
 func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, owner string, filters managementQueryFilters, token string, selection, rebase, preview, hydrate bool) (managementQuerySnapshot, error) {
 	ctx = managementTraceContext(ctx)
-	if !selection && owner != "" {
+	checkSelection, _ := ctx.Value(managementCheckSelectionKey{}).(bool)
+	projected := !selection || checkSelection
+	if projected && owner != "" {
 		ctx = context.WithValue(ctx, managementGatewayPartsScopeKey{}, &managementGatewayPartsScope{store: &s.gatewayParts, owner: owner})
 	}
 	out := managementQuerySnapshot{}
 	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
 		ctx := ctx
-		if !selection {
+		if projected {
 			directory := &managementDirectoryScope{store: &s.modelDirectories, predicates: &s.predicateSets, database: s.control.db, tx: tx, owner: owner}
 			ctx = context.WithValue(ctx, managementDirectoryScopeKey{}, directory)
 			proof, _, err := s.managementReadProof(ctx, tx, owner)
@@ -155,10 +157,12 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 		// withManagementSnapshot owns this repeatable-read transaction. Only
 		// this path can retain predicate receipts until same-snapshot hydration.
 		var reuse *managementReceiptReuse
-		if !selection {
+		if projected {
 			reuse = &managementReceiptReuse{deferModelUsage: filters.PriceStatus == ""}
 		}
-		view, err := s.readManagementDatabaseModeWithReceiptsFrom(ctx, tx, owner, facts, !selection, filters.Model, catalogOnly && !selection, reuse)
+		// Checks need model states, including those outside the current page.
+		// Do not hydrate replies or use the catalog-only shortcut for them.
+		view, err := s.readManagementDatabaseModeWithReceiptsFrom(ctx, tx, owner, facts, projected, filters.Model, catalogOnly && !selection, reuse)
 		if err != nil {
 			return view, err
 		}

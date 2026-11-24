@@ -40,10 +40,44 @@ type managementSelectionResponse struct {
 	Prices        []Price              `json:"prices"`
 }
 
+type managementCheckSelectionKey struct{}
+
+type managementCheckSelectionResponse struct {
+	Format        string               `json:"format"`
+	Revision      string               `json:"revision"`
+	ReadAtMS      int64                `json:"read_at_ms"`
+	Total         int                  `json:"total"`
+	EligibleCount int                  `json:"eligible_count"`
+	Eligible      []managementQueryRow `json:"eligible"`
+}
+
+// Model checks need target identity and queue state, not the full diagnostic
+// history, account inventory and a second copy of the filtered rows.
+func managementCheckSelection(page managementQueryPage, rows []managementQueryRow) managementCheckSelectionResponse {
+	eligible := managementEligibleRows(rows)
+	for i := range eligible {
+		row := &eligible[i]
+		account, target := row.Account, row.Target
+		row.Account = subAccount{ID: account.ID, Name: account.Name, State: account.State, JobKind: account.JobKind, ProviderKind: account.ProviderKind, Targets: []subTarget{}}
+		row.Target = subTarget{GroupID: target.GroupID, Name: target.Name, KeyID: target.KeyID, Active: target.Active, State: target.State,
+			CompactionState: target.CompactionState, ToolUseState: target.ToolUseState}
+		for _, m := range target.Models {
+			if managementPending(m.State) {
+				row.Target.Models = append(row.Target.Models, subModelResult{Model: m.Model, State: m.State})
+			}
+		}
+		if target.Models != nil && row.Target.Models == nil {
+			row.Target.Models = []subModelResult{}
+		}
+		row.Checks, row.Selected = []managementQueryCheck{}, nil
+	}
+	return managementCheckSelectionResponse{"management-check-selection-v1", page.Revision, page.ReadAtMS, page.Total, page.EligibleCount, eligible}
+}
+
 func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	filters := managementQueryFilters{GroupStatus: "available"}
 	for key, list := range values {
-		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor", "observe_receipt_plan", "observe_model_read", "receipt_view", "model_view"}, key) || len(list) != 1 || len(list[0]) > 8192 {
+		if !slices.Contains([]string{"filters", "cursor", "selection", "check_selection", "refresh_cursor", "observe_receipt_plan", "observe_model_read", "receipt_view", "model_view"}, key) || len(list) != 1 || len(list[0]) > 8192 {
 			return filters, errManagementFilters
 		}
 	}
@@ -60,6 +94,9 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 		return filters, errManagementFilters
 	}
 	if values.Has("model_view") && values.Get("model_view") != "selected" {
+		return filters, errManagementFilters
+	}
+	if values.Has("check_selection") && (values.Get("check_selection") != "1" || values.Get("selection") == "") {
 		return filters, errManagementFilters
 	}
 	raw := values.Get("filters")
@@ -181,6 +218,10 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	checkSelection := values.Get("check_selection") == "1"
+	if checkSelection {
+		ctx = context.WithValue(ctx, managementCheckSelectionKey{}, true)
+	}
 	listView := r.Header.Get(managementListViewHeader)
 	if selection == "" && r.Header.Get("Accept") == managementPageV3MediaType &&
 		(listView == managementListViewV1 || listView == managementOverviewV1 && filters.Model == "") && !values.Has("observe_receipt_plan") && !values.Has("observe_model_read") {
@@ -273,6 +314,8 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 			class = "management_source_incomplete"
 		}
 		http.Error(w, message, status)
+	} else if checkSelection {
+		err = writeManagementJSON(w, r.WithContext(ctx), managementCheckSelection(page, snapshot.Filtered.Rows))
 	} else if selection != "" {
 		filtered := filterManagementQueryRows(rows, filters, evidence).Rows
 		err = writeManagementJSON(w, r, managementSelectionResponse{Format: "management-selection-v1", Revision: page.Revision, ReadAtMS: page.ReadAtMS, Total: page.Total, EligibleCount: page.EligibleCount, Rows: filtered, Eligible: managementEligibleRows(filtered), Input: view.Input, Prices: view.Prices})

@@ -593,6 +593,61 @@ it("renders just the current 25 rows and fetches all 61 before a batch, without 
   ).toEqual([]);
 });
 
+it.each([202, 502])("shows a failed selected-model preview, then confirms only that model and handles submit status %s", async submitStatus => {
+  const owner = `selected-model-batch-feedback-${submitStatus}`;
+  const model = "gpt-6.2-sol";
+  saveSubFilters(owner, { ...subFilterDefaults, model });
+  saveSubModels(owner, [model], SUB_MODELS);
+  let previewReads = 0;
+  const writes: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
+    if (url.pathname.endsWith("/detection-settings")) return Response.json({ disabled: [] });
+    if (url.pathname.endsWith("/sub2api/checks") && init?.method === "POST") {
+      writes.push(JSON.parse(String(init.body)));
+      return submitStatus === 202
+        ? Response.json({ queued: true }, { status: 202 })
+        : new Response("<html>Bad Gateway</html>", { status: 502 });
+    }
+    if (url.pathname.endsWith("/channel-management/query")) {
+      if (!url.searchParams.has("selection")) return Response.json(page());
+      expect(url.searchParams.get("check_selection")).toBe("1");
+      expect(JSON.parse(url.searchParams.get("filters")!).model).toBe(model);
+      if (++previewReads === 1) return new Response("<html>Bad Gateway</html>", { status: 502 });
+      return Response.json({
+        format: "management-check-selection-v1", revision: "current", read_at_ms: 2, total: 61, eligible_count: 61,
+        eligible: rows.map((row, i) => i === 60 ? { ...row, target: { ...row.target, models: [{ model, state: "queued" }] } } : row),
+      });
+    }
+    return Response.json({ data: [] });
+  }));
+  mount(owner);
+  const user = userEvent.setup();
+  const detect = await screen.findByRole("button", { name: "检测所选模型 · 61 个渠道" });
+  await waitFor(() => expect(detect).toBeEnabled());
+  await user.click(detect);
+  const failure = await screen.findByRole("dialog", { name: "批量检测失败" });
+  expect(within(failure).getByRole("alert")).toHaveTextContent("检测范围读取失败，请重试。（HTTP 502）");
+  expect(screen.queryByRole("dialog", { name: "核对批量检测范围" })).not.toBeInTheDocument();
+  expect(writes).toHaveLength(0);
+  await user.click(within(failure).getByRole("button", { name: "知道了" }));
+  await user.click(detect);
+  const preview = await screen.findByRole("dialog", { name: "核对批量检测范围" });
+  expect(within(preview).getByText(/本次计划 60 \/ 61 个渠道/)).toBeVisible();
+  expect(writes).toHaveLength(0);
+  await user.click(within(preview).getByRole("button", { name: "确认提交检测" }));
+  if (submitStatus === 202) {
+    expect(await screen.findByText(/站点渠道.*已收到提交回执/)).toBeVisible();
+  } else {
+    const unconfirmed = await screen.findByRole("dialog", { name: "批量检测提交结果未确认" });
+    expect(within(unconfirmed).getByText(/未收到检测回执（HTTP 502）/)).toBeVisible();
+    expect(within(unconfirmed).getByText(/避免重复提交/)).toBeVisible();
+  }
+  expect(previewReads).toBe(3);
+  expect(writes).toEqual([{ targets: rows.slice(0, 60).map(row => ({ account_id: account.id, group_id: row.target.group_id, models: [model] })) }]);
+});
+
 it("opens optimization from a fresh full snapshot after results changed, while batches still reject the old page selection", async () => {
   const calls: URL[] = [];
   vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
@@ -611,7 +666,9 @@ it("opens optimization from a fresh full snapshot after results changed, while b
   mount("fresh-optimization");const user=userEvent.setup();
   await screen.findByText("Channel 1",{selector:"strong"});
   await user.click(screen.getByRole("button",{name:"检测全部模型 · 61 个渠道"}));
-  await screen.findByText("渠道配置或检测结果已变化，请重新读取");
+  const failure = await screen.findByRole("dialog", { name: "批量检测失败" });
+  expect(within(failure).getByText("渠道配置或检测结果已变化，请重新读取")).toBeVisible();
+  await user.click(within(failure).getByRole("button", { name: "知道了" }));
   const before=calls.filter(u=>u.searchParams.has("selection")).length;
   await user.click(screen.getByRole("button",{name:"优化渠道模型"}));
   const dialog=await screen.findByRole("dialog",{name:"优化渠道模型"});

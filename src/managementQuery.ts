@@ -440,6 +440,41 @@ export async function readManagementSelection(
   return selection;
 }
 
+export async function readManagementCheckSelection(
+  filters: SubFilters,
+  page: ManagementPage,
+  signal: AbortSignal,
+): Promise<Pick<ManagementSelection, "revision" | "total" | "eligible">> {
+  let selection: (Omit<Pick<ManagementSelection, "format" | "revision" | "total" | "eligible_count" | "read_at_ms" | "eligible">, "format"> &
+    { format: "management-check-selection-v1" | "management-selection-v1" });
+  try {
+    selection = await controlRequest(
+      path(filters, { selection: page.selection_token }) + "&check_selection=1",
+      { signal },
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400 && error.message.trim() === "筛选参数无效")
+      throw Error("批量检测服务正在更新，请稍后重试。");
+    // Never retry using the full diagnostic response during a rolling deploy.
+    throw error;
+  }
+  signal.throwIfAborted();
+  if (
+    !selection ||
+    !["management-check-selection-v1", "management-selection-v1"].includes(selection.format) ||
+    selection.revision !== page.revision ||
+    selection.total !== page.total ||
+    selection.eligible_count !== page.eligible_count ||
+    !count(selection.read_at_ms) ||
+    !Array.isArray(selection.eligible) ||
+    selection.eligible.length !== page.eligible_count ||
+    !uniqueRows(selection.eligible)
+  ) {
+    throw Error("完整筛选结果已变化或读取不完整，请刷新渠道后重试");
+  }
+  return selection;
+}
+
 function validateManagementSelection(selection: ManagementSelection | ManagementOptimizationPreview) {
   if (
     !selection.revision ||

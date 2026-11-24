@@ -12,6 +12,78 @@ import (
 	"testing"
 )
 
+func TestManagementHTTPCheckSelectionKeepsAllTargetsWithoutDiagnosticPayload(t *testing.T) {
+	s := managementHydrationFixture(t)
+	const marker = "BATCH_DIAGNOSTIC_MUST_NOT_BE_SERIALIZED"
+	db := s.control.db
+	for _, q := range []string{
+		`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,active,state)
+		     SELECT 'a',g,'G'||g,'openai',g,true,'done' FROM generate_series(62,980) g`,
+		`INSERT INTO console_sub_models(account_id,group_id,model,state,message,result)
+		     SELECT 'a',g,m,CASE WHEN g=980 AND m='gpt-6.2-sol' THEN 'queued' ELSE 'done' END,'',
+		            jsonb_build_object('model',m,'checked_at',g,'verdict','pass','availability',
+		              jsonb_build_object('status','success','text',repeat('` + marker + `',256)))
+		     FROM generate_series(62,980) g CROSS JOIN unnest(ARRAY['gpt-6.2-sol','gpt-6-astra','gpt-5.5']) m`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session, err := s.control.newSession(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	call := func(values url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?"+values.Encode(), nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for _, model := range []string{"gpt-6.2-sol", ""} {
+		filters := `{"model":"` + model + `"}`
+		pageParams := url.Values{"filters": {filters}}
+		if model != "" {
+			pageParams.Set("receipt_view", "selected")
+			pageParams.Set("model_view", "selected")
+		}
+		first := call(pageParams)
+		var page managementPageResponse
+		if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil || first.Code != 200 || page.Total != 980 || len(page.Rows) != 25 {
+			t.Fatalf("expected production-size page, got status=%d total=%d rows=%d err=%v", first.Code, page.Total, len(page.Rows), err)
+		}
+		params := url.Values{"filters": {filters}, "selection": {page.SelectionToken}, "check_selection": {"1"}}
+		response := call(params)
+		var result managementCheckSelectionResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || response.Code != 200 ||
+			result.Format != "management-check-selection-v1" || result.Revision != page.Revision || result.Total != 980 || result.EligibleCount != 980 || len(result.Eligible) != 980 {
+			t.Fatalf("invalid check selection: status=%d total=%d eligible=%d err=%v", response.Code, result.Total, len(result.Eligible), err)
+		}
+		if body := response.Body; body.Len() > 800_000 || strings.Contains(body.String(), marker) || strings.Contains(body.String(), `"input":`) {
+			t.Fatal("batch response included diagnostic inventory", body.Len())
+		}
+		found := false
+		for _, row := range result.Eligible {
+			if row.Target.GroupID == 980 {
+				found = len(row.Target.Models) == 1 && row.Target.Models[0].Model == "gpt-6.2-sol" && row.Target.Models[0].State == "queued"
+			}
+		}
+		if !found {
+			t.Fatal("off-page running or queued model was lost")
+		}
+		if model == "" {
+			if _, err := db.Exec(`UPDATE console_sub_models SET state='done' WHERE account_id='a' AND group_id=980 AND model='gpt-6.2-sol'`); err != nil {
+				t.Fatal(err)
+			}
+			if stale := call(params); stale.Code != http.StatusConflict {
+				t.Fatal("stale check selection accepted", stale.Code)
+			}
+		}
+	}
+}
+
 func TestManagementHTTPCompleteSelectionAuthorizationAndFreshness(t *testing.T) {
 	var logs bytes.Buffer
 	previous := log.Writer()
