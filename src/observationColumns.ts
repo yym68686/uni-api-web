@@ -13,10 +13,12 @@ export const observationColumns = [
   { id: "balance", label: "站点余额", className: "column-balance" },
   { id: "quality", label: "是否降智", className: "column-quality" },
   { id: "fingerprint", label: "指纹", className: "column-quality" },
+  { id: "fast", label: "Fast", className: "column-quality" },
+  { id: "ultrafast", label: "Ultrafast", className: "column-quality" },
 ] as const;
 
 export type ObservationColumn = typeof observationColumns[number]["id"];
-export type DetectionColumn = "quality" | "fingerprint";
+export type DetectionColumn = "quality" | "fingerprint" | "fast" | "ultrafast";
 export const observationColumnClass = Object.fromEntries(observationColumns.map(({ id, className }) => [id, className])) as Record<ObservationColumn, string>;
 export type ChannelMetricLayout = "run" | "quality" | "finance" | "all";
 
@@ -24,6 +26,7 @@ export function observationPreset(layout: ChannelMetricLayout, compact = false, 
   if (compact && layout === "run") return ["status", "success", "balance"];
   const detection: ObservationColumn[] = account && (layout === "quality" || layout === "all") ? ["quality", "fingerprint"] : [];
   return [...detection, ...observationColumns.filter(({ id, className }) =>
-    id !== "quality" && id !== "fingerprint" && (layout === "all" || id === "status" || id === "balance" || className.startsWith(`column-${layout}`)),
+    id !== "quality" && id !== "fingerprint" && ((id === "fast" || id === "ultrafast") ? layout === "all" && account :
+      layout === "all" || id === "status" || id === "balance" || className.startsWith(`column-${layout}`)),
   ).map(({ id }) => id)];
 }

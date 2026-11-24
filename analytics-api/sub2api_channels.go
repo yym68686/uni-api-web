@@ -26,30 +26,31 @@ type subChannelRef struct {
 	Rate            *float64
 }
 type subInstalledChannel struct {
-	ServiceTierScope string            `json:"service_tier_scope,omitempty"`
-	Protocol         string            `json:"protocol,omitempty"`
-	Engine           string            `json:"engine,omitempty"`
-	EngineMode       string            `json:"engine_mode,omitempty"`
-	ModelMappings    map[string]string `json:"model_mappings,omitempty"`
-	Fingerprint      string            `json:"-"`
-	Kind             string            `json:"kind,omitempty"`
-	BindingStatus    string            `json:"binding_status,omitempty"`
-	BindingCheckedAt int64             `json:"binding_checked_at,omitempty"`
-	BoundKeys        []subBoundKey     `json:"bound_keys,omitempty"`
-	Base             string            `json:"base"`
-	AccountID        string            `json:"account_id"`
-	GroupID          int64             `json:"group_id"`
-	SourceID         string            `json:"source_id"`
-	SourceName       string            `json:"source_name"`
-	KeyID            string            `json:"api_key_id"`
-	KeyPosition      int               `json:"key_position"`
-	KeyPrefix        string            `json:"key_prefix"`
-	Provider         string            `json:"provider"`
-	Name             string            `json:"name"`
-	Models           []string          `json:"models"`
-	Positions        map[string]int    `json:"positions"`
-	Revision         string            `json:"revision"`
-	Manageable       bool              `json:"manageable"`
+	ServiceTierScope   string            `json:"service_tier_scope,omitempty"`
+	ServiceTierRouting map[string]string `json:"service_tier_routing,omitempty"`
+	Protocol           string            `json:"protocol,omitempty"`
+	Engine             string            `json:"engine,omitempty"`
+	EngineMode         string            `json:"engine_mode,omitempty"`
+	ModelMappings      map[string]string `json:"model_mappings,omitempty"`
+	Fingerprint        string            `json:"-"`
+	Kind               string            `json:"kind,omitempty"`
+	BindingStatus      string            `json:"binding_status,omitempty"`
+	BindingCheckedAt   int64             `json:"binding_checked_at,omitempty"`
+	BoundKeys          []subBoundKey     `json:"bound_keys,omitempty"`
+	Base               string            `json:"base"`
+	AccountID          string            `json:"account_id"`
+	GroupID            int64             `json:"group_id"`
+	SourceID           string            `json:"source_id"`
+	SourceName         string            `json:"source_name"`
+	KeyID              string            `json:"api_key_id"`
+	KeyPosition        int               `json:"key_position"`
+	KeyPrefix          string            `json:"key_prefix"`
+	Provider           string            `json:"provider"`
+	Name               string            `json:"name"`
+	Models             []string          `json:"models"`
+	Positions          map[string]int    `json:"positions"`
+	Revision           string            `json:"revision"`
+	Manageable         bool              `json:"manageable"`
 }
 type subGatewayControls struct {
 	Revision   string `json:"revision"`

@@ -29,6 +29,7 @@ type configuredCheck struct {
 	Result         json.RawMessage `json:"result"`
 	History        qualitySummary  `json:"history"`
 	owner          string
+	requestedScope string
 }
 
 func configuredProbeFingerprint(src controlSource, p configuredProvider) string {
@@ -36,7 +37,7 @@ func configuredProbeFingerprint(src controlSource, p configuredProvider) string 
 }
 
 func (s *Service) configuredChecks(w http.ResponseWriter, r *http.Request) {
-	data, err := readConfiguredChecksFrom(r.Context(), s.control.db, r.URL.Query().Get("source_id"), r.URL.Query().Get("provider"), r.URL.Query().Get("model"))
+	data, err := readConfiguredChecksFrom(r.Context(), s.control.db, r.URL.Query().Get("source_id"), r.URL.Query().Get("provider"), r.URL.Query().Get("model"), r.URL.Query().Get("kind") == "service-tiers")
 	if err != nil {
 		log.Printf("configured_checks read failed class=%s", databaseErrorClass(err))
 		http.Error(w, "检测记录读取失败", 503)
@@ -55,24 +56,30 @@ func (s *Service) configuredChecks(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Kind    string `json:"kind"`
-		Manual  bool   `json:"manual"`
-		Targets []struct {
+		Kind      string `json:"kind"`
+		Manual    bool   `json:"manual"`
+		Confirmed bool   `json:"confirmed"`
+		Targets   []struct {
 			Source   string   `json:"source_id"`
 			Provider string   `json:"provider"`
 			Models   []string `json:"models"`
+			Scope    string   `json:"expected_scope"`
 		} `json:"targets"`
 	}
 	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	tier := isServiceTier(in.Kind)
-	if (in.Kind != "check" && in.Kind != "availability" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use" && !tier) || len(in.Targets) == 0 || tier && !in.Manual {
+	if (in.Kind != "check" && in.Kind != "availability" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use" && !tier) || len(in.Targets) == 0 || tier && !in.Manual && !in.Confirmed {
 		http.Error(w, "无效检测任务", 400)
 		return
 	}
 	tierCount := 0
 	for _, t := range in.Targets {
+		if tier && (in.Confirmed || t.Scope != "") && !serviceTierDigest(t.Scope) {
+			http.Error(w, "渠道配置未确认，请刷新后重新选择", 400)
+			return
+		}
 		if t.Provider == "" || len(t.Provider) > 256 || strings.ContainsAny(t.Provider, "\r\n/") {
 			http.Error(w, "无效渠道或模型", 400)
 			return
@@ -151,10 +158,10 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 		for _, m := range models {
-			res, e := tx.ExecContext(r.Context(), `INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,quality_only,owner)
- VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET
- source_target=excluded.source_target,quality_only=excluded.quality_only,owner=excluded.owner,state='queued',message='',deadline=NULL,updated_at=now()
- WHERE console_configured_checks.state NOT IN ('queued','running') OR console_configured_checks.deadline<now()`, t.Source, t.Provider, kind, m, controlTarget(sources[t.Source]), in.Kind == "quality", owner)
+			res, e := tx.ExecContext(r.Context(), `INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,quality_only,owner,requested_scope)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET
+ source_target=excluded.source_target,quality_only=excluded.quality_only,owner=excluded.owner,requested_scope=excluded.requested_scope,state='queued',message='',deadline=NULL,updated_at=now()
+ WHERE console_configured_checks.state NOT IN ('queued','running') OR console_configured_checks.deadline<now()`, t.Source, t.Provider, kind, m, controlTarget(sources[t.Source]), in.Kind == "quality", owner, t.Scope)
 			if e != nil {
 				http.Error(w, "检测入队失败", 503)
 				return
@@ -230,7 +237,7 @@ func (s *Service) configuredCheckOne(parent context.Context) bool {
  ORDER BY updated_at,source_id,provider,model FOR UPDATE SKIP LOCKED LIMIT 1)
  UPDATE console_configured_checks c SET state='running',run_id=$1,deadline=now()+interval '210 seconds'
  FROM job j WHERE c.source_id=j.source_id AND c.provider=j.provider AND c.kind=j.kind AND c.model=j.model
- RETURNING c.source_id,c.provider,c.kind,c.model,c.source_target,c.quality_only,c.owner`, run).Scan(&c.Source, &c.Provider, &c.Kind, &c.Model, &target, &qualityOnly, &c.owner)
+ RETURNING c.source_id,c.provider,c.kind,c.model,c.source_target,c.quality_only,c.owner,c.requested_scope`, run).Scan(&c.Source, &c.Provider, &c.Kind, &c.Model, &target, &qualityOnly, &c.owner, &c.requestedScope)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) && parent.Err() == nil {
 			log.Printf("configured_checks claim: %v", err)

@@ -29,11 +29,12 @@ type managementModel struct {
 	ProtocolOptions *[]string `json:"upstream_protocol_options,omitempty"`
 }
 type managementProvider struct {
-	ServiceTierScope string `json:"service_tier_scope,omitempty"`
-	Base             string `json:"base"`
-	Fingerprint      string `json:"fingerprint"`
-	ProbeFingerprint string `json:"probe_fingerprint"`
-	CredentialCount  int    `json:"credential_count,omitempty"`
+	ServiceTierScope   string            `json:"service_tier_scope,omitempty"`
+	ServiceTierRouting map[string]string `json:"service_tier_routing,omitempty"`
+	Base               string            `json:"base"`
+	Fingerprint        string            `json:"fingerprint"`
+	ProbeFingerprint   string            `json:"probe_fingerprint"`
+	CredentialCount    int               `json:"credential_count,omitempty"`
 }
 type managementSnapshot struct {
 	Rows      []managementModel             `json:"rows"`
@@ -49,11 +50,12 @@ func managementProviderEvidence(src controlSource, p configuredProvider) managem
 	hashes, _ := json.Marshal(keys)
 	base := subBindingSite(p.Base)
 	return managementProvider{
-		ServiceTierScope: serviceTierScope(src, p.ServiceTierScope),
-		Base:             base,
-		Fingerprint:      tokenHash(controlTarget(src) + "\n" + p.Provider + "\n" + base + "\n" + string(hashes)),
-		ProbeFingerprint: configuredProbeFingerprint(src, p),
-		CredentialCount:  len(keys),
+		ServiceTierScope:   serviceTierScope(src, p.ServiceTierScope),
+		ServiceTierRouting: p.ServiceTierRouting,
+		Base:               base,
+		Fingerprint:        tokenHash(controlTarget(src) + "\n" + p.Provider + "\n" + base + "\n" + string(hashes)),
+		ProbeFingerprint:   configuredProbeFingerprint(src, p),
+		CredentialCount:    len(keys),
 	}
 }
 
@@ -135,6 +137,10 @@ func (s *Service) managementSnapshots(ctx context.Context) (map[string]managemen
 // Read the gateway catalog, not historical traffic: unused configured channels
 // must be manageable too. Account enrichment uses the durable key bindings.
 func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "service-tiers" {
+		s.serviceTierInventory(w, r)
+		return
+	}
 	owner, _ := s.controlUser(r)
 	bindings, err := s.configuredBindings(r.Context(), owner)
 	if err != nil {
@@ -220,6 +226,60 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(data, func(i, j int) bool {
 		return data[i].SourceID+"\n"+data[i].Provider < data[j].SourceID+"\n"+data[j].Provider
 	})
+	writeJSON(w, 200, map[string]any{"data": data, "unavailable_sources": unavailable})
+}
+
+// Include key-owned copies here: observation rows address the actual serving
+// provider, whereas management groups or hides some of those copies.
+func (s *Service) serviceTierInventory(w http.ResponseWriter, r *http.Request) {
+	sources, err := s.control.listSources(r.Context())
+	if err != nil {
+		http.Error(w, "来源列表读取失败", 503)
+		return
+	}
+	snapshots, err := s.managementSnapshots(r.Context())
+	if err != nil {
+		http.Error(w, "档位渠道读取失败", 503)
+		return
+	}
+	data := []managementChannel{}
+	unavailable := []string{}
+	var mu sync.Mutex
+	var workers sync.WaitGroup
+	slots := make(chan struct{}, 4)
+	for _, source := range sources {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			select {
+			case slots <- struct{}{}:
+			case <-r.Context().Done():
+				return
+			}
+			defer func() { <-slots }()
+			ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+			defer cancel()
+			src, err := s.control.source(ctx, source.ID)
+			snapshot, cached := snapshots[source.ID]
+			if err == nil && (!cached || snapshot.Identity != controlTarget(src) || time.Since(time.Unix(snapshot.CheckedAt, 0)) > time.Minute) {
+				snapshot, err = loadManagementSnapshot(ctx, src)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				unavailable = append(unavailable, source.ID)
+				return
+			}
+			snapshot.Copies = nil
+			for _, member := range assembleManagementChannels(src, snapshot, nil, nil, "", nil) {
+				if member.ServiceTierScope != "" {
+					member.Base, member.ProbeFingerprint = "", ""
+					data = append(data, member)
+				}
+			}
+		}()
+	}
+	workers.Wait()
 	writeJSON(w, 200, map[string]any{"data": data, "unavailable_sources": unavailable})
 }
 

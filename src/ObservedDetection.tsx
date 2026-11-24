@@ -23,8 +23,11 @@ import { capabilityCheckScope, isCapabilityCheckModel } from "./sub2apiModels";
 import { toolUseLabels } from "./toolUse";
 import type { Channel } from "./types";
 import { Spinner } from "./ui";
+import { isServiceTier, serviceTierBatchLimit, serviceTierFilterLabels, serviceTierName } from "./serviceTierStatus";
+import { observedTierTarget, refreshTierViews, submitTierChecks, tierRecord, tierResultStatus,
+  useTierChecks, useTierMembers, type TierTarget } from "./serviceTierTable";
 
-type Target = { source_id: string; provider: string; model: string };
+type Target = { source_id: string; provider: string; model: string; scope?: string };
 type Fingerprints = Pick<
   ReturnType<typeof useModelFingerprints>,
   "index" | "members" | "groupRejections" | "supportedModels" | "isPending" | "isError"
@@ -37,6 +40,7 @@ export function useObservedDetection(
   rows: Channel[],
   checks: Checks,
   fingerprints: Fingerprints,
+  tierColumns = false,
 ) {
   const [project, selectProject] = useDetectionProject(
     "observation",
@@ -62,6 +66,11 @@ export function useObservedDetection(
   const additional = visible && expanded && project !== "quality";
   const detection = useChannelDetection(owner, additional);
   const capability = project === "compaction" || project === "tool-use";
+  const tier = isServiceTier(project) ? project : undefined;
+  const tierEnabled = visible && (tierColumns || (expanded && !!tier));
+  const tierChecks = useTierChecks(owner, tierEnabled);
+  const tierMembers = useTierMembers(owner, tierEnabled);
+  const tierTargetFor = (row: Channel) => observedTierTarget(row, tierMembers.members.get(providerId(row)));
   const configured = useConfiguredChecks(additional && capability);
   const configuredIndex = useMemo(
     () =>
@@ -79,6 +88,7 @@ export function useObservedDetection(
 
   function targetFor(row: Channel): Target | undefined {
     if (!row.source_id) return;
+    if (tier) return tierTargetFor(row);
     if (project === "fingerprint") {
       if (
         fingerprints.isPending ||
@@ -101,7 +111,8 @@ export function useObservedDetection(
     };
   }
   const entry = (target: Target) =>
-    configuredIndex.get(`${project}:${fingerprintKey(target)}`);
+    tier && target.scope ? tierRecord(tierChecks.index, tier, target as TierTarget) :
+      configuredIndex.get(`${project}:${fingerprintKey(target)}`);
   const submissionKey = (target: Target) => JSON.stringify([owner,project,fingerprintKey(target)]);
   const busy = (target: Target) =>
     submitting.has(submissionKey(target)) ||
@@ -114,8 +125,8 @@ export function useObservedDetection(
     for (const row of rows) {
       const target = targetFor(row);
       if (!target || busy(target) || detection.disabled.has(detectionKey(target))) continue;
-      if (project === "fingerprint" && (row.reason === "temporarily_disabled" ||
-          row.reason === "no_provider_key" || fingerprints.groupRejections.has(providerId(row)))) {
+      if ((tier || project === "fingerprint") && (row.reason === "temporarily_disabled" ||
+          row.reason === "no_provider_key" || (project === "fingerprint" && fingerprints.groupRejections.has(providerId(row))))) {
         skippedDisabled++;
         continue;
       }
@@ -129,6 +140,10 @@ export function useObservedDetection(
       ? "检测开关读取失败，无法批量检测。"
       : detection.isPending
         ? "正在读取批量检测设置…"
+        : tier && (tierMembers.isPending || tierMembers.isError || tierChecks.isPending || tierChecks.isError)
+          ? "档位检测数据尚不可用。"
+          : tier && total > serviceTierBatchLimit
+            ? `单次最多提交 ${serviceTierBatchLimit} 项档位检测，请缩小筛选范围。`
         : project === "fingerprint" &&
             (fingerprints.isPending || fingerprints.isError)
           ? "指纹检测支持信息尚不可用。"
@@ -142,6 +157,7 @@ export function useObservedDetection(
     if (project === "quality" || !manual && batchInFlight.current.has(batchKey)) return;
     targets = targets.filter(target => !inFlight.current.has(submissionKey(target)) && !busy(target));
     if (!targets.length) return;
+    if (tier && !window.confirm(`${serviceTierName[tier]} 检测最多发送 ${targets.length} 次可能计费的上游请求。继续？`)) return;
     const keys = targets.map(submissionKey);
     keys.forEach(key => inFlight.current.add(key));
     setSubmitting(new Set(inFlight.current));
@@ -152,7 +168,7 @@ export function useObservedDetection(
     setNotice(undefined);
     try {
       const fingerprint = project === "fingerprint";
-      const result = await controlRequest<{ queued?: number }>(
+      const result = tier ? await submitTierChecks(tier, targets as TierTarget[], manual) : await controlRequest<{ queued?: number }>(
         fingerprint
           ? "/v1/model-fingerprints"
           : "/v1/channel-management/checks",
@@ -175,7 +191,8 @@ export function useObservedDetection(
       setNotice({
         text: `已提交${detectionProjectLabels[project]} · ${result.queued ?? targets.length} 项`,
       });
-      await client.invalidateQueries({
+      if (tier) await refreshTierViews(client, owner);
+      else await client.invalidateQueries({
         queryKey: [fingerprint ? "model-fingerprints" : "configured-checks"],
       });
     } catch (error) {
@@ -199,6 +216,9 @@ export function useObservedDetection(
     total,
     batchIssue,
     skippedDisabled,
+    tierChecks,
+    tierMembers,
+    tierTargetFor,
     notice: notices.get(batchKey),
     active: activeBatches.has(batchKey),
     select(next: typeof project) {
@@ -217,12 +237,13 @@ export function useObservedDetection(
         : !batchIssue && queue([...batchTargets.values()]),
     rowAction(row: Channel) {
       const target = targetFor(row);
-      const record = target && capability ? entry(target) : undefined;
-      const status = (record?.result as { status?: string } | null)?.status;
+      const record = target && (capability || tier) ? entry(target) : undefined;
+      const status = tier && target?.scope ? tierResultStatus(record, target as TierTarget)
+        : (record?.result as { status?: string } | null)?.status;
       const labels: Record<string, string> =
-        project === "compaction" ? compactionLabels : toolUseLabels;
+        tier ? serviceTierFilterLabels : project === "compaction" ? compactionLabels : toolUseLabels;
       return {
-        applicable: !!target,
+        applicable: !!target && (!tier || (!tierChecks.isError && !tierChecks.isPending)),
         busy: !!target && busy(target),
         status:
           record?.state === "done"
@@ -237,7 +258,7 @@ export function useObservedDetection(
                     ? "检测中"
                     : "",
         message: record?.message,
-        run: () => target && !busy(target) && void queue([target], true),
+        run: () => target && (!tier || !tierChecks.isError && !tierChecks.isPending) && !busy(target) && void queue([target], true),
       };
     },
   };
@@ -329,7 +350,7 @@ export function ObservedDetectionRow({
           disabled={!action.applicable || action.busy}
           aria-busy={action.busy}
           title={
-            detection.project === "fingerprint"
+            detection.project === "fingerprint" || isServiceTier(detection.project)
               ? undefined
               : capabilityCheckScope
           }

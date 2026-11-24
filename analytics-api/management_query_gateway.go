@@ -379,6 +379,7 @@ func assembleManagementImports(facts managementGatewayFacts, refs []subChannelRe
 		}
 		out = append(out, subInstalledChannel{Protocol: protocol, Engine: engines[channel.Provider], EngineMode: modes[channel.Provider], ModelMappings: mappings[channel.Provider], Base: ref.Base, AccountID: ref.Account, GroupID: ref.Group, SourceID: facts.Source.ID, SourceName: facts.Source.Name, KeyID: channel.KeyID, KeyPosition: key.Position, KeyPrefix: key.Prefix, Provider: channel.Provider, Name: ref.Name, Models: channel.Models, Positions: positions, Revision: controls.Revision, Manageable: controls.Manageable})
 		out[len(out)-1].ServiceTierScope = serviceTierScope(facts.Source, provider.ServiceTierScope)
+		out[len(out)-1].ServiceTierRouting = provider.ServiceTierRouting
 	}
 	return out, nil
 }
@@ -479,6 +480,7 @@ func assembleManagementChannels(src controlSource, snapshot managementSnapshot, 
 				item.ProbeFingerprint = live.ProbeFingerprint
 				item.CredentialCount = live.CredentialCount
 				item.ServiceTierScope = live.ServiceTierScope
+				item.ServiceTierRouting = live.ServiceTierRouting
 			}
 			ids := map[string]bool{}
 			for _, key := range binding.BoundKeys {

@@ -27,6 +27,8 @@ type serviceTierResult struct {
 	Scope           string `json:"scope,omitempty"`
 	VerifiedAt      int64  `json:"verified_at,omitempty"`
 	VerifiedBinding string `json:"verified_binding,omitempty"`
+	Compatibility   string `json:"compatibility,omitempty"`
+	UpstreamModel   string `json:"upstream_model,omitempty"`
 }
 
 func serviceTierDigest(value string) bool {
@@ -105,6 +107,9 @@ func serviceTierGateway(ctx context.Context, src controlSource, provider, model,
 	}
 	// Never import verification fields supplied by an upstream or compatibility proxy.
 	out.VerifiedAt, out.VerifiedBinding = 0, ""
+	if !serviceTierDigest(out.Compatibility) {
+		out.Compatibility = ""
+	}
 	if out.Status == "supported" {
 		out.VerifiedAt, out.VerifiedBinding = out.CheckedAt, out.Binding
 	}
@@ -127,7 +132,11 @@ func (s *Service) runServiceTierCheck(ctx context.Context, src controlSource, c 
 	if err != nil {
 		return err
 	}
-	c.Fingerprint = serviceTierScope(src, target.Scope)
+	scope := serviceTierScope(src, target.Scope)
+	if c.requestedScope != "" && c.requestedScope != scope {
+		return errors.New("渠道配置已变化，未发起上游请求")
+	}
+	c.Fingerprint = scope
 	if target.Status == "not_applicable" {
 		target.Scope = ""
 		*result = target
@@ -156,7 +165,9 @@ func (s *Service) saveServiceTierResult(ctx context.Context, c configuredCheck, 
    WHEN $8::jsonb IS NULL AND ($9='' OR fingerprint=$9) THEN result
    WHEN $8::jsonb->>'status' IN ('inconclusive','not_honored') AND fingerprint=$9
         AND result->>'verified_binding'=$8::jsonb->>'binding'
-   THEN $8::jsonb || jsonb_build_object('verified_at',result->'verified_at','verified_binding',result->'verified_binding')
+   THEN $8::jsonb || jsonb_build_object('verified_at',result->'verified_at','verified_binding',result->'verified_binding',
+     'compatibility',COALESCE(NULLIF($8::jsonb->>'compatibility',''),result->>'compatibility'),
+     'upstream_model',COALESCE(NULLIF($8::jsonb->>'upstream_model',''),result->>'upstream_model'))
    ELSE $8::jsonb END,
  fingerprint=CASE WHEN $9='' THEN fingerprint ELSE $9 END,updated_at=now(),deadline=NULL
  WHERE source_id=$1 AND provider=$2 AND kind=$3 AND model=$4 AND run_id=$5 AND state='running'`,

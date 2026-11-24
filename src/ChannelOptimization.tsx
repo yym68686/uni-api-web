@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Sparkles, X } from "lucide-react";
 import { Spinner } from "./ui";
 import { channelEngineLabel, channelProtocolLabel } from "./channelProtocol";
+import { OptimizationTiers } from "./OptimizationTiers";
 import {
   applyOptimization,
   buildOptimizationPlan,
@@ -32,6 +33,8 @@ export function ChannelOptimization({
     [finished, setFinished] = useState(false),
     [error, setError] = useState("");
   const [reading,setReading]=useState(false);
+  const [tierSaving,setTierSaving]=useState(false);
+  const [tierSaved,setTierSaved]=useState(false);
   const [readError,setReadError]=useState("");
   const readingRef=useRef(false);
   const [progress, setProgress] = useState<
@@ -79,11 +82,12 @@ export function ChannelOptimization({
     finally{readingRef.current=false;setReading(false);}
     setSelected(new Set());
     setFinished(false);
+    setTierSaved(false);
     setError("");
     setProgress({});
   }
   async function apply() {
-    if (!input || locked.current || finished || !selected.size) return;
+    if (!input || locked.current || tierSaving || tierSaved || finished || !selected.size) return;
     locked.current = true;
     setBusy(true);
     setError("");
@@ -119,7 +123,7 @@ export function ChannelOptimization({
     <Dialog.Root
       open={!!input}
       onOpenChange={(next) => {
-        if (busy) return;
+        if (busy || tierSaving) return;
         if (next) open();
         else setInput(null);
       }}
@@ -142,7 +146,7 @@ export function ChannelOptimization({
             className="guide-dialog channel-optimization-dialog"
             onPointerDownOutside={(e) => e.preventDefault()}
             onEscapeKeyDown={(e) => {
-              if (busy) e.preventDefault();
+              if (busy || tierSaving) e.preventDefault();
             }}
           >
             <header>
@@ -153,16 +157,19 @@ export function ChannelOptimization({
               </Dialog.Description>
               <Dialog.Close
                 className="icon-button detail-close"
-                disabled={busy}
+                disabled={busy || tierSaving}
                 aria-label="关闭优化预览"
               >
                 <X size={18} />
               </Dialog.Close>
             </header>
             <div className="channel-optimization-body">
+              <OptimizationTiers snapshot={input} disabled={busy || tierSaving || finished} onBusy={setTierSaving}
+                onSaved={() => setTierSaved(true)} />
+              {tierSaved && <p className="muted">重新打开优化以读取最新配置。</p>}
               <fieldset
                 className="optimization-events"
-                disabled={busy || finished}
+                disabled={busy || tierSaving || tierSaved || finished}
               >
                 <legend>优化事件</legend>
                 {optimizationEvents.map((event) => (
@@ -220,7 +227,7 @@ export function ChannelOptimization({
                   <input
                     type="checkbox"
                     aria-label="选择全部优化变更"
-                    disabled={busy || finished || !eligible.length}
+                    disabled={busy || tierSaving || tierSaved || finished || !eligible.length}
                     checked={
                       !!eligible.length &&
                       eligible.every((c) => selected.has(c.id))
@@ -267,7 +274,7 @@ export function ChannelOptimization({
                         <input
                           type="checkbox"
                           aria-label={`选择 ${b.sourceName} Key ${b.keyPosition} ${b.name} 的优化变更`}
-                          disabled={busy || finished || !selectable.length}
+                          disabled={busy || tierSaving || tierSaved || finished || !selectable.length}
                           checked={
                             !!selectable.length &&
                             selectable.every((c) => selected.has(c.id))
@@ -311,7 +318,7 @@ export function ChannelOptimization({
                           type="checkbox"
                           aria-label={`${c.action === "migrate" ? "升级旧版默认协议" : `${c.action === "add" ? "新增" : "取消"} ${c.model}`} · ${b.sourceName} Key ${b.keyPosition} ${b.name}`}
                           checked={selected.has(c.id)}
-                          disabled={busy || finished || !!c.blockedReason}
+                          disabled={busy || tierSaving || tierSaved || finished || !!c.blockedReason}
                           onChange={(e) => toggleChange(c.id, e.target.checked)}
                         />
                         <span
@@ -398,13 +405,13 @@ export function ChannelOptimization({
             <footer>
               <span>已选 {selected.size} 项变更</span>
               <Dialog.Close asChild>
-                <button className="button" disabled={busy}>
-                  {finished ? "完成" : "取消"}
+                <button className="button" disabled={busy || tierSaving}>
+                  {finished || tierSaved ? "完成" : "取消"}
                 </button>
               </Dialog.Close>
               <button
                 className="button primary"
-                disabled={busy || finished || !selected.size}
+                disabled={busy || tierSaving || tierSaved || finished || !selected.size}
                 onClick={() => void apply()}
               >
                 {busy ? (

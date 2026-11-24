@@ -698,7 +698,7 @@ it("offers all four projects and queues only eligible fingerprints across manage
   const user = userEvent.setup(), owner = "manage-fingerprint";
   let view = mount(owner);
   const picker = screen.getByLabelText("选择检测项目");
-  expect(within(picker).getAllByRole("option").map(option => option.textContent)).toEqual(["降智检测", "指纹检测", "Tool use 检测", "压缩检测"]);
+  expect(within(picker).getAllByRole("option").map(option => option.textContent)).toEqual(["降智检测", "指纹检测", "Tool use 检测", "压缩检测", "Fast 检测", "Ultrafast 检测"]);
   await user.selectOptions(picker, "fingerprint");
   await user.selectOptions(await screen.findByLabelText("检测模型筛选"), "gpt-5.5");
   await waitFor(() => expect(screen.getByRole("button", { name: "指纹检测 · 61 个渠道" })).toBeDisabled());

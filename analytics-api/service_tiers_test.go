@@ -209,3 +209,79 @@ func TestServiceTierFailedCheckPreservesOnlySameBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestServiceTierImportRequiresCompatibleReceiptAndPreservesOptOut(t *testing.T) {
+	ctx := context.Background()
+	store, err := newControlStore(isolatedControlTestDSN(t), strings.Repeat("fixture-master", 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.db.Close()
+	sha := func(c string) string { return strings.Repeat(c, 64) }
+	receipt, compatible, candidate := sha("a"), sha("b"), sha("c")
+	var reads int
+	checker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads++
+		var in struct {
+			VerifyOnly bool `json:"verify_only"`
+			Candidate  struct {
+				Key    string            `json:"api_key"`
+				Models map[string]string `json:"models"`
+			}
+		}
+		if r.URL.Path != serviceTierProbePath || r.Header.Get("Authorization") != "Bearer admin" ||
+			json.NewDecoder(r.Body).Decode(&in) != nil || !in.VerifyOnly || in.Candidate.Models["alias"] != "model" {
+			t.Error("expected local-only verification of the exact model mapping")
+			http.Error(w, "invalid", 400)
+			return
+		}
+		digest := compatible
+		if in.Candidate.Key != "matching-fixture-key" {
+			digest = sha("d")
+		}
+		writeJSON(w, 200, map[string]any{"models": map[string]serviceTierImportBinding{
+			"alias": {Binding: candidate, Compatibility: digest},
+		}})
+	}))
+	defer checker.Close()
+	src := controlSource{sourceView: sourceView{ID: "s", Name: "fixture", Base: checker.URL}, Key: "observer", ConfigKey: "admin"}
+	if _, err := store.saveSource(ctx, src, false); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().Unix() - 120
+	insert := func(provider, tier, status string, checked, verified int64) {
+		t.Helper()
+		value := serviceTierResult{Status: status, CheckedAt: checked, VerifiedAt: verified,
+			Binding: receipt, VerifiedBinding: receipt, Compatibility: compatible, UpstreamModel: "model"}
+		if _, err := store.db.Exec(`INSERT INTO console_configured_checks
+ (source_id,provider,kind,model,source_target,state,result) VALUES ($1,$2,$3,'former-alias',$4,'done',$5)`,
+			src.ID, provider, tier, controlTarget(src), mustJSON(value)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("previous", "fast", "supported", at, at)
+	insert("previous", "ultrafast", "supported", at-serviceTierTTL, at-serviceTierTTL)
+	s := &Service{control: store}
+	plan := func(key string) serviceTierImportPlan {
+		t.Helper()
+		got, err := s.planServiceTierImport(ctx, src, "prospective", "https://fixture.invalid/v1/responses", key, map[string]string{"alias": "model"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	result := plan("matching-fixture-key")
+	settings := importTierSettings(result, subImportInput{ServiceTierEnabled: map[string]bool{"fast": false}})
+	path := "/preferences/service_tier_evidence/" + candidate + "/fast"
+	if result.counts["fast"] != 1 || result.counts["ultrafast"] != 0 || settings[path] != at ||
+		settings["/preferences/service_tier_disabled/fast"] != true || len(settings) != 2 {
+		t.Fatal("wrong bound import settings", settings)
+	}
+	if got := plan("different-fixture-key"); len(got.set) != 0 {
+		t.Fatal("evidence followed a different key")
+	}
+	insert("newer", "fast", "unsupported", at+30, 0)
+	if got := plan("matching-fixture-key"); len(got.set) != 0 || reads != 3 {
+		t.Fatal("older support overrode a newer explicit rejection", reads)
+	}
+}

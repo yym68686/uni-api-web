@@ -175,6 +175,7 @@ export const currentBlockingControlWriteGeneration = () => blockingControlWriteG
 function managementWriteImpact(path: string, method: string, backgroundChannelAdd: boolean) {
  const endpoint = path.split("?", 1)[0];
  if (endpoint.includes("/recharge/") ||
+     endpoint === "/v1/sub2api/channel-tier-options" ||
      /^\/v1\/sub2api\/accounts(?:\/[^/]+)?\/(?:sync|sync-selected|sync-only)$/.test(endpoint) ||
      /^\/v1\/(?:sub2api\/check-curl|channel-management\/detection-settings|channel-setting-templates)$/.test(endpoint) ||
      /^\/v1\/automations(?:\/[^/]+)?$/.test(endpoint) ||

@@ -393,6 +393,7 @@ it("recovers an expired site session in place without slow refetches or losing t
   let postFailureReads = 0;
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
+    if (input.endsWith("/channel-tier-options")) return Response.json({verified: {}, total: 1});
     if (init?.method === "POST") {
       writes.push({ path: input, body: JSON.parse(String(init.body)) });
       if (input.endsWith("/accounts/account/login")) return Response.json({ authenticated: true, queued: false });
@@ -429,6 +430,7 @@ it("recovers an expired site session in place without slow refetches or losing t
   await user.type(screen.getByLabelText("重命名 1 对外模型名"), "public-alias");
   await user.selectOptions(screen.getByLabelText("渠道添加位置"), "per-model");
   await user.selectOptions(screen.getByLabelText("gpt-6-sol 的路由位置"), "2");
+  await waitFor(() => expect(screen.getByRole("button", { name: "添加到渠道" })).toBeEnabled());
   await user.click(screen.getByRole("button", { name: "添加到渠道" }));
   const recover = await screen.findByRole("button", { name: "重新登录站点" });
   expect(recover).toBeEnabled();
@@ -464,6 +466,7 @@ it("checks live group state without blocking source selection and disables stale
   const writes: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
+    if (input.endsWith("/channel-tier-options")) return Response.json({verified: {}, total: 1});
     if (init?.method === "POST") { writes.push(input); return Response.json({}); }
     if (input.endsWith("/groups/1/access")) {
       if (recovered) return Response.json({ available: true, status: "available" });
@@ -501,6 +504,7 @@ it("waits for the live account task and automatically restores add without losin
   let statusReads = 0;
   const writes: any[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.endsWith("/channel-tier-options")) return Response.json({verified: {}, total: 1});
     if (input.endsWith("/import-status")) {
       statusReads++;
       return Response.json(running
@@ -543,6 +547,54 @@ it("waits for the live account task and automatically restores add without losin
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].model_mappings).toEqual({ "public-alias": "gpt-6-sol" });
 }, 12000);
+
+it("preselects only a verified tier beside compaction and saves its explicit opt-out", async () => {
+  let resolveOptions!: (response: Response) => void;
+  const writes: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/channel-tier-options")) {
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        account_id: account.id, group_id: 1, source_id: "primary", api_key_id: "key2",
+        models: ["gpt-6-sol"], protocols: {"gpt-6-sol": "responses"},
+      });
+      return new Promise<Response>(resolve => {resolveOptions = resolve;});
+    }
+    if (url.endsWith("/import-status")) return Response.json({state: "idle", can_import: true});
+    if (url.endsWith("/groups/1/access")) return Response.json({available: true, status: "available"});
+    if (url.includes("channel-options")) return Response.json({
+      revision: "r1", supported: true, manageable: true,
+      keys: [{key_id: "key2", position: 2, prefix: "masked-two"}], channels: [],
+    });
+    if (init?.method === "POST") {
+      writes.push(JSON.parse(String(init.body)));
+      return Response.json({message: "已添加"});
+    }
+    return Response.json({data: [], unavailable_keys: [], unavailable_sources: []});
+  }));
+  const model = "gpt-6-sol";
+  mount({...target, active: true,
+    models: [{model, state: "done", message: "", result: {model, availability: {status: "success", protocol: "responses"}}}],
+  } as SubTarget);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", {name: /新增接入/}));
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  const group = within(screen.getByRole("group", {name: "渠道能力"}));
+  expect(group.getByRole("checkbox", {name: "开启远程压缩"})).toBeInTheDocument();
+  const fast = group.getByRole("checkbox", {name: "开启 Fast"});
+  const ultra = group.getByRole("checkbox", {name: "开启 Ultrafast"});
+  const add = screen.getByRole("button", {name: "添加到渠道"});
+  await waitFor(() => expect(resolveOptions).toBeTypeOf("function"));
+  expect(add).toBeDisabled();
+  resolveOptions(Response.json({verified: {fast: 1}, total: 1}));
+  await waitFor(() => expect(fast).toBeChecked());
+  expect(ultra).not.toBeChecked();
+  expect(ultra).toBeDisabled();
+  await user.click(fast);
+  await user.click(add);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({service_tier_enabled: {fast: false}, models: [model]});
+});
 
 it("keeps addition blocked when account state cannot be read and permits an explicit retry", async () => {
   let failed = true;

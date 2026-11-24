@@ -283,14 +283,15 @@ func normalizeManagementModels(models []subModelResult) {
 	}
 }
 
-func readConfiguredChecksFrom(ctx context.Context, db controlQueryDB, sourceID, provider, model string) ([]configuredCheck, error) {
+func readConfiguredChecksFrom(ctx context.Context, db controlQueryDB, sourceID, provider, model string, tiersOnly ...bool) ([]configuredCheck, error) {
 	rows, err := db.QueryContext(ctx, `SELECT c.source_id,c.provider,c.kind,c.model,c.fingerprint,
  CASE WHEN c.state='running' AND c.deadline<now() THEN 'interrupted' ELSE c.state END,c.message,c.result,
  COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0)
  FROM console_configured_checks c JOIN console_sources s ON s.id=c.source_id
  LEFT JOIN console_quality_totals h ON h.source_id=c.source_id AND h.provider=c.provider WHERE s.enabled
  AND ($1='' OR c.source_id=$1) AND ($2='' OR c.provider=$2)
- AND ($3='' OR c.model=$3 OR c.model='' OR c.model='gpt-6-astra')`, sourceID, provider, model)
+ AND ($3='' OR c.model=$3 OR c.model='' OR c.model='gpt-6-astra')
+ AND (NOT $4::boolean OR c.kind IN ('fast','ultrafast'))`, sourceID, provider, model, len(tiersOnly) > 0 && tiersOnly[0])
 	if err != nil {
 		return nil, err
 	}

@@ -74,6 +74,7 @@ it.each(["site", "native"])(
       "fetch",
       vi.fn(async (input: string, init?: RequestInit) => {
       if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
+        if (input.endsWith("/channel-tier-options")) return Response.json({verified: {}, total: 1});
         const u = new URL(input);
         if (init?.method === "POST") {
           writes.push(JSON.parse(String(init.body)));

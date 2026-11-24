@@ -254,6 +254,7 @@ it.each([false,true])("imports sub2api aliases independently of originals (keep 
   vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
     if(input.endsWith("/accounts") && writes.length)return new Promise<Response>(resolve=>pendingPageReads.push(resolve));
     if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
+    if (input.endsWith("/channel-tier-options")) return Response.json({verified:{},total:1});
     if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已添加"});}
     if(input.includes("channel-options"))return Response.json({revision:"r1",supported:true,keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:[]});
     return Response.json({data:input.endsWith("/accounts")?data:input.endsWith("/sources")?[{id:"primary",name:"Fugue"}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
@@ -2739,6 +2740,7 @@ it("shows model-scoped Tool use and leaves failed models unchecked when importin
  const writes:any[]=[];
  vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
     if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
+  if (input.endsWith("/channel-tier-options")) return Response.json({verified:{},total:3});
   if(init?.method==='POST'){writes.push(JSON.parse(String(init.body)));return Response.json({message:'已添加'});}
   if(input.includes('channel-options'))return Response.json({revision:'r1',supported:true,keys:[{key_id:'k1',position:1,prefix:'masked'}],channels:[]});
   return Response.json({data:input.endsWith('/accounts')?data:input.endsWith('/sources')?[{id:'primary',name:'Fugue'}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
@@ -2764,6 +2766,7 @@ it("shows model-scoped Tool use and leaves failed models unchecked when importin
  await user.selectOptions(d.getByLabelText('添加到 uni-api 来源'),'primary');
  await waitFor(()=>expect(d.getByLabelText('添加到 API key')).toBeEnabled());
  await user.selectOptions(d.getByLabelText('添加到 API key'),'k1');
+ await waitFor(()=>expect(d.getByRole('button',{name:'添加到渠道'})).toBeEnabled());
  await user.click(d.getByRole('button',{name:'添加到渠道'}));
  await waitFor(()=>expect(writes).toHaveLength(1));
  expect(writes[0].models).toEqual(expect.arrayContaining(['gpt-5.5','gpt-6-sol','gpt-6-luna']));
@@ -2824,6 +2827,7 @@ it("shows terminal warnings in site checks and imports only the models the user 
  const writes:any[]=[];
  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
     if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
+  if (input.endsWith("/channel-tier-options")) return Response.json({verified:{},total:2});
   if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已添加"});}
   if(input.includes("channel-options"))return Response.json({revision:"r1",supported:true,keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:[]});
   return Response.json({data:input.endsWith("/accounts")?data:input.endsWith("/sources")?[{id:"primary",name:"Fugue"}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
@@ -2842,6 +2846,7 @@ it("shows terminal warnings in site checks and imports only the models the user 
  await user.selectOptions(d.getByLabelText("添加到 uni-api 来源"),"primary");
  await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled());
  await user.selectOptions(d.getByLabelText("添加到 API key"),"k1");
+ await waitFor(()=>expect(d.getByRole("button",{name:"添加到渠道"})).toBeEnabled());
  await user.click(d.getByRole("button",{name:"添加到渠道"}));
  await waitFor(()=>expect(writes).toHaveLength(1));
  expect(writes[0].models).toEqual(["gpt-6-luna","gpt-5.5"]);

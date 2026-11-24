@@ -43,7 +43,9 @@ import { ChannelConfigurationDialog, ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { ServiceTierChecks } from "./ServiceTierChecks";
-import { serviceTierFilterLabels, serviceTierName, serviceTiers } from "./serviceTierStatus";
+import { isServiceTier, serviceTierBatchLimit, serviceTierFilterLabels, serviceTierName, serviceTiers, type ServiceTier } from "./serviceTierStatus";
+import { managementTierTargets, refreshTierViews, ServiceTierCell, submitTierChecks, tierIndex, tierPending,
+  tierRecord, tierTargetKey, useTierChecks, type TierTarget } from "./serviceTierTable";
 import type { InstalledChannel } from "./sub2apiImports";
 import { useManagementPage, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation } from "./managementQuery";
 import type { ManagementOptimizationPreview, ManagementPagePosition, ManagementSelection } from "./managementQuery";
@@ -102,6 +104,8 @@ const managementColumnChoices = [
   {id: "quality", label: "Astra 降智"},
   {id: "compaction", label: "远程压缩"},
   {id: "tool-use", label: "Tool use"},
+  {id: "fast", label: "Fast"},
+  {id: "ultrafast", label: "Ultrafast"},
   {id: "diagnostics", label: "回复 / 诊断"},
   {id: "checked", label: "最近检测"},
   {id: "batch", label: "批量检测"},
@@ -109,7 +113,7 @@ const managementColumnChoices = [
 type ManagementColumn = (typeof managementColumnChoices)[number]["id"];
 const managementPresets = {
   operations: ["model", "platform", "rate", "availability", "latency", "fingerprint", "checked", "batch"],
-  checks: ["model", "platform", "rate", "availability", "latency", "fingerprint", "protocol", "match", "quality", "compaction", "tool-use", "diagnostics", "checked", "batch"],
+  checks: ["model", "platform", "rate", "availability", "latency", "fingerprint", "protocol", "match", "quality", "compaction", "tool-use", "fast", "ultrafast", "diagnostics", "checked", "batch"],
   finance: ["model", "rate", "price", "availability", "fingerprint", "checked", "batch"],
   all: managementColumnChoices.map(({id}) => id),
 } satisfies Record<string, readonly ManagementColumn[]>;
@@ -893,6 +897,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [managementPreset, setManagementPreset] = useState<keyof typeof managementPresets>("operations");
   const [customColumns, setCustomColumns] = useTableColumns(managementColumnsStorageKey, managementColumnChoices);
   const activeColumns: readonly ManagementColumn[] = customColumns ?? managementPresets[managementPreset];
+  const tableTiers = useTierChecks(user, section === "channels" && activeColumns.some(isServiceTier));
   const includePrices = activeColumns.includes("price") || !!filters.priceStatus;
   const overview = managementOverviewForColumns(filters.model, activeColumns);
   const pageQuery=useManagementPage(user,filters,cursor,navigation,includePrices,overview);
@@ -1174,8 +1179,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     }
   }
   type CheckKind = "check" | "quality" | "compaction" | "tool-use";
-  type BatchKind = CheckKind | "fingerprint";
-  type BatchPreview = { kind: BatchKind; scope: string; revision: string; total: number; items: {id:string; label:string; models:string[]}[]; targets: CheckSelection; fingerprintTargets: ReturnType<typeof fingerprintTargets> };
+  type BatchKind = CheckKind | "fingerprint" | ServiceTier;
+  type BatchPreview = { kind: BatchKind; scope: string; revision: string; total: number; items: {id:string; label:string; models:string[]}[]; targets: CheckSelection; fingerprintTargets: ReturnType<typeof fingerprintTargets>; tierTargets: TierTarget[] };
   const [batchPreview,setBatchPreview] = useState<BatchPreview|null>(null);
   const [batchReceipts,setBatchReceipts] = useState<{label:string;accepted:boolean;message:string}[]>([]);
   const submittingBatch = useRef(false);
@@ -1299,11 +1304,35 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     if (ready.length > FINGERPRINT_BATCH_LIMIT) throw Error(`单次最多提交 ${FINGERPRINT_BATCH_LIMIT} 项指纹检测，请缩小渠道或模型范围。`);
     return ready;
   }
+  function tierPreview(selection: Pick<ManagementSelection, "eligible" | "input">, tier: ServiceTier) {
+    const index = tierIndex(selection.input.checks);
+    const targets = new Map<string, TierTarget>();
+    const items: BatchPreview["items"] = [];
+    for (const row of selection.eligible) {
+      if (detection.isSaving(row) || !detection.isEnabled(row)) continue;
+      const members = managementTierTargets(row, selection.input.imports, filters.model, filters.accountId)
+        .filter(target => (filters.model || modelsToCheck.includes(target.model) || !row.configured &&
+          selection.input.imports.some(m => m.source_id === target.source_id && m.provider === target.provider &&
+            modelsToCheck.includes(m.model_mappings?.[target.model] || target.model))) &&
+          !tierPending(tierRecord(index, tier, target)));
+      for (const target of members) targets.set(tierTargetKey(target), target);
+      if (members.length) items.push({id: row.id, label: `${row.account.name} / ${row.target.name}`, models: [...new Set(members.map(m => m.model))]});
+    }
+    if (!targets.size) throw Error("当前筛选没有待检测的已接入渠道模型。");
+    if (targets.size > serviceTierBatchLimit) throw Error(`单次最多提交 ${serviceTierBatchLimit} 项档位检测，请缩小渠道或模型范围。`);
+    return {items, targets: [...targets.values()]};
+  }
   async function batch(kind: BatchKind){
     if(selectionRead.current || !usablePage || detection.isPending || detection.isError)return;
     selectionRead.current=true;setReadingSelection(true);setError("");setFingerprintsSubmitted(0);setBatchReceipts([]);
     try{
       const selected=await completeSelection();
+      if (isServiceTier(kind)) {
+        const preview = tierPreview(selected, kind);
+        setBatchPreview({kind,scope:batchScope,revision:selected.revision,total:selected.total,items:preview.items,
+          targets:[],fingerprintTargets:[],tierTargets:preview.targets});
+        return;
+      }
       const targetSet = kind === "fingerprint" ? preparedFingerprints(selected) : [];
       const allowed = new Set(targetSet.map(fingerprintKey));
       const targets = kind === "fingerprint"
@@ -1315,7 +1344,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         models:kind==="fingerprint" ? [...new Set(batchFingerprintTargets(row).filter(value=>allowed.has(fingerprintKey(value))).map(value=>value.model))]
           : kind==="check" ? modelsToCheck : kind==="quality" ? ["gpt-6-astra"] : [kind==="compaction" ? "压缩能力" : "Tool use 能力"],
       }));
-      setBatchPreview({kind,scope:batchScope,revision:selected.revision,total:selected.total,items,targets,fingerprintTargets:targetSet});
+      setBatchPreview({kind,scope:batchScope,revision:selected.revision,total:selected.total,items,targets,fingerprintTargets:targetSet,tierTargets:[]});
     }
     catch(e){setError(e instanceof Error?e.message:"完整筛选结果读取失败");}
     finally{selectionRead.current=false;setReadingSelection(false);}
@@ -1336,6 +1365,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         await controlRequest("/v1/model-fingerprints", {method:"POST",body:JSON.stringify({targets:plan.fingerprintTargets})});
         setFingerprintsSubmitted(plan.fingerprintTargets.length);
         void client.invalidateQueries({queryKey:["model-fingerprints"]});
+      } else if (isServiceTier(plan.kind)) {
+        const fresh = tierPreview(verified, plan.kind).targets;
+        const signature = (entries: TierTarget[]) => entries.map(t => `${tierTargetKey(t)}:${t.scope}`).sort().join("\n");
+        if (signature(fresh) !== signature(plan.tierTargets)) throw Error("档位待检测范围已变化，请重新预览。");
+        const receipt = await submitTierChecks(plan.kind, plan.tierTargets, false);
+        setBatchReceipts([{label:detectionProjectLabels[plan.kind],accepted:true,message:`已排队 ${receipt.queued} 项`}]);
+        void refreshTierViews(client, user);
       } else await queueChecks(plan.kind,plan.targets,false);
       setBatchPreview(null);
     } catch (error) {
@@ -1347,6 +1383,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   }
   const batchBusy=readingSelection || batchSubmitting;
   const batchDisabled=(kind:BatchKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || batchBusy || (
+    isServiceTier(kind) ? !filters.model && !modelsToCheck.length :
     kind === "fingerprint"
       ? !fingerprintModelsToCheck.length || (rows.length === total && !rows.some(row => batchFingerprintTargets(row).length))
       : (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>!detection.isSaving(row)&&detectionEnabled(row,detection.disabled)&&canCheck(row.account,row.target,kind,row.configured)))
@@ -1586,7 +1623,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           <div className="compact-dialog-scroll">
             <p className="dialog-summary">
               <span>本次计划 {batchPreview.items.length} / {batchPreview.total} 个渠道；跳过 {Math.max(0,batchPreview.total-batchPreview.items.length)} 个</span>
-              <span>{batchPreview.kind==="fingerprint" ? `去重后 ${batchPreview.fingerprintTargets.length} 项` : `${batchPreview.items.reduce((count,item)=>count+item.models.length,0)} 个检测项`}</span>
+              <span>{batchPreview.kind==="fingerprint" ? `去重后 ${batchPreview.fingerprintTargets.length} 项` :
+                isServiceTier(batchPreview.kind) ? `最多 ${batchPreview.tierTargets.length} 次可能计费的上游请求` :
+                `${batchPreview.items.reduce((count,item)=>count+item.models.length,0)} 个检测项`}</span>
             </p>
             <details className="data-disclosure"><summary>渠道与模型</summary><ul className="dialog-preview-list">
               {batchPreview.items.map(item=><li key={item.id}><strong>{item.label}</strong><small>{item.models.join("、")}</small></li>)}
@@ -2028,6 +2067,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         {managementColumns.map(id => {
                           const content = () => {
                             switch (id) {
+                              case "fast":
+                              case "ultrafast": return <ServiceTierCell tier={id}
+                                targets={managementTierTargets(managementRow, displayedPage?.context.imports || [], tableModel, filters.accountId)}
+                                index={tableTiers.index} loading={tableTiers.isPending} failed={tableTiers.isError} />;
                               case "model": return <span className="mono management-table-label" title={tableModel}>{tableModel || ((t.list_overview?.total ?? checks.length) ? `${t.list_overview?.total ?? checks.length} 个模型` : "—")}</span>;
                               case "platform": return <>
                                 <span title={t.platform}>{t.platform}</span>

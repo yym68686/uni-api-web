@@ -1,6 +1,8 @@
 export const serviceTiers = ["fast", "ultrafast"] as const;
 export type ServiceTier = typeof serviceTiers[number];
 export const serviceTierName = { fast: "Fast", ultrafast: "Ultrafast" } as const;
+export const isServiceTier = (value: string): value is ServiceTier => value === "fast" || value === "ultrafast";
+export const serviceTierBatchLimit = 30;
 export const serviceTierFilterLabels = {
   supported: "已验证支持",
   not_honored: "未命中",

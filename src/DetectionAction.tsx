@@ -1,11 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
+import { serviceTiers } from "./serviceTierStatus";
 
 export const detectionProjects = [
   "quality",
   "fingerprint",
   "tool-use",
   "compaction",
+  ...serviceTiers,
 ] as const;
 export type DetectionProject = (typeof detectionProjects)[number];
 
@@ -14,6 +16,8 @@ export const detectionProjectLabels: Record<DetectionProject, string> = {
   fingerprint: "指纹检测",
   "tool-use": "Tool use 检测",
   compaction: "压缩检测",
+  fast: "Fast 检测",
+  ultrafast: "Ultrafast 检测",
 };
 
 export function useDetectionProject<T extends DetectionProject>(

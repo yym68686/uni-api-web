@@ -20,6 +20,8 @@ import type { BatchPart, BatchDraft } from "./channelBatch";
 import type { ConsoleSourcesQuery } from "./consoleSources";
 import { toolUseFailed, modelToolUse, toolUseLabels } from "./toolUse";
 import { CompactionStatus } from "./SubCompaction";
+import { serviceTierName, serviceTiers, type ServiceTier } from "./serviceTierStatus";
+import "./serviceTierRouting.css";
 import { assessPrice } from "./sub2apiPriceCheck";
 import { ModelPriceWarning } from "./Sub2apiPricing";
 import { ModelQualityWarning } from "./ModelQualityWarning";
@@ -330,6 +332,34 @@ function Sub2apiImportForm({
   );
   const compactionEnabled =
     compactionChoice ?? target.compaction?.status === "supported";
+  const [tierOverride, setTierOverride] = useState(() => ({
+    destination: JSON.stringify([initialAdd?.source, initialAdd?.key]),
+    choices: initialAdd?.serviceTierChoices || {},
+  }));
+  const tierDestination = JSON.stringify([source, key]);
+  const tierChoices = tierOverride.destination === tierDestination ? tierOverride.choices : {};
+  const tierPreviewBody = JSON.stringify({
+    account_id: account.id, group_id: target.group_id, source_id: source, api_key_id: key,
+    models: originals, model_mappings: mapping.mappings, protocols,
+  });
+  const checkTiers = adding && !!source && !!key && models.length > 0 && !mapping.error &&
+    !missingProtocol && Object.values(protocols).includes("responses");
+  const [settledTierBody, setSettledTierBody] = useState("");
+  useEffect(() => {
+    if (!checkTiers) return;
+    const timer = window.setTimeout(() => setSettledTierBody(tierPreviewBody), 180);
+    return () => window.clearTimeout(timer);
+  }, [checkTiers, tierPreviewBody]);
+  const tierPreview = useQuery({
+    queryKey: ["service-tier-import-options", tierPreviewBody],
+    enabled: checkTiers && settledTierBody === tierPreviewBody,
+    queryFn: ({ signal }) => controlRequest<{verified: Partial<Record<ServiceTier, number>>; total: number}>(
+      "/v1/sub2api/channel-tier-options", {method: "POST", signal, body: tierPreviewBody}),
+    retry: false, staleTime: 15000, refetchOnWindowFocus: false,
+  });
+  const tierCount = (tier: ServiceTier) => tierPreview.isError ? 0 : tierPreview.data?.verified?.[tier] || 0;
+  const tierIsEnabled = (tier: ServiceTier) => tierCount(tier) > 0 && tierChoices[tier] !== false;
+  const waitingForTiers = checkTiers && !tierPreview.data && !tierPreview.isError;
   const options = useQuery({
     queryKey: ["sub-import-options", source, key, account.id, target.group_id],
     queryFn: ({ signal }) =>
@@ -617,7 +647,7 @@ function Sub2apiImportForm({
   ) {
     if (
       busy ||
-      (action === "add" && (groupUnavailable || importBlocked || fingerprintLoading || duplicate || !options.data?.supported)) ||
+      (action === "add" && (groupUnavailable || importBlocked || fingerprintLoading || waitingForTiers || duplicate || !options.data?.supported)) ||
       (action !== "delete" &&
         (mapping.error ||
           invalidModels.length ||
@@ -638,6 +668,9 @@ function Sub2apiImportForm({
       ...(action === "add" ? { compaction_enabled: compactionEnabled } : {
         action, provider: item?.provider || editing?.provider,
       }),
+      ...(action === "add" && serviceTiers.some(tier => tierCount(tier) > 0) && {
+        service_tier_enabled: Object.fromEntries(serviceTiers.filter(tier => tierCount(tier) > 0).map(tier => [tier, tierIsEnabled(tier)])),
+      }),
       ...(action !== "delete" && {
         models: originals,
         protocols,
@@ -655,6 +688,7 @@ function Sub2apiImportForm({
         body,
         draft: {
           source, key, aliases, position, perModel, modelPositions, protocols, compactionEnabled,
+          serviceTierChoices: tierChoices,
           modelChoices: Object.fromEntries(checks.map(check => [check.model, originals.includes(check.model)])),
         },
         refresh: () => void refresh(),
@@ -1269,6 +1303,7 @@ function Sub2apiImportForm({
                 )}
                 {!editing && (
                   <div className="sub-import-field">
+                    <div className="service-tier-import-toggles" role="group" aria-label="渠道能力">
                     <label className="settings-check">
                       <input
                         type="checkbox"
@@ -1278,6 +1313,17 @@ function Sub2apiImportForm({
                       />
                       开启远程压缩
                     </label>
+                    {serviceTiers.map(tier => <label className="settings-check" key={tier}>
+                      <input type="checkbox" aria-label={`开启 ${serviceTierName[tier]}`}
+                        checked={tierIsEnabled(tier)} disabled={busy || !tierCount(tier)}
+                        onChange={event => setTierOverride({destination:tierDestination, choices:{...tierChoices, [tier]:event.target.checked}})}/>
+                      {serviceTierName[tier]}
+                      <small className={tierCount(tier) ? "positive" : "muted"}>
+                        {tierCount(tier) ? `已验证 ${tierCount(tier)}/${tierPreview.data?.total}` :
+                          waitingForTiers ? "核对中…" : tierPreview.isError ? "未能验证" : "未验证"}
+                      </small>
+                    </label>)}
+                    </div>
                     <CompactionStatus target={target} />
                     <small className="muted">
                       关闭后此渠道跳过 compaction 请求，普通请求照常转发。
@@ -1383,7 +1429,7 @@ function Sub2apiImportForm({
                     form={formId}
                     disabled={
                       busy ||
-                      (!editing && (groupUnavailable || importBlocked)) ||
+                      (!editing && (groupUnavailable || importBlocked || waitingForTiers)) ||
                       !source ||
                       !key ||
                       !keyDirectory?.data?.keys.some((k) => k.key_id === key) ||

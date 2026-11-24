@@ -56,6 +56,8 @@ import {
   analyticsRequest,
 } from "./api";
 import { ObservedDetectionActions, ObservedDetectionRow, useObservedDetection } from "./ObservedDetection";
+import { ServiceTierCell } from "./serviceTierTable";
+import { isServiceTier, serviceTierName } from "./serviceTierStatus";
 import {
   ChannelCheckAction,
   LatestChannelCheck,
@@ -775,7 +777,7 @@ export default function Dashboard({
   const [customColumns, setCustomColumns] = useTableColumns("uni-console:channel-columns:v1", observationColumns);
   const compactViewport = useCompactWorkbench();
   const compactObservation = compactViewport && !customColumns && columnView === "run";
-  const columnChoices = baseConnection.account ? observationColumns : observationColumns.filter(({ id }) => id !== "quality" && id !== "fingerprint");
+  const columnChoices = baseConnection.account ? observationColumns : observationColumns.filter(({ id }) => id !== "quality" && id !== "fingerprint" && !isServiceTier(id));
   const visibleColumns = customColumns ? customColumns.filter(id => columnChoices.some(choice => choice.id === id)) : observationPreset(columnView, compactObservation, !!baseConnection.account);
   const observationLayout = customColumns ? "custom" : columnView;
   const showBalanceColumn = visibleColumns.includes("balance");
@@ -1238,7 +1240,7 @@ export default function Dashboard({
     }
     return result;
   }, [historicalCostMap, balanceRanks, baseConnection.account, channelSpend, filtered, balanceDetails]);
-  const observedDetection = useObservedDetection(baseConnection.session, channelView && !!baseConnection.account, filtered, checks, fingerprints);
+  const observedDetection = useObservedDetection(baseConnection.session, channelView && !!baseConnection.account, filtered, checks, fingerprints, visibleColumns.some(isServiceTier));
   const checkingChannels = observedDetection.expanded;
   const total = channelView ? filtered.length : balanceProviders.length;
   const pageCount = Math.max(1, Math.ceil(total / 25)),
@@ -1501,7 +1503,8 @@ export default function Dashboard({
     {checkingChannels && <th className="observation-detection-actions">检测操作</th>}
     <ChannelMetricHeaders keySelected={!!keyId} channels={filtered} columns={visibleColumns} renderDetection={id => id === "quality"
       ? <th className="column-quality"><Tip text="显示此来源、此渠道最近一次 gpt-6-astra 检测结果，与当前指标时间范围无关；不代表表中每个模型都已单独检测。">是否降智 <CircleHelp size={12} /></Tip></th>
-      : <th className="column-quality column-fingerprint"><FingerprintColumnHeader help={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}/></th> } />
+      : id === "fingerprint" ? <th className="column-quality column-fingerprint"><FingerprintColumnHeader help={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}/></th>
+      : <th className="column-quality">{serviceTierName[id]}</th>} />
   </>;
   return (
     <div className="app-shell">
@@ -2055,10 +2058,16 @@ export default function Dashboard({
                               stale={staleSources.has(row.source_id || "")}
                               metricsUnavailable={!metrics.data}
                               columns={visibleColumns}
-                              renderDetection={id => id === "quality" ? <LatestChannelCheck row={row} checks={checks} /> : <td className="column-quality column-fingerprint"><FingerprintCell
+                              renderDetection={id => id === "quality" ? <LatestChannelCheck row={row} checks={checks} /> : id === "fingerprint" ? <td className="column-quality column-fingerprint"><FingerprintCell
                                 entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)), fingerprints.supportedModels)}
                                 error={fingerprints.error} loading={fingerprints.isPending}
                                 supportedModels={fingerprints.supportedModels}
+                              /></td> : <td className="column-quality"><ServiceTierCell tier={id}
+                                targets={[observedDetection.tierTargetFor(row)].filter(target => target !== undefined)}
+                                index={observedDetection.tierChecks.index}
+                                loading={observedDetection.tierMembers.isPending || observedDetection.tierChecks.isPending}
+                                failed={observedDetection.tierMembers.isError || observedDetection.tierChecks.isError ||
+                                  observedDetection.tierMembers.unavailable.includes(row.source_id || "")}
                               /></td>}
                             />
                           </tr>

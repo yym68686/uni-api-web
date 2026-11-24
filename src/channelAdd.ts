@@ -14,6 +14,7 @@ export interface SiteChannelAddDraft extends ChannelAddDraft {
   modelChoices: Record<string, boolean>;
   protocols: Record<string, string>;
   compactionEnabled: boolean;
+  serviceTierChoices?: Partial<Record<"fast" | "ultrafast", boolean>>;
 }
 
 export interface ConfiguredChannelAddDraft extends ChannelAddDraft {

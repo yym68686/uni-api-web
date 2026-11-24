@@ -22,6 +22,7 @@ type subImportInput struct {
 	Positions             map[string]int    `json:"positions,omitempty"`
 	ModelMappings         map[string]string `json:"model_mappings,omitempty"`
 	CompactionEnabled     *bool             `json:"compaction_enabled,omitempty"`
+	ServiceTierEnabled    map[string]bool   `json:"service_tier_enabled,omitempty"`
 	Action                string            `json:"action"`
 	AccountID             string            `json:"account_id"`
 	GroupID               int64             `json:"group_id"`
@@ -196,7 +197,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	owner, _ := s.controlUser(r)
 	publicModels, modelErr := importPublicModels(in.Models, in.ModelMappings)
-	if modelErr != nil || validateModelPositions(publicModels, in.Positions) != nil || in.Position < 1 || len(in.Revision) > 256 {
+	if modelErr != nil || !validTierChoices(in.ServiceTierEnabled) || validateModelPositions(publicModels, in.Positions) != nil || in.Position < 1 || len(in.Revision) > 256 {
 		http.Error(w, "请选择模型和有效位置", 400)
 		return
 	}
@@ -439,6 +440,7 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 		return nil, 400, err
 	}
 	document := map[string]any{"provider": provider, "base_url": base, "api": []string{upstreamKey}, "exclude_request_types": excluded}
+	appliedTiers := map[string]bool{}
 	for index, part := range parts {
 		name := provider
 		if index > 0 {
@@ -456,6 +458,27 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 		snapshot, code, err = s.prepareImportSnapshot(ctx, src, snapshot, channel, in.Position, protocolPositions(channel.Models, in.Positions))
 		if err != nil {
 			return nil, code, err
+		}
+		if part.Protocol == "responses" && len(in.ServiceTierEnabled) > 0 {
+			plan, err := s.planServiceTierImport(ctx, src, name, channel.Base, upstreamKey, part.Models)
+			if err != nil {
+				return nil, 409, errors.New("档位检测证据无法确认，请刷新后重试")
+			}
+			set := importTierSettings(plan, in)
+			if len(set) > 0 {
+				if snapshot.Settings == nil {
+					snapshot.Settings = map[string]json.RawMessage{}
+				}
+				snapshot.Settings[name] = json.RawMessage(mustJSON(map[string]any{"set": set}))
+			}
+			for tier, count := range plan.counts {
+				appliedTiers[tier] = count > 0
+			}
+		}
+	}
+	for tier, enabled := range in.ServiceTierEnabled {
+		if enabled && !appliedTiers[tier] {
+			return nil, 409, errors.New("所选档位的验证已失效，请刷新后重试")
 		}
 	}
 	admin := src

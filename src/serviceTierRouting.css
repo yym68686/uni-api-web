@@ -1,0 +1,27 @@
+.service-tier-import-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .65rem 1.25rem;
+}
+
+.service-tier-import-toggles .settings-check {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  white-space: nowrap;
+}
+
+.opt-tier-settings {
+  margin-block: .65rem;
+  border: 1px solid var(--border);
+  border-radius: .5rem;
+  padding: .65rem .85rem;
+}
+
+.opt-tier-settings summary { cursor: pointer; }
+.opt-tier-settings table { width: 100%; border-collapse: collapse; }
+.opt-tier-settings th, .opt-tier-settings td { padding: .5rem; text-align: left; }
+.opt-tier-settings th:not(:first-child), .opt-tier-settings td:not(:first-child) { text-align: center; }
+.opt-tier-settings th, .opt-tier-settings td { border-bottom: 1px solid var(--border); }
+.opt-tier-settings .table-scroll { margin-block: .5rem; }

@@ -8,6 +8,44 @@ import {
   modelCheck,
 } from "./channelOptimization.test-data";
 
+it("saves only the changed speed tier without running model optimization", async () => {
+  const snapshot = optimizationFixture();
+  const scope = "a".repeat(64);
+  Object.assign(snapshot.imports.data[0], {
+    service_tier_scope: scope,
+    service_tier_routing: {fast: "enabled", ultrafast: "enabled"},
+  });
+  const fetch = vi.fn(async (_url: string, _init?: RequestInit) =>
+    Response.json({status: "applied"}),
+  );
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const user = userEvent.setup();
+    render(<QueryClientProvider client={new QueryClient()}>
+      <ChannelOptimization snapshot={() => snapshot} />
+    </QueryClientProvider>);
+    await user.click(screen.getByRole("button", {name: "优化渠道模型"}));
+    await user.click(screen.getByText("Fast / Ultrafast"));
+    const fast = screen.getByRole("checkbox", {name: "Fugue Site-0.1 Fast"});
+    const ultra = screen.getByRole("checkbox", {name: "Fugue Site-0.1 Ultrafast"});
+    expect(fast).toBeChecked();
+    expect(ultra).toBeChecked();
+    await user.click(fast);
+    expect(ultra).toBeChecked();
+    await user.click(screen.getByRole("button", {name: "保存档位"}));
+    await screen.findByText("已保存 1 项档位变更");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = fetch.mock.calls[0];
+    expect(new URL(url).pathname).toBe("/analytics/v1/sources/s/service-tier-routing");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      revision: "r1",
+      choices: [{provider: "p", scope, tier: "fast", enabled: false}],
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("shows legacy retirement and couples a model addition to its selected protocol upgrade", async () => {
   const snapshot = optimizationFixture();
   snapshot.imports.data[0].engine = "gpt";

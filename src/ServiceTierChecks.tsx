@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown } from "lucide-react";
 import { controlRequest } from "./api";
+import { submitTierChecks, tierTarget } from "./serviceTierTable";
 import type { ConfiguredCheck } from "./channelManagement";
 import type { InstalledChannel } from "./sub2apiImports";
 import { serviceTierFilterLabels, serviceTierFresh, serviceTierName, serviceTiers, serviceTierVerified } from "./serviceTierStatus";
@@ -118,9 +119,9 @@ function TierAction({ tier, member, model, check, ready, reload, refreshManageme
     setNotice(undefined);
     try {
       if (action === "probe") {
-        await controlRequest("/v1/channel-management/checks", { method: "POST", body: JSON.stringify({
-          kind: tier, manual: true, targets: [{ source_id: member.source_id, provider: member.provider, models: [model] }],
-        }) }, { localConfiguredCheck: true });
+        const target = tierTarget(member, model);
+        if (!target) throw Error("当前模型不适用档位检测");
+        await submitTierChecks(tier, [target], true);
       } else {
         const receipt = await controlRequest<{status?: string; message?: string}>(`/v1/sources/${encodeURIComponent(member.source_id)}/service-tier-evidence`, {
           method: "POST", body: JSON.stringify({ provider: member.provider, model, tier, operation_id: crypto.randomUUID(), remove: action === "remove" }),
