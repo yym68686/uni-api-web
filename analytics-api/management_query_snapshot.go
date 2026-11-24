@@ -183,6 +183,9 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 		}
 		endEvidence := managementReadSpan(ctx, "filter_evidence")
 		out.Evidence = managementQueryEvidence(view.Input, out.Rows, filters.Model, view.Prices)
+		if filters.hasServiceTiers() {
+			out.Evidence.ServiceTiers = managementServiceTiers(view.Input, out.Rows, filters, view.ReadAt.Unix())
+		}
 		out.Evidence.siteAvailability = siteAvailability
 		endEvidence()
 		endPage := managementReadSpan(ctx, "filter_page")

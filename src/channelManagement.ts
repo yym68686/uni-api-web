@@ -70,6 +70,7 @@ export function configuredQualityResult(member: ManagedChannel, accounts: SubAcc
   return native && (!latestSite || native.checked_at >= latestSite.checked_at) ? native : latestSite || null;
 }
 
+import type { ServiceTier, ServiceTierResult } from "./serviceTierStatus";
 export const UNASSIGNED_ACCOUNT = "__unassigned__";
 export interface ManagedChannel extends InstalledChannel {
   engine: string;
@@ -84,12 +85,12 @@ export interface ConfiguredCheck {
   details_omitted?: boolean;
   source_id: string;
   provider: string;
-  kind: "model" | "availability" | "compaction" | "tool-use";
+  kind: "model" | "availability" | "compaction" | "tool-use" | ServiceTier;
   model: string;
   fingerprint: string;
   state: string;
   message: string;
-  result: NonNullable<SubTarget["result"]> | ToolUseResult | null;
+  result: NonNullable<SubTarget["result"]> | ToolUseResult | ServiceTierResult | null;
   history: SubTarget["history"];
 }
 

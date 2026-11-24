@@ -66,16 +66,19 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 	if !decodeConfiguration(w, r, &in) {
 		return
 	}
-	if (in.Kind != "check" && in.Kind != "availability" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use") || len(in.Targets) == 0 {
+	tier := isServiceTier(in.Kind)
+	if (in.Kind != "check" && in.Kind != "availability" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use" && !tier) || len(in.Targets) == 0 || tier && !in.Manual {
 		http.Error(w, "无效检测任务", 400)
 		return
 	}
+	tierCount := 0
 	for _, t := range in.Targets {
 		if t.Provider == "" || len(t.Provider) > 256 || strings.ContainsAny(t.Provider, "\r\n/") {
 			http.Error(w, "无效渠道或模型", 400)
 			return
 		}
 		for _, m := range t.Models {
+			tierCount++
 			if (in.Kind == "tool-use" || in.Kind == "compaction") && !subCapabilityModel(m) {
 				http.Error(w, "仅检测 gpt 或 codex 开头的模型", http.StatusBadRequest)
 				return
@@ -85,10 +88,14 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
-		if (in.Kind == "check" || in.Kind == "availability") && len(t.Models) == 0 {
+		if (in.Kind == "check" || in.Kind == "availability" || tier) && len(t.Models) == 0 {
 			http.Error(w, "请选择检测模型", 400)
 			return
 		}
+	}
+	if tier && tierCount > serviceTierBatchLimit {
+		http.Error(w, "单次最多检测 30 个渠道模型", 400)
+		return
 	}
 	owner, _ := s.controlUser(r)
 	disabled, _, err := readDisabledDetection(r.Context(), s.control.db, owner)
@@ -219,7 +226,7 @@ func (s *Service) configuredCheckOne(parent context.Context) bool {
 	run = randomID()
 	err := s.control.db.QueryRowContext(parent, `WITH job AS (
  SELECT source_id,provider,kind,model FROM console_configured_checks c WHERE state='queued'
-	AND (kind IN ('model','availability') OR NOT EXISTS(SELECT 1 FROM console_configured_checks m WHERE m.source_id=c.source_id AND m.provider=c.provider AND m.kind IN ('model','availability') AND m.state IN ('queued','running')))
+	AND (kind IN ('model','availability','fast','ultrafast') OR NOT EXISTS(SELECT 1 FROM console_configured_checks m WHERE m.source_id=c.source_id AND m.provider=c.provider AND m.kind IN ('model','availability') AND m.state IN ('queued','running')))
  ORDER BY updated_at,source_id,provider,model FOR UPDATE SKIP LOCKED LIMIT 1)
  UPDATE console_configured_checks c SET state='running',run_id=$1,deadline=now()+interval '210 seconds'
  FROM job j WHERE c.source_id=j.source_id AND c.provider=j.provider AND c.kind=j.kind AND c.model=j.model
@@ -247,6 +254,10 @@ func (s *Service) configuredCheckOne(parent context.Context) bool {
 	if result != nil {
 		raw = mustJSON(result)
 	}
+	if isServiceTier(c.Kind) {
+		s.saveServiceTierResult(finish, c, run, state, message, raw)
+		return true
+	}
 	_, saveErr := s.control.db.ExecContext(finish, `UPDATE console_configured_checks SET state=$6,message=$7,result=$8,fingerprint=$9,updated_at=now(),deadline=NULL
  WHERE source_id=$1 AND provider=$2 AND kind=$3 AND model=$4 AND run_id=$5 AND state='running'`, c.Source, c.Provider, c.Kind, c.Model, run, state, message, raw, c.Fingerprint)
 	if saveErr != nil {
@@ -266,6 +277,9 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	src, err := s.control.source(ctx, c.Source)
 	if err != nil || controlTarget(src) != target {
 		return errors.New("来源已变更，请刷新后重新检测")
+	}
+	if isServiceTier(c.Kind) {
+		return s.runServiceTierCheck(ctx, src, c, result)
 	}
 	preflight, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

@@ -24,6 +24,8 @@ type managementQueryFilters struct {
 	PriceStatus  string `json:"priceStatus"`
 	Compaction   string `json:"compaction"`
 	ToolUse      string `json:"toolUse"`
+	Fast         string `json:"fast,omitempty"`
+	Ultrafast    string `json:"ultrafast,omitempty"`
 	Quality      string `json:"quality"`
 	MinQuality   string `json:"minQuality"`
 	Platform     string `json:"platform"`
@@ -33,10 +35,11 @@ type managementQueryFilters struct {
 }
 
 type managementFilterEvidence struct {
-	Prices           []Price             `json:"prices"`
-	FingerprintReady bool                `json:"fingerprint_ready"`
-	Fingerprints     map[string][]string `json:"fingerprints"`
-	Joined           map[string]string   `json:"joined"`
+	Prices           []Price                         `json:"prices"`
+	FingerprintReady bool                            `json:"fingerprint_ready"`
+	Fingerprints     map[string][]string             `json:"fingerprints"`
+	Joined           map[string]string               `json:"joined"`
+	ServiceTiers     map[string][]managementTierPair `json:"service_tiers,omitempty"`
 	// Request-local, derived from the already fenced model evidence. Do not
 	// include the optimization in the shared page/complete-selection revision.
 	siteAvailability map[string]bool
@@ -388,6 +391,9 @@ func filterManagementQueryRows(rows []managementQueryRow, f managementQueryFilte
 			f.ModelMatch != "" && !slices.ContainsFunc(checks, func(c managementQueryCheck) bool { return managementModelMatch(c) == f.ModelMatch }) ||
 			f.Compaction != "" && managementCompaction(row.Target, f.Model) != f.Compaction ||
 			!managementToolMatches(row.Target, f.ToolUse, f.Model) || f.Quality != "" && managementQuality(&row.Target) != f.Quality {
+			continue
+		}
+		if !managementTierMatches(evidence.ServiceTiers[row.ID], f) {
 			continue
 		}
 		if f.MinQuality != "" {

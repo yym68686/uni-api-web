@@ -1,0 +1,16 @@
+.service-tier-controls { display: grid; gap: .5rem; }
+.service-tier-controls > .select-field { margin-block-start: .5rem; }
+.service-tier-row {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .4rem .6rem;
+  padding: .5rem 0;
+}
+.service-tier-row > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.service-tier-row > small { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.service-tier-actions { display: flex; gap: .3rem; white-space: nowrap; }
+@media (max-width: 650px) {
+  .service-tier-row { grid-template-columns: minmax(5rem, auto) minmax(0, 1fr); }
+  .service-tier-actions { grid-column: 1 / -1; }
+}

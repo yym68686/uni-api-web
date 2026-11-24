@@ -42,6 +42,9 @@ import { CreateChannel } from "./CreateChannel";
 import { ChannelConfigurationDialog, ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
+import { ServiceTierChecks } from "./ServiceTierChecks";
+import { serviceTierFilterLabels, serviceTierName, serviceTiers } from "./serviceTierStatus";
+import type { InstalledChannel } from "./sub2apiImports";
 import { useManagementPage, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation } from "./managementQuery";
 import type { ManagementOptimizationPreview, ManagementPagePosition, ManagementSelection } from "./managementQuery";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT } from "./channelManagement";
@@ -649,11 +652,15 @@ function CheckDetails({
 function ManagementChannelDrawer({
   row,
   prices,
+  imports,
+  owner,
   close,
   onOpenChannel,
 }: {
   row: ManagementRow;
   prices?: ModelPrice[];
+  imports: InstalledChannel[];
+  owner: string;
   close: () => void;
   onOpenChannel: () => void;
 }) {
@@ -763,6 +770,12 @@ function ManagementChannelDrawer({
             </dl>
             {target.message && <p className="negative sub-management-message">{target.message}</p>}
           </section>
+          <ServiceTierChecks
+            owner={owner}
+            members={configured ? configuredMembers : imports.filter(member =>
+              member.kind !== "configured" && member.account_id === account.id && member.group_id === target.group_id)}
+            initialModel={selected?.model}
+          />
           <section className="detail-section detail-models" aria-label="模型检测结果">
             <h3>模型检测结果 <span className="count-badge">{modelCount}</span></h3>
             {modelsPending ? complete.isError
@@ -1801,6 +1814,23 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                   {Object.entries(toolUseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select><ChevronDown size={13} />
               </label>
+              {serviceTiers.map(tier => <label key={tier} className="select-field">
+                <select aria-label={`${serviceTierName[tier]} 支持状态筛选`} value={filters[tier] || ""}
+                  onChange={e => {
+                    const value = e.target.value;
+                    setFilters(v => {
+                      const next = {...v};
+                      if (value) next[tier] = value;
+                      else delete next[tier];
+                      return next;
+                    });
+                    setPage(0);
+                  }}>
+                  <option value="">{serviceTierName[tier]} · 全部</option>
+                  {Object.entries(serviceTierFilterLabels).map(([value, label]) =>
+                    <option key={value} value={value}>{serviceTierName[tier]} · {label}</option>)}
+                </select><ChevronDown size={13} />
+              </label>)}
               <label className="select-field">
                 <select
                   aria-label="降智筛选"
@@ -2173,6 +2203,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       {managementDetail && (
         <ManagementChannelDrawer
           row={rows.find(row => row.id === managementDetail.id) || managementDetail}
+          owner={user}
+          imports={displayedPage?.context.imports || []}
           prices={prices.data?.data}
           close={() => setManagementDetail(null)}
           onOpenChannel={() => {

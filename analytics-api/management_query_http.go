@@ -92,6 +92,8 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 		{filters.PriceStatus, []string{"", "normal", "abnormal", "unconfirmed", "unconfirmed_match", "unconfirmed_mismatch"}},
 		{filters.Compaction, []string{"", "supported", "unsupported", "error", "untested", "not_applicable"}},
 		{filters.ToolUse, []string{"", "supported", "unsupported", "error", "untested", "not_applicable"}},
+		{filters.Fast, managementTierFilterOptions},
+		{filters.Ultrafast, managementTierFilterOptions},
 		{filters.Quality, []string{"", "pass", "fail", "inconclusive", "error"}},
 		{filters.Joined, []string{"", "joined", "unjoined"}},
 		{filters.ModelMatch, []string{"", "match", "mismatch", "missing", "invalid", "unavailable", "legacy", "untested"}},
@@ -206,7 +208,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		cacheCursor += "\x00refresh"
 	}
 	computedKey := managementPageComputedKey(ctx, owner, filters, cacheCursor)
-	if selection == "" {
+	if selection == "" && !filters.hasServiceTiers() {
 		page, reused, reuseErr := s.currentComputedManagementPageMode(ctx, owner, computedKey, r.Header.Get("Accept") == managementPageV3MediaType)
 		if reuseErr != nil {
 			http.Error(w, "渠道数据实时核验失败，请重新读取", http.StatusServiceUnavailable)
@@ -278,8 +280,14 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		headers := managementAccountHeaders(view.Input.Accounts)
 		selectionToken := encodeManagementCursor(s.control.key, owner, managementPageCursor{Version: 1, Revision: page.Revision, Filter: tokenHash(mustJSON(filters))})
 		response := managementPageResponse{Owner: owner, managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)}
-		err = s.writeAndRememberManagementPage(w, r, response, computedKey, snapshot.Proof)
-		if err == nil {
+		proof := snapshot.Proof
+		if filters.hasServiceTiers() {
+			// A result expires by time alone. A database/gateway revision cannot
+			// prove the continued validity of a cached entitlement filter.
+			proof = nil
+		}
+		err = s.writeAndRememberManagementPage(w, r, response, computedKey, proof)
+		if err == nil && !filters.hasServiceTiers() {
 			s.rememberManagementPagingPlanMode(owner, filters, snapshot, managementListView(ctx))
 		}
 	}

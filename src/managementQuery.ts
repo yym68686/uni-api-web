@@ -116,8 +116,11 @@ const path = (
 ) => {
   // Keep default reads compatible with the previous backend during rollout.
   // A requested exclusion must always reach the server, including selections.
-  const { excludeName, ...existingFilters } = filters;
-  const query = new URLSearchParams({ filters: JSON.stringify(excludeName ? { ...existingFilters, excludeName } : existingFilters) });
+  const { excludeName, fast, ultrafast, ...existingFilters } = filters;
+  const query = new URLSearchParams({ filters: JSON.stringify({
+    ...existingFilters, ...(excludeName ? { excludeName } : {}),
+    ...(fast ? { fast } : {}), ...(ultrafast ? { ultrafast } : {}),
+  }) });
   if (token?.cursor) { query.set("cursor", token.cursor); if(token.refreshCursor)query.set("refresh_cursor","1"); }
   if (token?.selection) query.set("selection", token.selection);
   if (token?.selectedReceipts && filters.model && !token.selection) query.set("receipt_view", "selected");

@@ -114,6 +114,7 @@ const labels: Record<string, string> = {
   model_timeout: "模型超时（秒）",
   hedging: "Hedging 并行请求",
   unknown_upstream_400_retries: "所有上游400换渠道次数",
+  service_tier_routing: "Fast / Ultrafast 路由",
   timeout_policy: "条件超时策略",
   keepalive_interval: "心跳间隔（秒）",
   cooldown_period: "渠道冷却（秒）",

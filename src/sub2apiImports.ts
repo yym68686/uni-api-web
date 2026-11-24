@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
 export interface InstalledChannel {
+  service_tier_scope?: string;
   protocol?: string;
   engine?: string;
   engine_mode?: string;

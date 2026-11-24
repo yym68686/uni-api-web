@@ -1,3 +1,5 @@
+import { serviceTierFilterLabels } from "./serviceTierStatus";
+
 export const subFilterDefaults = {
   search: "",
   excludeName: "",
@@ -17,7 +19,7 @@ export const subFilterDefaults = {
   modelMatch: "",
   fingerprint: "",
 };
-export type SubFilters = typeof subFilterDefaults;
+export type SubFilters = typeof subFilterDefaults & { fast?: string; ultrafast?: string };
 const cache = new Map<string, SubFilters>();
 const key = (user: string) => `uni-console-sub2api-filters:v1:${user}`;
 function validate(raw: unknown): SubFilters {
@@ -30,6 +32,8 @@ function validate(raw: unknown): SubFilters {
       : "";
   const maxRate = field("maxRate");
   const groupStatus = field("groupStatus", ["available", "all", "unavailable"]);
+  const fast = field("fast", Object.keys(serviceTierFilterLabels));
+  const ultrafast = field("ultrafast", Object.keys(serviceTierFilterLabels));
   return {
     joined: field("joined", ["", "joined", "unjoined"]),
     // Older clients stored "all" even without an explicit choice. Migrate
@@ -54,6 +58,8 @@ function validate(raw: unknown): SubFilters {
     priceStatus: field("priceStatus", ["", "normal", "abnormal", "unconfirmed", "unconfirmed_match", "unconfirmed_mismatch"]),
     compaction: field("compaction", ["", "supported", "unsupported", "error", "untested", "not_applicable"]),
     toolUse: field("toolUse", ["", "supported", "unsupported", "error", "untested", "not_applicable"]),
+    ...(fast ? { fast } : {}),
+    ...(ultrafast ? { ultrafast } : {}),
     quality: field("quality", ["", "pass", "fail", "inconclusive", "error"]),
     minQuality: field("minQuality", ["", ...Array.from({ length: 11 }, (_, i) => String(i * 10))]),
   };

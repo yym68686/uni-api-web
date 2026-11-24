@@ -26,6 +26,7 @@ type subChannelRef struct {
 	Rate            *float64
 }
 type subInstalledChannel struct {
+	ServiceTierScope string            `json:"service_tier_scope,omitempty"`
 	Protocol         string            `json:"protocol,omitempty"`
 	Engine           string            `json:"engine,omitempty"`
 	EngineMode       string            `json:"engine_mode,omitempty"`

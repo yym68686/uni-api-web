@@ -338,8 +338,8 @@ it("reads one current page and separately verifies the complete 61-row selection
   expect(calls).toHaveLength(2);
 });
 
-it("sends name exclusions unchanged for both pages and complete batch selections", async () => {
-  const filters = { ...subFilterDefaults, excludeName: "KiRo" };
+it("sends name exclusions and tier conditions unchanged for both pages and complete batch selections", async () => {
+  const filters = { ...subFilterDefaults, excludeName: "KiRo", fast: "supported", ultrafast: "unknown" };
   const calls: URL[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {
     const url = new URL(input);
@@ -354,7 +354,7 @@ it("sends name exclusions unchanged for both pages and complete batch selections
 });
 
 it("opens a fresh complete optimization preview independently of the old page revision without a write or selection token", async () => {
-  const filters = {...subFilterDefaults, model:"gpt-5.5", excludeName:"kiro"};
+  const filters = {...subFilterDefaults, model:"gpt-5.5", excludeName:"kiro", ultrafast:"supported"};
   const fetch = vi.fn(async (input:string, init:RequestInit) => {
     const url = new URL(input);
     expect(url.pathname).toBe("/analytics/v1/channel-management/optimization-preview");

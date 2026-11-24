@@ -29,6 +29,7 @@ type managementModel struct {
 	ProtocolOptions *[]string `json:"upstream_protocol_options,omitempty"`
 }
 type managementProvider struct {
+	ServiceTierScope string `json:"service_tier_scope,omitempty"`
 	Base             string `json:"base"`
 	Fingerprint      string `json:"fingerprint"`
 	ProbeFingerprint string `json:"probe_fingerprint"`
@@ -48,6 +49,7 @@ func managementProviderEvidence(src controlSource, p configuredProvider) managem
 	hashes, _ := json.Marshal(keys)
 	base := subBindingSite(p.Base)
 	return managementProvider{
+		ServiceTierScope: serviceTierScope(src, p.ServiceTierScope),
 		Base:             base,
 		Fingerprint:      tokenHash(controlTarget(src) + "\n" + p.Provider + "\n" + base + "\n" + string(hashes)),
 		ProbeFingerprint: configuredProbeFingerprint(src, p),

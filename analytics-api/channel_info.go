@@ -15,12 +15,13 @@ type configuredModelEndpoint struct {
 }
 
 type configuredProvider struct {
-	Temporary       bool                               `json:"temporary,omitempty"`
-	IdentityChanged bool                               `json:"identity_changed,omitempty"`
-	Provider        string                             `json:"provider"`
-	Base            string                             `json:"base_url"`
-	API             any                                `json:"api"`
-	ModelEndpoints  map[string]configuredModelEndpoint `json:"model_endpoints,omitempty"`
+	Temporary        bool                               `json:"temporary,omitempty"`
+	IdentityChanged  bool                               `json:"identity_changed,omitempty"`
+	Provider         string                             `json:"provider"`
+	Base             string                             `json:"base_url"`
+	API              any                                `json:"api"`
+	ModelEndpoints   map[string]configuredModelEndpoint `json:"model_endpoints,omitempty"`
+	ServiceTierScope string                             `json:"service_tier_scope,omitempty"`
 }
 
 func configuredProviders(ctx context.Context, src controlSource) ([]configuredProvider, error) {

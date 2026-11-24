@@ -36,3 +36,13 @@ it("preserves name exclusions per user and defaults older or invalid preferences
  saveSubFilters("saved-exclusion",{...subFilterDefaults});
  expect(loadSubFilters("saved-exclusion").excludeName).toBe("");
 });
+it("persists each tier filter and discards invalid or reset values", () => {
+  const user = "saved-service-tiers";
+  localStorage.setItem(`uni-console-sub2api-filters:v1:${user}`, JSON.stringify({ fast: "supported", ultrafast: "invalid" }));
+  expect(loadSubFilters(user).fast).toBe("supported");
+  expect(loadSubFilters(user).ultrafast).toBeUndefined();
+  saveSubFilters(user, { ...subFilterDefaults, fast: "not_honored", ultrafast: "unknown" });
+  expect(loadSubFilters(user)).toMatchObject({ fast: "not_honored", ultrafast: "unknown" });
+  saveSubFilters(user, subFilterDefaults);
+  expect(loadSubFilters(user)).toEqual(subFilterDefaults);
+});
