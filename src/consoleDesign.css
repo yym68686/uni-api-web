@@ -111,8 +111,8 @@ h1, h2, h3 { overflow-wrap: anywhere; }
   .workspace .request-log-table :is(th,td) { padding-inline: 4px; }
   .log-id-wide { display: none; }
   .log-id-narrow { display: inline; }
-  .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:first-child { width: 31%; }
-  .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:nth-child(2) { width: 25%; }
+  .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:first-child { width: 28%; }
+  .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:nth-child(2) { width: 20%; }
   .workspace .request-logs-panel .workbench-tools .button { font-size: 14px; }
 }
 .workspace .balance-table:not([data-details]) :is(td,th) { overflow: visible; white-space: normal; }

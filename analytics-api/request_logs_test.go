@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -9,6 +10,38 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRequestLogsClassifiesRequestMetadataAndLegacyCompact(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	type scenario struct{ id, endpoint, metadata, kind, tier string }
+	cases := []scenario{
+		{"legacy", "/v1/responses", "", "", ""},
+		{"compact", "/v1/responses/compact/", "", "compaction", ""},
+		{"combined", "/v1/responses", `{"request_type":"compaction","requested_service_tier":"ultrafast"}`, "compaction", "ultrafast"},
+		{"fast", "/v1/responses", `{"request_type":"standard","requested_service_tier":"priority"}`, "standard", "fast"},
+		{"unknown", "/v1/responses", `{"request_type":"unrecognized","requested_service_tier":"unrecognized"}`, "", ""},
+	}
+	var facts []Fact
+	for _, c := range cases {
+		facts = append(facts, Fact{Schema: 1, EventID: c.id, Kind: "request", SourceID: "a", RequestID: c.id, Endpoint: c.endpoint, Status: 200, Outcome: "success", AtMS: now.Add(-time.Second).UnixMilli(), TraceDetail: json.RawMessage(c.metadata)})
+	}
+	if err := e.Import(ctx, "request-types", "v1", facts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.RequestLogs(ctx, RequestLogFilter{QueryFilter: QueryFilter{SourceIDs: []string{"a"}, Range: "24h", To: now.Unix()}})
+	if err != nil || len(got.Data) != len(cases) {
+		t.Fatal(got, err)
+	}
+	for _, c := range cases {
+		for _, log := range got.Data {
+			if log.EventID == c.id && (log.RequestType != c.kind || log.RequestedTier != c.tier) {
+				t.Fatalf("%s: %+v", c.id, log)
+			}
+		}
+	}
+}
 
 func TestRequestLogsOnlyFinalRequestsAndScopedFilters(t *testing.T) {
 	e := stateTestEngine(t)

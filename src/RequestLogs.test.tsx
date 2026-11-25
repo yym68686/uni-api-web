@@ -133,6 +133,25 @@ function auxiliary(url: URL) {
     });
   return undefined;
 }
+it("renders independent request type and tier labels and preserves legacy column preferences", async () => {
+  localStorage.setItem("uni-console:log-columns:v1", JSON.stringify(["request", "result"]));
+  setup(async input => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/request-logs")) return Response.json({data: [
+      {...row, event_id:"fast-compaction", request_type:"compaction", requested_service_tier:"fast"},
+      {...row, event_id:"ultra-compaction", request_type:"compaction", requested_service_tier:"ultrafast"},
+      {...row, event_id:"standard", request_type:"standard", requested_service_tier:"default"},
+      {...row, event_id:"compact-legacy", endpoint:"/v1/responses/compact/"},
+      {...row, event_id:"unknown"},
+    ], models: []});
+    return auxiliary(url) || Response.json({data: []});
+  });
+  expect(await screen.findByRole("columnheader",{name:"类型"})).toBeVisible();
+  await waitFor(() => {
+    const cells = Array.from(document.querySelectorAll("td.log-request-type")).map(cell => cell.textContent);
+    expect(cells).toEqual(["压缩Fast","压缩Ultrafast","普通","压缩","未记录"]);
+  });
+});
 function traceResult() {
   return {
     import: { caught_up: true },

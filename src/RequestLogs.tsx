@@ -46,6 +46,8 @@ export interface RequestLog {
   key_id: string;
   model: string;
   endpoint: string;
+  request_type?: string;
+  requested_service_tier?: string;
   stream: boolean;
   at_ms: number;
   started_ms: number | null;
@@ -83,6 +85,7 @@ const logColumns = [
   { id: "request", label: "时间 / 请求 ID" },
   { id: "source", label: "来源 / API Key" },
   { id: "model", label: "模型 / 端点" },
+  { id: "type", label: "类型" },
   { id: "result", label: "最终结果" },
   { id: "duration", label: "总耗时" },
   { id: "latency", label: "响应创建" },
@@ -91,7 +94,7 @@ const logColumns = [
 ] as const;
 type LogColumn = typeof logColumns[number]["id"];
 const numericLogColumns: ReadonlySet<LogColumn> = new Set(["duration", "latency", "wait", "tokens"]);
-const defaultLogColumns = logColumns.filter(({ id }) => id === "request" || id === "result" || id === "duration" || id === "latency").map(({ id }) => id);
+const defaultLogColumns = logColumns.filter(({ id }) => id === "request" || id === "type" || id === "result" || id === "duration" || id === "latency").map(({ id }) => id);
 const logColumnLabels = Object.fromEntries(logColumns.map(({ id, label }) => [id, label])) as Record<LogColumn, string>;
 export function requestLogParams(filters: Filters, cursor: string, exact?: LogWindow | null) {
   const params = new URLSearchParams({
@@ -181,7 +184,7 @@ export function RequestLogsPage({
   const [selected, setSelected] = useState<LogPosition | null>(incoming.request);
   const [exact, setExact] = useState<LogWindow | null>(incoming.logWindow);
   const [editWindow, setEditWindow] = useState(false);
-  const [customColumns, setCustomColumns] = useTableColumns("uni-console:log-columns:v1", logColumns);
+  const [customColumns, setCustomColumns] = useTableColumns("uni-console:log-columns:v2", logColumns, {key:"uni-console:log-columns:v1", append:["type"]});
   const visibleColumns = customColumns ?? defaultLogColumns;
   const hasRequestColumn = visibleColumns.includes("request");
   const [fromInput, setFromInput] = useState("");
@@ -458,6 +461,15 @@ export function RequestLogsPage({
         <strong className="mono" title={row.model}>{row.model || "未记录模型"}</strong>
         <small title={row.endpoint}>{row.endpoint || "未记录端点"} · {row.stream ? "流式" : "非流式"}</small>
       </td>;
+      case "type": {
+        const compact = row.request_type === "compaction" || row.endpoint.replace(/\/+$/, "") === "/v1/responses/compact";
+        const tier = { fast:"Fast", priority:"Fast", ultrafast:"Ultrafast", flex:"Flex", scale:"Scale", auto:"Auto" }[row.requested_service_tier || ""];
+        return <td key={id} className="log-request-type" title="请求类型和请求档位，不代表实际计费档位">
+          {compact && <span className="log-type-tag">压缩</span>}
+          {tier && <span className="log-type-tag">{tier}</span>}
+          {!compact && !tier && (row.request_type === "standard" && row.requested_service_tier === "default" ? <span>普通</span> : <span className="muted">未记录</span>)}
+        </td>;
+      }
       case "result": {
         const interrupted = row.stream && row.result === "failed" && row.status === 502 &&
           row.response_headers_status === 200 &&
@@ -736,7 +748,7 @@ export function RequestLogsPage({
             <table className="request-log-table" style={customColumns ? {minWidth: `max(100%, ${visibleColumns.length * 118 + (hasRequestColumn ? 64 : 58)}px)`} : undefined}>
               <thead>
                 <tr>
-                  {visibleColumns.map(id => <th scope="col" key={id} data-align={numericLogColumns.has(id) ? "end" : undefined} className={id === "request" ? "log-identity" : id === "result" ? "log-outcome" : undefined}>{logColumnLabels[id]}</th>)}
+                  {visibleColumns.map(id => <th scope="col" key={id} data-align={numericLogColumns.has(id) ? "end" : undefined} className={id === "request" ? "log-identity" : id === "result" ? "log-outcome" : id === "type" ? "log-request-type" : undefined}>{logColumnLabels[id]}</th>)}
                   {!hasRequestColumn && <th className="log-open">详情</th>}
                 </tr>
               </thead>

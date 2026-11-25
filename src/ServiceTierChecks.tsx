@@ -110,10 +110,9 @@ function TierAction({ tier, member, model, check, ready, reload, refreshManageme
     check?.message].filter(Boolean).join(" · ");
   async function act(action: "probe" | "publish" | "remove") {
     if (busy.current || pending(check)) return;
-    const confirm = action === "probe" ? `检测 ${member.provider} / ${model} 的 ${label} 将发送一次可能计费的上游请求。继续？` :
-      action === "publish" ? `将 ${member.provider} / ${model} 的 ${label} 证据应用到路由？` :
-        `撤销 ${member.provider} / ${model} 的 ${label} 路由证据？`;
-    if (!window.confirm(confirm)) return;
+    if (action !== "probe" && !window.confirm(action === "publish"
+      ? `将 ${member.provider} / ${model} 的 ${label} 证据应用到路由？`
+      : `撤销 ${member.provider} / ${model} 的 ${label} 路由证据？`)) return;
     busy.current = true;
     setWorking(true);
     setNotice(undefined);

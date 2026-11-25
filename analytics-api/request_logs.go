@@ -24,6 +24,8 @@ type RequestLog struct {
 	KeyID             string   `json:"key_id"`
 	Model             string   `json:"model"`
 	Endpoint          string   `json:"endpoint"`
+	RequestType       string   `json:"request_type,omitempty"`
+	RequestedTier     string   `json:"requested_service_tier,omitempty"`
 	Stream            bool     `json:"stream"`
 	AtMS              int64    `json:"at_ms"`
 	StartedMS         *int64   `json:"started_ms"`
@@ -207,6 +209,11 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
     FROM facts a WHERE a.kind='attempt' AND page.trace_id<>'' AND page.started_ms IS NOT NULL
       AND a.source_id=page.source_id AND a.instance_id IS NOT DISTINCT FROM page.instance_id
       AND a.trace_id=page.trace_id AND a.at_ms BETWEEN page.started_ms AND page.at_ms)
+ , CASE WHEN rtrim(coalesce(endpoint,''),'/')='/v1/responses/compact' THEN 'compaction'
+        WHEN NULLIF(trace_detail::text,'')::jsonb->>'request_type' IN ('compaction','standard') THEN NULLIF(trace_detail::text,'')::jsonb->>'request_type' ELSE '' END
+ , CASE NULLIF(trace_detail::text,'')::jsonb->>'requested_service_tier'
+        WHEN 'priority' THEN 'fast' WHEN 'fast' THEN 'fast' WHEN 'ultrafast' THEN 'ultrafast'
+        WHEN 'default' THEN 'default' WHEN 'flex' THEN 'flex' WHEN 'scale' THEN 'scale' WHEN 'auto' THEN 'auto' ELSE '' END
  FROM page ORDER BY sort_value,at_ms DESC,event_id DESC`, args...)
 	if err != nil {
 		return out, err
@@ -216,7 +223,7 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 	for rows.Next() {
 		var v RequestLog
 		var sortValue float64
-		if err = rows.Scan(&v.EventID, &v.SourceID, &v.InstanceID, &v.RequestID, &v.TraceID, &v.KeyID, &v.Model, &v.Endpoint, &v.Stream, &v.AtMS, &v.StartedMS, &v.Status, &v.ResponseHeadersStatus, &v.Outcome, &v.Result, &v.FailureReason, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &sortValue, &v.ObservedAttempts); err != nil {
+		if err = rows.Scan(&v.EventID, &v.SourceID, &v.InstanceID, &v.RequestID, &v.TraceID, &v.KeyID, &v.Model, &v.Endpoint, &v.Stream, &v.AtMS, &v.StartedMS, &v.Status, &v.ResponseHeadersStatus, &v.Outcome, &v.Result, &v.FailureReason, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &sortValue, &v.ObservedAttempts, &v.RequestType, &v.RequestedTier); err != nil {
 			return out, err
 		}
 		if len(out.Data) == 50 {

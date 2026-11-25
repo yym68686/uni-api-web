@@ -570,7 +570,7 @@ function Detail({
         </> },
         ...(imports ? [{ id: "models", label: "模型", content: <ChannelModels key={`models:${providerId(row)}`} row={row} imports={imports} catalog={catalog} keyId={trend.keyId} session={session} /> }] : []),
         ...(hasControls ? [{ id: "checks", label: "检测", content: <>
-              <ChannelDetailChecks key={`${providerId(row)}:${row.model}:checks`} row={row} />
+              <ChannelDetailChecks key={`${providerId(row)}:${row.model}:checks`} row={row} owner={session} />
               <section className="detail-section">
                 <h3>降智检测</h3>
                 {check ? <div className="quality-status-stack"><Tip text={check.history && check.history.total > 0 ? qualityTooltip(check.history, check.checked_at, check.origin) : `最近检测：${dateTime(check.checked_at)}`}><CheckVerdict result={check} /></Tip><QualityProbability history={check.history} checkedAt={check.checked_at} origin={check.origin} /></div> : <p className="muted">暂无检测结果。</p>}

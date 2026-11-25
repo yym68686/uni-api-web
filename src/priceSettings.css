@@ -88,3 +88,15 @@
 .price-reference-panel { overflow-wrap: anywhere; }
 .price-overview-table :is(th,td), .price-overview-table thead th { font-size: 14px; }
 .price-overview-table thead .price-column-unit { margin-top: 4px; font-size: 14px; }
+.price-overview-table :is(th,td) { padding: 12px; }
+.price-overview-table th:first-child { width: 28%; }
+.price-tier-reference { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; }
+.price-tier-reference:is(:hover,:focus-visible) { color: var(--accent); }
+.price-tier-detail { display: grid; gap: 4px; margin-top: 16px; font-size: 14px; font-variant-numeric: tabular-nums; }
+@media (max-width:780px) {
+  .price-overview-table th:first-child { position:sticky; left:0; z-index:1; width:152px; min-width:152px; max-width:152px; background:var(--surface); white-space:normal; overflow-wrap:anywhere; }
+  .price-overview-table thead th:first-child { background:var(--subtle); }
+  .price-model-open { max-width:100%; }
+  .price-model-open > span:first-child { min-width:0; overflow-wrap:anywhere; }
+  .price-edit-affordance { width:18px; flex:none; }
+}

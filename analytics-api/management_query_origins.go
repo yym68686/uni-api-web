@@ -29,7 +29,7 @@ func (s *Service) managementEngineOriginsFrom(ctx context.Context, db controlQue
 		return nil, errManagementSourceContract
 	}
 	for provider := range snapshot.Settings {
-		if protocolRepairCustomized(snapshot, provider) {
+		if hasChannelProtocolOverride(snapshot, provider) {
 			origins[provider] = engineOriginUser
 		}
 	}

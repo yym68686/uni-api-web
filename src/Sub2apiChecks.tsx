@@ -1725,13 +1725,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               <span>本次计划 {batchPreview.items.length} / {batchPreview.total} 个渠道；跳过 {Math.max(0,batchPreview.total-batchPreview.items.length)} 个</span>
               <span>{new Set(batchPreview.items.flatMap(item => item.models)).size} 个模型</span>
               <span>{batchPreview.kind==="fingerprint" ? `去重后 ${batchPreview.fingerprintTargets.length} 项` :
-                isServiceTier(batchPreview.kind) ? `最多 ${batchPreview.tierTargets.length} 次可能计费的上游请求` :
+                isServiceTier(batchPreview.kind) ? `${batchPreview.tierTargets.length} 个检测项` :
                 `${batchPreview.items.reduce((count,item)=>count+item.models.length,0)} 个检测项`}</span>
             </p>
             <details className="data-disclosure"><summary>渠道与模型</summary><ul className="dialog-preview-list">
               {batchPreview.items.map(item=><li key={item.id}><strong>{item.label}</strong><small>{item.models.join("、")}</small></li>)}
             </ul></details>
-            <p className="dialog-inline-note">{batchPreview.kind === "check" ? modelCheckScope : "上游可能计费；每项可能发出多次请求，当前没有可确认的总次数上限。"}</p>
+            {batchPreview.kind === "check" && <p className="dialog-inline-note">{modelCheckScope}</p>}
             {batchPreview.scope!==batchScope && <p className="dialog-inline-note" role="alert">筛选或检测数据已变化，请重新预览。</p>}
           </div>
           <div className="compact-dialog-footer">

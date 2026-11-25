@@ -33,6 +33,29 @@ func protocolSpec(protocol string) (channelProtocol, bool) {
 
 func protocolProvider(root, protocol string) string { return root + "--" + protocol }
 
+// An explicit engine or address override rules out automatic protocol changes.
+func hasChannelProtocolOverride(snapshot retainedSnapshot, provider string) bool {
+	var settings struct {
+		Set    map[string]any `json:"set"`
+		Remove []string       `json:"remove"`
+	}
+	raw := snapshot.Settings[provider]
+	if len(raw) > 0 && json.Unmarshal(raw, &settings) != nil {
+		return true
+	}
+	for path := range settings.Set {
+		if path == "/engine" || path == "/base_url" {
+			return true
+		}
+	}
+	for _, path := range settings.Remove {
+		if path == "/engine" || path == "/base_url" {
+			return true
+		}
+	}
+	return false
+}
+
 func subProviderNames(account string, group int64, key string) []string {
 	root := subProviderName(account, group, key)
 	names := []string{root}
@@ -166,7 +189,7 @@ func (s *Service) validateBatchProtocolSplits(ctx context.Context, src controlSo
 			bases[t.Account] = subBindingSite(site)
 		}
 		if !hasProtocol || bases[t.Account] == "" || strings.TrimRight(base, "/") != bases[t.Account]+spec.Endpoint ||
-			(engine != "" && engine != "auto") || overrides[t.Provider] || protocolRepairCustomized(snapshot, t.Provider) {
+			(engine != "" && engine != "auto") || overrides[t.Provider] || hasChannelProtocolOverride(snapshot, t.Provider) {
 			return fmt.Errorf("%s：无法确认原渠道的自动协议及上游地址，未提交修改", t.Provider)
 		}
 		for _, protocol := range t.SplitProtocols {

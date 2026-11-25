@@ -47,6 +47,8 @@
   border-top: 1px solid var(--line);
   white-space: nowrap;
 }
+.request-log-table td.log-request-type {white-space:normal;overflow-wrap:anywhere;}
+.log-type-tag {display:inline-block;max-width:100%;padding:4px 8px;margin:2px 4px 2px 0;border-radius:8px;background:var(--subtle);font-size:12px;line-height:16px;}
 .request-log-table strong,
 .request-log-table time {
   display: block;

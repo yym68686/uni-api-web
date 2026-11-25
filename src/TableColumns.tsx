@@ -9,15 +9,21 @@ export function parseTableColumns<K extends string>(value: unknown, choices: rea
   return [...new Set(value.filter((id): id is K => typeof id === "string" && valid.has(id as K)))];
 }
 
-export function useTableColumns<K extends string>(key: string, choices: readonly TableColumn<K>[]) {
+export function useTableColumns<K extends string>(key: string, choices: readonly TableColumn<K>[], migrate?: {key: string; append: readonly K[]}) {
   const [selection, setSelection] = useState<K[] | null>(() => {
-    try { return parseTableColumns(JSON.parse(localStorage.getItem(key) || "null"), choices); }
+    try {
+      const current = localStorage.getItem(key);
+      if (current !== null) return parseTableColumns(JSON.parse(current), choices);
+      const previous = migrate && parseTableColumns(JSON.parse(localStorage.getItem(migrate.key) || "null"), choices);
+      return previous && migrate ? [...new Set([...previous,...migrate.append])] : null;
+    }
     catch { return null; }
   });
   const set = (next: K[] | null) => {
     setSelection(next);
     try {
       if (next) localStorage.setItem(key, JSON.stringify(next));
+      else if (migrate) localStorage.setItem(key, "null");
       else localStorage.removeItem(key);
     } catch { /* Column preferences also work when browser storage is disabled. */ }
   };

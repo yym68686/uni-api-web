@@ -23,7 +23,7 @@ import { capabilityCheckScope, isCapabilityCheckModel } from "./sub2apiModels";
 import { toolUseLabels } from "./toolUse";
 import type { Channel } from "./types";
 import { Spinner } from "./ui";
-import { isServiceTier, serviceTierFilterLabels, serviceTierName } from "./serviceTierStatus";
+import { isServiceTier, serviceTierFilterLabels } from "./serviceTierStatus";
 import { observedTierTarget, refreshTierViews, submitTierChecks, tierRecord, tierResultStatus,
   useTierChecks, useTierMembers, type TierTarget } from "./serviceTierTable";
 
@@ -155,7 +155,6 @@ export function useObservedDetection(
     if (project === "quality" || !manual && batchInFlight.current.has(batchKey)) return;
     targets = targets.filter(target => !inFlight.current.has(submissionKey(target)) && !busy(target));
     if (!targets.length) return;
-    if (tier && !window.confirm(`${serviceTierName[tier]} 检测最多发送 ${targets.length} 次可能计费的上游请求。继续？`)) return;
     const keys = targets.map(submissionKey);
     keys.forEach(key => inFlight.current.add(key));
     setSubmitting(new Set(inFlight.current));

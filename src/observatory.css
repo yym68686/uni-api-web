@@ -218,8 +218,15 @@
 .workspace .request-log-table :is(th,td,strong,small,time,.trace-status,.request-log-id) {overflow:hidden;text-overflow:ellipsis}
 .workspace .request-log-table :is(.trace-status,.request-log-id) {max-width:100%;white-space:nowrap}
 .workspace .request-logs-panel[data-columns="custom"] .request-log-table :is(strong,small,.request-log-id) {max-width:18rem}
-.workspace .request-logs-panel[data-columns="summary"] .request-log-table th:first-child {width:34%}
-.workspace .request-logs-panel[data-columns="summary"] .request-log-table th:nth-child(2) {width:26%}
+.workspace .request-logs-panel[data-columns="summary"] .request-log-table th.log-identity {width:28%}
+.workspace .request-logs-panel[data-columns="summary"] .request-log-table th.log-request-type {width:20%}
+.workspace .request-logs-panel[data-columns="summary"] .request-log-table th.log-outcome {width:24%}
+.workspace .request-log-table td.log-request-type {white-space:normal;overflow-wrap:anywhere;}
+@media (max-width:780px) {
+  .workspace .request-logs-panel[data-columns="summary"] .request-log-table-wrap {overflow-x:auto}
+  .workspace .request-logs-panel[data-columns="summary"] .request-log-table {min-width:640px}
+  .workspace .request-logs-panel[data-columns="summary"] .request-log-table :is(th,td) {padding-inline:8px}
+}
 .workspace .request-log-table .trace-status {max-width:100%}
 .workspace .request-log-id {margin-top:3px;color:var(--accent);font-size:12px;overflow-wrap:anywhere}
 .workspace .request-logs-panel .workbench-popover .search-field {min-width:0;margin:0 0 7px}
@@ -228,7 +235,6 @@
 .sources-settings .source-item > svg {color:var(--muted)}
 .sources-settings .source-item > .workbench-disclosure .workbench-popover {width:min(27rem,calc(100vw - 26px))}
 .sources-settings .source-item > div > :is(strong,small) {display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sources-settings .source-item > .channel-protocol-repair {grid-column:1/-1;overflow-wrap:anywhere}
 .workspace .balance-table:not([data-details]) {min-width:100%;table-layout:fixed}
 .workspace .balance-table :is(td,th) {white-space:nowrap}
 .workspace .balance-table:not([data-details]) :is(td,th) {padding:8px;overflow:hidden;text-overflow:ellipsis}

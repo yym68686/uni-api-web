@@ -8,7 +8,6 @@ import { Spinner } from "./ui";
 import { ChannelConfigurationDialog, GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
 import { ControlPersistence } from "./ControlPersistence";
 import { ManagedConfiguration } from "./ManagedConfiguration";
-import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 import { FingerprintSettings } from "./FingerprintSettings";
 import { WorkbenchNotice, WorkbenchTabs } from "./Workbench";
 import { IntentMenu } from "./IntentMenu";
@@ -25,7 +24,7 @@ export interface ConsoleSource {
 function sourceHost(base: string) {
   try { return new URL(base).host; } catch { return base; }
 }
-type SourceAction = "global" | "retention" | "managed" | "protocol";
+type SourceAction = "global" | "retention" | "managed";
 
 export function SourceSettings({
   sources,
@@ -57,7 +56,7 @@ export function SourceSettings({
     opener.current = document.activeElement as HTMLElement;
     setManagement({src, action});
   };
-  const setupTitles = {retention: "保留临时配置设置", managed: "完整配置托管", protocol: "旧渠道协议修复"} as const;
+  const setupTitles = {retention: "保留临时配置设置", managed: "完整配置托管"} as const;
   function edit(source: ConsoleSource | null) {
     opener.current = document.activeElement as HTMLElement;
     setEditing(source);
@@ -141,7 +140,6 @@ export function SourceSettings({
               {label: setupTitles.retention, run: () => manage(src, "retention")},
               {label: setupTitles.managed, run: () => manage(src, "managed")},
             ]},
-            {label: "协议修复", run: () => manage(src, "protocol")},
             {label: "编辑来源", run: () => edit(src)},
             {label: "移除来源", danger: true, disabled: busy, run: () => { setError(""); setRemoving(src.id); }},
           ]} />
@@ -164,7 +162,6 @@ export function SourceSettings({
               <details className="source-url"><summary>来源地址</summary><p>{management.src.base}</p></details>
               {management.action === "retention" && <ControlPersistence source={management.src.id} name={management.src.name} />}
               {management.action === "managed" && <ManagedConfiguration source={management.src.id} initiallyOpen />}
-              {management.action === "protocol" && <ChannelProtocolRepair source={management.src.id} provider="" onApplied={onSaved} />}
             </div>
           </Dialog.Content>
         </Dialog.Portal>

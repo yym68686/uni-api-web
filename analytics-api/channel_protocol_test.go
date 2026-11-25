@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -92,14 +95,48 @@ func TestChannelProtocolPartitionAndSplitPreservesRules(t *testing.T) {
 	}
 }
 
-func TestProtocolRepairProtectsManualOverrides(t *testing.T) {
+func TestProtocolChangesProtectManualOverrides(t *testing.T) {
 	for _, path := range []string{"/engine", "/base_url"} {
 		for _, raw := range []string{`{"set":{"` + path + `":"custom"}}`, `{"remove":["` + path + `"]}`} {
-			if !protocolRepairCustomized(retainedSnapshot{Settings: map[string]json.RawMessage{"channel": json.RawMessage(raw)}}, "channel") {
+			if !hasChannelProtocolOverride(retainedSnapshot{Settings: map[string]json.RawMessage{"channel": json.RawMessage(raw)}}, "channel") {
 				t.Fatal("manual override not protected")
 			}
 		}
 	}
+}
+
+func TestRetiredChannelProtocolRepairHasNoRoute(t *testing.T) {
+	w := httptest.NewRecorder()
+	(&Service{}).controlHandler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/sources/test/channel-protocol-repair", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("retired protocol repair route returned %d", w.Code)
+	}
+}
+
+// Decode model mappings from gateway fixtures to assert their saved state.
+func protocolDocumentModels(document map[string]any) (map[string]string, error) {
+	var items []any
+	if decodeMap(document["model"], &items) != nil {
+		return nil, errors.New("invalid model definition")
+	}
+	models := map[string]string{}
+	for _, item := range items {
+		switch value := item.(type) {
+		case string:
+			models[value] = value
+		case map[string]any:
+			for upstream, raw := range value {
+				name, ok := raw.(string)
+				if !ok {
+					return nil, errors.New("invalid model alias")
+				}
+				models[name] = upstream
+			}
+		default:
+			return nil, errors.New("invalid model definition")
+		}
+	}
+	return models, nil
 }
 
 func TestCatalogProtocolUsesGatewayEngineNotModelOrProviderSuffix(t *testing.T) {

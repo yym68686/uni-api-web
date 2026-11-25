@@ -108,7 +108,7 @@ export function useTierMembers(owner: string, enabled: boolean) {
   });
   const members = useMemo(() => new Map((query.data?.data || []).map(member => [tierMemberKey(member), member])), [query.data]);
   return {members, isError: !!enabled && query.isError, isPending: !!enabled && query.isPending,
-    unavailable: query.data?.unavailable_sources || []};
+    unavailable: query.data?.unavailable_sources || [], refetch: query.refetch};
 }
 
 export function refreshTierViews(client: QueryClient, owner: string) {

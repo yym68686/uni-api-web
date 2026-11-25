@@ -20,6 +20,8 @@ let effective: typeof base,
   reads: number;
 let catalog: Partial<Channel>[];
 let bodyOverrides: unknown;
+let tierRouting: Record<string,string>;
+const tierScope = "a".repeat(64);
 beforeEach(() => {
   effective = structuredClone(base);
   effective.preferences.cooldown_period = 90;
@@ -28,9 +30,12 @@ beforeEach(() => {
   reads = 0;
   catalog = [{ provider: "one", engine: "codex", engine_mode: "auto" }];
   bodyOverrides = undefined;
+  tierRouting = {fast:"enabled",ultrafast:"disabled_verified"};
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/service-tier-routing?"))
+        return Response.json({scope:tierScope,routing:tierRouting});
       if (url.includes("/secrets?"))
         return new Response(
           JSON.stringify({
@@ -57,6 +62,8 @@ beforeEach(() => {
           previews: [],
         };
         if (init.method === "PATCH") {
+          for (const choice of body.service_tier_choices || [])
+            tierRouting[choice.tier] = choice.enabled ? "enabled" : "disabled_verified";
           const change = body.changes[0];
           if ("/preferences/cooldown_period" in change.set)
             effective.preferences.cooldown_period =
@@ -128,7 +135,7 @@ beforeEach(() => {
     }),
   );
 });
-async function mount() {
+async function mount(provider = "one") {
   render(
     <QueryClientProvider
       client={
@@ -137,7 +144,7 @@ async function mount() {
     >
       <ChannelSettings
         row={
-          { provider: "one", model: "model-a", source_id: "primary" } as Channel
+          { provider, model: "model-a", source_id: "primary" } as Channel
         }
       />
     </QueryClientProvider>,
@@ -147,6 +154,41 @@ async function mount() {
   await screen.findByRole("button", { name: "校验与预览" });
   return user;
 }
+it("does not render the retired protocol repair action for an imported channel", async () => {
+  await mount("sub2api-imported");
+  expect(screen.queryByRole("button",{name:"预览旧渠道协议修复"})).not.toBeInTheDocument();
+});
+it("stages the two route switches and saves both through the existing settings operation", async () => {
+  const user = await mount();
+  await user.click(screen.getByRole("button",{name:"请求规则"}));
+  const fast = screen.getByRole("switch",{name:"允许 Fast 请求"});
+  const ultra = screen.getByRole("switch",{name:"允许 Ultrafast 请求"});
+  await waitFor(() => expect(fast).toBeEnabled());
+  expect(fast).toBeChecked();
+  expect(ultra).not.toBeChecked();
+  await user.click(fast);
+  await user.click(ultra);
+  expect(fast).not.toBeChecked();
+  expect(ultra).toBeChecked();
+  expect(writes).toHaveLength(0);
+  await user.click(screen.getByRole("button",{name:"撤销修改"}));
+  await waitFor(() => expect(fast).toBeEnabled());
+  expect(fast).toBeChecked();
+  expect(ultra).not.toBeChecked();
+  await user.click(fast);
+  await user.click(ultra);
+  await user.click(screen.getByRole("button",{name:"校验与预览"}));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  const choices = [{provider:"one",scope:tierScope,tier:"fast",enabled:false},{provider:"one",scope:tierScope,tier:"ultrafast",enabled:true}];
+  expect(writes[0].service_tier_choices).toEqual(choices);
+  await user.click(screen.getByRole("button",{name:"保存并应用"}));
+  await screen.findByText("设置已保存并应用");
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1].service_tier_choices).toEqual(choices);
+  await waitFor(() => expect(fast).toBeEnabled());
+  expect(fast).not.toBeChecked();
+  expect(ultra).toBeChecked();
+});
 it("keeps image removal off by default and previews only the requested removal rules", async () => {
   const user = await mount();
   await user.click(screen.getByRole("button", { name: "请求改写" }));

@@ -203,10 +203,10 @@ it("keeps aligned table columns, searchable models and accessible pricing detail
   render(<PriceSettings {...props} />);
   const table = screen.getByRole("table", { name: "模型价格" });
   expect(screen.getByRole("button", { name: "编辑 gemini-4-argon" })).toHaveTextContent("gemini-4-argon");
-  expect(within(table).getAllByRole("columnheader")).toHaveLength(4);
+  expect(within(table).getAllByRole("columnheader")).toHaveLength(6);
   expect(within(table).getAllByText("美元 / 百万 token")).toHaveLength(3);
   expect(within(table).getAllByRole("rowheader")).toHaveLength(MODEL_PRICE_CATALOG.length);
-  for (const row of table.querySelectorAll("tbody tr")) expect(row.children).toHaveLength(4);
+  for (const row of table.querySelectorAll("tbody tr")) expect(row.children).toHaveLength(6);
   const user = userEvent.setup();
   await user.type(screen.getByRole("textbox", { name: "搜索模型价格" }), "gemini-4-argon");
   expect(await within(table).findAllByRole("rowheader")).toHaveLength(1);
@@ -233,7 +233,7 @@ it("keeps aligned table columns, searchable models and accessible pricing detail
 });
 
 it("chooses price data columns in the filter, persists the choice and restores the defaults", async () => {
-  const key = "uni-console:price-columns:v1";
+  const key = "uni-console:price-columns:v2";
   const props = { prices: [], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
   const user = userEvent.setup();
   const headers = () => within(screen.getByRole("table", { name: "模型价格" }))
@@ -249,10 +249,10 @@ it("chooses price data columns in the filter, persists the choice and restores t
     await user.click(screen.getByRole("checkbox", { name: /缓存写入.*5 分钟/ }));
     await user.click(screen.getByRole("checkbox", { name: /缓存写入.*1 小时/ }));
     await user.click(screen.getByRole("checkbox", { name: "售卖比例" }));
-    const expected = ["模型", "输入", "缓存读取", "缓存写入 · 默认 / 5 分钟", "缓存写入 · 长时 / 1 小时", "售卖比例"];
+    const expected = ["模型", "输入", "缓存读取", "Fast", "Ultrafast", "缓存写入 · 默认 / 5 分钟", "缓存写入 · 长时 / 1 小时", "售卖比例"];
     expect(headers()).toEqual(expected);
     const claudeRow = screen.getByRole("button", { name: "编辑 claude-opus-5-5" }).closest("tr")!;
-    expect(within(claudeRow).getAllByRole("cell").slice(2).map(cell => cell.textContent))
+    expect(within(claudeRow).getAllByRole("cell").slice(4).map(cell => cell.textContent))
       .toEqual(["$5", "$8", "15%"]);
     view.unmount();
     render(<PriceSettings {...props} />);
@@ -262,7 +262,7 @@ it("chooses price data columns in the filter, persists the choice and restores t
     expect(headers()).toEqual(["模型"]);
     expect(screen.getByRole("button", { name: "编辑 claude-opus-5-5" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "恢复默认列" }));
-    expect(headers()).toEqual(["模型", "输入", "输出", "缓存读取"]);
+    expect(headers()).toEqual(["模型", "输入", "输出", "缓存读取", "Fast", "Ultrafast"]);
   } finally {
     localStorage.removeItem(key);
   }

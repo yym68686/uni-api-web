@@ -119,7 +119,7 @@ func (s *Service) prepareOptimizationProtocolMoves(ctx context.Context, src cont
 		from, to := targets[fromID], targets[toID]
 		current, ok := protocolSpec(optimizationMoveCatalogProtocol(catalogs[m.Key], m.From))
 		if !ok || current.Protocol == m.Protocol || !owned[fromID] ||
-			from.MigrateLegacyEngine || overrides[m.From] || protocolRepairCustomized(snapshot, m.From) {
+			from.MigrateLegacyEngine || overrides[m.From] || hasChannelProtocolOverride(snapshot, m.From) {
 			return nil, fmt.Errorf("%s · %s：原协议已变化或由人工指定，未提交修改", m.From, m.Model)
 		}
 		site, ok := sites[from.Account]

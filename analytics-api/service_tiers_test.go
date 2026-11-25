@@ -99,6 +99,77 @@ func TestServiceTierFilterBeforePaginationAndExpiry(t *testing.T) {
 	}
 }
 
+func TestServiceTierSettingsChoicesRequireCurrentBoundEvidence(t *testing.T) {
+	ctx := context.Background()
+	store, err := newControlStore(isolatedControlTestDSN(t), strings.Repeat("fixture-master", 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	liveScope := strings.Repeat("a", 64)
+	binding := strings.Repeat("b", 64)
+	state := map[string]string{"fast": "unconfigured", "ultrafast": "disabled_verified"}
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/channel-settings/providers" || r.Header.Get("Authorization") != "Bearer admin" {
+			t.Error("unexpected gateway operation")
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: "p", ServiceTierScope: liveScope, ServiceTierRouting: state}}})
+	}))
+	defer gateway.Close()
+	src := controlSource{sourceView: sourceView{ID: "s", Name: "fixture", Base: gateway.URL}, Key: "observer", ConfigKey: "admin"}
+	if _, err := store.saveSource(ctx, src, false); err != nil {
+		t.Fatal(err)
+	}
+	scope := serviceTierScope(src, liveScope)
+	s := &Service{control: store}
+	in := channelSettingMutation{TierChoices: []serviceTierRoutingChoice{{Provider: "p", Scope: scope, Tier: "fast", Enabled: true}, {Provider: "p", Scope: scope, Tier: "ultrafast", Enabled: false}}}
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 409 {
+		t.Fatal("enabled unverified route", code, err)
+	}
+	now := time.Now().Unix() - 5
+	insert := func(provider, fingerprint string, at int64) {
+		t.Helper()
+		r := serviceTierResult{Status: "supported", Binding: binding, VerifiedBinding: binding, CheckedAt: at, VerifiedAt: at}
+		_, err := store.db.Exec(`INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,state,result,fingerprint)
+ VALUES ($1,$2,'fast','m',$3,'done',$4,$5)
+ ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET result=excluded.result,fingerprint=excluded.fingerprint`, src.ID, provider, controlTarget(src), mustJSON(r), fingerprint)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("other", scope, now)
+	insert("p", strings.Repeat("c", 64), now)
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 409 {
+		t.Fatal("accepted unrelated provider or scope", code, err)
+	}
+	insert("p", scope, now-serviceTierTTL)
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 409 {
+		t.Fatal("accepted expired evidence", code, err)
+	}
+	insert("p", scope, now)
+	out, code, err := s.resolveServiceTierChoices(ctx, src, in)
+	if err != nil || len(out.Changes) != 1 || len(out.TierChoices) != 0 {
+		t.Fatal(out, code, err)
+	}
+	set := out.Changes[0].Set
+	if len(set) != 3 || set["/preferences/service_tier_disabled/fast"] != false ||
+		set["/preferences/service_tier_disabled/ultrafast"] != true ||
+		set["/preferences/service_tier_evidence/"+binding+"/fast"] != now {
+		t.Fatal(set)
+	}
+	in.Changes = []channelSettingChange{{Provider: "p", Set: map[string]any{"/api": "new-credential"}}}
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 400 {
+		t.Fatal("accepted simultaneous credential change", code, err)
+	}
+	in.Changes = nil
+	in.TierChoices[0].Scope = strings.Repeat("d", 64)
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 409 {
+		t.Fatal("accepted stale scope", code, err)
+	}
+}
+
 func TestServiceTierProbeNegotiationDoesNotRepeatOrImportVerification(t *testing.T) {
 	binding, scope := strings.Repeat("a", 64), strings.Repeat("b", 64)
 	version, realCalls, checks := 0, 0, 0

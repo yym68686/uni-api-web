@@ -45,7 +45,7 @@ func engineOverrideHistoryFrom(ctx context.Context, db controlQueryDB, source st
 }
 
 func legacyEngineOrigin(snapshot retainedSnapshot, channel retainedChannel, refs []subChannelRef, overrides map[string]bool) string {
-	if overrides[channel.Provider] || protocolRepairCustomized(snapshot, channel.Provider) {
+	if overrides[channel.Provider] || hasChannelProtocolOverride(snapshot, channel.Provider) {
 		return engineOriginUser
 	}
 	var document map[string]any
@@ -89,7 +89,7 @@ func (s *Service) snapshotEngineOrigins(ctx context.Context, src controlSource, 
 		origins[provider] = engineOriginUser
 	}
 	for provider := range snapshot.Settings {
-		if protocolRepairCustomized(snapshot, provider) {
+		if hasChannelProtocolOverride(snapshot, provider) {
 			origins[provider] = engineOriginUser
 		}
 	}

@@ -1,6 +1,5 @@
 import { DetailLoading } from "./PageLoading";
 import { LoadingIndicator } from "./LoadingIndicator";
-import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 import { useEffect, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -41,8 +40,12 @@ import type { ManagedChannel } from "./channelManagement";
 import type { ConfiguredChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
 import { Spinner } from "./ui";
 import type { Channel } from "./types";
+import { serviceTierName, serviceTiers, type ServiceTier } from "./serviceTierStatus";
+import type { InstalledChannel } from "./sub2apiImports";
+import { WorkbenchNotice } from "./Workbench";
 
 type Document = Record<string, unknown>;
+type TierRoutingView = { scope: string; routing?: InstalledChannel["service_tier_routing"] };
 interface Field {
   path: string;
   group: string;
@@ -503,6 +506,16 @@ export function Editor({
   const [resetOverride, setResetOverride] = useState(false);
   const isGlobal = row.provider === GLOBAL_SETTINGS_SCOPE;
   const [tab, setTab] = useState(isGlobal ? "超时与冷却" : initialModelTab ? "模型与接入" : "基本与模型");
+  const [tierDraft, setTierDraft] = useState<Partial<Record<ServiceTier, boolean>>>({});
+  const [tierScope, setTierScope] = useState("");
+  const hasTierDraft = Object.keys(tierDraft).length > 0;
+  const tierRouting = useQuery({
+    queryKey: ["service-tier-routing", row.source_id, row.provider],
+    queryFn: ({ signal }) => controlRequest<TierRoutingView>(
+      `/v1/sources/${encodeURIComponent(row.source_id!)}/service-tier-routing?` + new URLSearchParams({provider: row.provider}), { signal }),
+    enabled: !isGlobal && !!row.source_id && tab === "请求规则" && !hasTierDraft,
+    retry: false, staleTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false,
+  });
   const [modelVisited, setModelVisited] = useState(!isGlobal && !!initialModelTab);
   const bodyRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
@@ -589,7 +602,10 @@ export function Editor({
           : stringify(result.data.effective),
       );
     }
+    if (hasTierDraft || (!isGlobal && tab === "请求规则")) await tierRouting.refetch();
     setResetOverride(false);
+    setTierDraft({});
+    setTierScope("");
     setCopyToKey("");
     setBatch([]);
     await Promise.all([
@@ -606,6 +622,9 @@ export function Editor({
         "channel-routes",
         "settings-channel-catalog",
         "channel-model-catalog",
+        "service-tier-routing",
+        "service-tier-members",
+        "service-tier-table",
       ].map((name) => client.invalidateQueries({ queryKey: [name] })),
     ]);
   }
@@ -641,6 +660,10 @@ export function Editor({
     setBusy(true);
     setError("");
     try {
+      const tierChoices = reset ? [] : serviceTiers.filter(tier => tierDraft[tier] !== undefined)
+        .map(tier => ({provider: row.provider, scope: tierScope, tier, enabled: tierDraft[tier]}));
+      if (tierChoices.length && (resetOverride || copyToKey || batch.length || tierRouting.isError || !tierScope || tierScope !== tierRouting.data?.scope))
+        throw Error("请先单独保存档位开关，或撤销修改并重新读取档位配置。");
       const changes: Change[] = [
         reset
           ? { ...settingsDiff({ ...view, effective: view.base }, resetDocument(view)), reset: true }
@@ -661,6 +684,7 @@ export function Editor({
         operation_id: id,
         changes,
         sample,
+        ...(tierChoices.length ? {service_tier_choices: tierChoices} : {}),
       };
       if (!apply) {
         const result = await controlRequest<Result>(path + "/validate", {
@@ -785,6 +809,7 @@ export function Editor({
   ];
   const dirty =
     !equal(draft, view.effective) ||
+    Object.keys(tierDraft).length > 0 ||
     resetOverride ||
     !!copyToKey ||
     batch.length > 0 ||
@@ -862,18 +887,44 @@ export function Editor({
             </p>
           )}
 
-          {!isGlobal &&
-            tab === "基本与模型" &&
-            row.source_id &&
-            row.provider.startsWith("sub2api-") && (
-              <ChannelProtocolRepair
-                source={row.source_id}
-                provider={row.provider}
-                onApplied={() => {
-                  void refreshed();
-                }}
-              />
-            )}
+          {!isGlobal && tab === "请求规则" && <section className="settings-tier-section" aria-label="Fast / Ultrafast 路由">
+            <div className="settings-tier-heading">
+              <h4>服务档位</h4>
+              <div className="settings-tier-tools">
+              <WorkbenchNotice urgent={tierRouting.isError} label="档位配置读取失败" messages={[tierRouting.isError && tierRouting.error.message]} />
+              <button type="button" className="settings-icon-button" title="重新读取档位配置"
+                aria-label="重新读取档位配置" disabled={busy || tierRouting.isFetching || hasTierDraft}
+                onClick={() => void tierRouting.refetch()}><RotateCcw size={18} /></button>
+              </div>
+            </div>
+            {serviceTiers.map(tier => {
+              const state = tierRouting.data?.routing?.[tier];
+              const available = !!state && !!tierRouting.data?.scope && !tierRouting.isError;
+              // Unconfigured means no explicit opt-out, not verified support.
+              const allowed = state === "enabled" || state === "unconfigured";
+              const value = tierDraft[tier] ?? allowed;
+              const detail = tierRouting.isError ? "读取失败" : tierRouting.isPending ? "读取中…" :
+                !available ? "来源不支持" : tierDraft[tier] !== undefined ? "待保存" :
+                  state === "unconfigured" ? "未验证" : state === "enabled" ? "已验证支持" :
+                    state === "disabled_verified" ? "已关闭 · 已验证" : "已关闭";
+              return <div className="settings-tier-row" key={tier}>
+                <label id={`tier-switch-${tier}`} htmlFor={`tier-toggle-${tier}`}>允许 {serviceTierName[tier]} 请求</label>
+                <span className={detail === "已验证支持" ? "positive" : detail === "未验证" ? "settings-tier-warning" : "muted"}>{detail}</span>
+                <button id={`tier-toggle-${tier}`} type="button" className="channel-detection-switch"
+                  role="switch" aria-labelledby={`tier-switch-${tier}`} aria-checked={value}
+                  disabled={busy || !available || tierRouting.isFetching || resetOverride || !!copyToKey || batch.length > 0}
+                  onClick={() => {
+                    edit(draft);
+                    setTierDraft(current => {
+                      const next = {...current};
+                      if ((!value) === allowed) delete next[tier]; else next[tier] = !value;
+                      return next;
+                    });
+                    if (!hasTierDraft) setTierScope(tierRouting.data!.scope);
+                  }}><span /></button>
+              </div>;
+            })}
+          </section>}
 
           {visibleFields
             .filter((f) => f.group === tab)
@@ -1445,11 +1496,12 @@ export function Editor({
             </section>
           )}
         </div>
-      {error && (
-        <p role="alert" className="settings-feedback is-error">
-          {error}
-        </p>
-      )}
+      <div className="settings-feedback-slot">
+        {error && <p role="alert" className="settings-feedback is-error">{error}</p>}
+        {operation && preview?.status !== "validated" && (
+          <button className="button small" disabled={busy} onClick={() => void reconcile()}>核对操作状态</button>
+        )}
+      </div>
       <span role="status" className="sr-only">{notice}</span>
       <footer className="settings-footer">
         <div className="settings-footer-secondary">
@@ -1460,6 +1512,8 @@ export function Editor({
             disabled={busy}
             onClick={() => {
               edit(resetDocument(view));
+              setTierDraft({});
+              setTierScope("");
               setResetOverride(true);
               setOperation("");
               void run(false, true);
@@ -1474,6 +1528,8 @@ export function Editor({
             disabled={busy || !dirty}
             onClick={() => {
               edit(structuredClone(view.effective));
+              setTierDraft({});
+              setTierScope("");
               setRaw(format === "json" ? JSON.stringify(view.effective, null, 2) : stringify(view.effective));
               setResetOverride(false);
               setCopyToKey("");
@@ -1496,15 +1552,6 @@ export function Editor({
           >
             {busy ? <Spinner small /> : <CircleCheck size={16} />}保存并应用
           </button>
-          {operation && preview?.status !== "validated" && (
-            <button
-              className="button"
-              disabled={busy}
-              onClick={() => void reconcile()}
-            >
-              核对操作状态
-            </button>
-          )}
         </div>
       </footer>
       </>}

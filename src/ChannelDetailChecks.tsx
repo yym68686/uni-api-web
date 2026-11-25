@@ -13,10 +13,13 @@ import type { ToolUseResult } from "./toolUse";
 import { toolUseLabels } from "./toolUse";
 import { compactionLabels } from "./SubCompaction";
 import { Spinner } from "./ui";
-import { time } from "./format";
+import { time, providerId } from "./format";
 import { WorkbenchNotice } from "./Workbench";
+import { detectionProjectLabels } from "./DetectionAction";
+import { isServiceTier, serviceTierFilterLabels, serviceTierFresh, serviceTierVerified, serviceTiers, type ServiceTier, type ServiceTierResult } from "./serviceTierStatus";
+import { observedTierTarget, refreshTierViews, submitTierChecks, useTierMembers } from "./serviceTierTable";
 
-type Kind = "availability" | "quality" | "tool-use" | "compaction";
+type Kind = "availability" | "quality" | "tool-use" | "compaction" | ServiceTier;
 const items: { kind: Kind; label: string; description: string }[] = [
   {
     kind: "availability",
@@ -38,11 +41,15 @@ const items: { kind: Kind; label: string; description: string }[] = [
     label: "远程压缩检测",
     description: "自动选择本渠道 gpt / codex 模型验证",
   },
+  ...serviceTiers.map(kind => ({ kind, label: detectionProjectLabels[kind], description: "当前渠道 · 当前模型" })),
 ];
 const pending = (state?: string) => state === "queued" || state === "running";
-export function ChannelDetailChecks({ row }: { row: Channel }) {
+export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: string }) {
   const client = useQueryClient(),
     query = useConfiguredChecks();
+  const members = useTierMembers(owner, !!row.source_id);
+  const tierReadFailed = members.isError || members.unavailable.includes(row.source_id || "");
+  const tierTarget = observedTierTarget(row, members.members.get(providerId(row)));
   const active = useRef(new Set<Kind>());
   const [submitting, setSubmitting] = useState(new Set<Kind>());
   const [errors, setErrors] = useState<Partial<Record<Kind, string>>>({});
@@ -51,7 +58,7 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
     (c) => c.source_id === row.source_id && c.provider === row.provider,
   );
   const completed = checks
-    .filter((c) => !pending(c.state))
+    .filter((c) => !isServiceTier(c.kind) && !pending(c.state))
     .map((c) => `${c.kind}:${c.model}:${c.state}:${c.result?.checked_at}`)
     .sort()
     .join("|");
@@ -64,6 +71,11 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
     ])
       void client.invalidateQueries({ queryKey: [key] });
   }, [client, completed]);
+  const tierCompleted = checks.filter(c => isServiceTier(c.kind) && c.model === row.model && !pending(c.state))
+    .map(c => `${c.kind}:${c.state}:${c.result?.checked_at}`).sort().join("|");
+  useEffect(() => {
+    if (tierCompleted) void refreshTierViews(client, owner);
+  }, [client, owner, tierCompleted]);
   function entry(kind: Kind): ConfiguredCheck | undefined {
     const model =
       kind === "quality"
@@ -93,7 +105,10 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
     return exact;
   }
   const applicable = (kind: Kind) =>
-    (kind !== "compaction" && kind !== "tool-use") || isCapabilityCheckModel(row.model);
+    isServiceTier(kind) ? !!tierTarget :
+      (kind !== "compaction" && kind !== "tool-use") || isCapabilityCheckModel(row.model);
+  const tierLoading = members.isPending || query.isPending;
+  const tierBlocked = tierReadFailed || query.isError || tierLoading;
   async function run(kind: Kind) {
     if (
       !applicable(kind) ||
@@ -102,12 +117,15 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
       !row.source_id
     )
       return;
+    if (isServiceTier(kind) && (!tierTarget || tierBlocked)) return;
     active.current.add(kind);
     setSubmitting(new Set(active.current));
     setErrors((old) => ({ ...old, [kind]: undefined }));
     setAccepted((old) => ({ ...old, [kind]: false }));
     try {
-      await controlRequest("/v1/channel-management/checks", {
+      if (isServiceTier(kind) && tierTarget) {
+        await submitTierChecks(kind, [tierTarget], true);
+      } else await controlRequest("/v1/channel-management/checks", {
         method: "POST",
         body: JSON.stringify({
           kind,
@@ -125,7 +143,7 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
         }),
       });
       setAccepted((old) => ({ ...old, [kind]: true }));
-      await Promise.all([
+      if (!isServiceTier(kind)) await Promise.all([
         client.invalidateQueries({ queryKey: ["configured-checks"] }),
         client.invalidateQueries({ queryKey: ["channel-checks"] }),
         client.invalidateQueries({ queryKey: ["sub2api"] }),
@@ -136,11 +154,22 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
         [kind]: e instanceof Error ? e.message : "检测提交失败",
       }));
     } finally {
+      if (isServiceTier(kind)) {
+        // A lost receipt can still mean the job was queued. Refresh without replaying it.
+        void refreshTierViews(client, owner);
+        await client.invalidateQueries({ queryKey: ["configured-checks"] }, { cancelRefetch: false });
+      }
       active.current.delete(kind);
       setSubmitting(new Set(active.current));
     }
   }
+  const tierResult = (c?: ConfiguredCheck) =>
+    c && tierTarget && c.fingerprint === tierTarget.scope ? c.result as ServiceTierResult | null : null;
   const text = (kind: Kind, c?: ConfiguredCheck) => {
+    if (isServiceTier(kind)) {
+      if (tierReadFailed || query.isError) return "读取失败";
+      if (tierLoading) return "读取中…";
+    }
     if (!applicable(kind)) return "不适用";
     if (!c) return "未检测";
     if (c.state === "queued") return "已排队";
@@ -154,6 +183,14 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
         result: c.result as SubTarget["result"],
       });
     if (c.state === "interrupted") return "已中断";
+    if (isServiceTier(kind)) {
+      const result = tierResult(c);
+      if (!result || !serviceTierFresh(result.checked_at)) return "未确认";
+      if (result.status === "not_applicable") return "不适用";
+      if (result.status === "inconclusive") return "结果未确认";
+      if (result.status === "supported" && !serviceTierVerified(result)) return "未确认";
+      return serviceTierFilterLabels[result.status] || "未确认";
+    }
     if (kind === "quality")
       return (
         (
@@ -174,9 +211,11 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
     <section className="detail-section detail-checks" aria-label="渠道独立检测">
       <div className="detail-section-heading">
         <h3>独立检测</h3>
-        {query.isError && <button className="button small" onClick={() => void query.refetch()}>
-          <RefreshCw size={13} />检测状态读取失败 · 重试
-        </button>}
+        <button className="button small detail-check-retry" hidden={!query.isError && !tierReadFailed}
+          aria-label="检测状态读取失败 · 重试" title="检测状态读取失败 · 重试"
+          onClick={() => { void query.refetch(); void members.refetch(); }}>
+          <RefreshCw size={18} />
+        </button>
       </div>
       <div className="detail-check-grid">
         {items.map(({ kind, label, description }) => {
@@ -188,30 +227,35 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
               ? (c?.result as SubTarget["result"])?.availability?.message
               : kind === "quality"
                 ? (c?.result as SubTarget["result"])?.quality?.message
-                : (c?.result as ToolUseResult)?.message);
+                : !isServiceTier(kind) ? (c?.result as ToolUseResult)?.message : undefined);
           const status = text(kind, c);
+          const tierEvidence = isServiceTier(kind) ? tierResult(c) : null;
+          const observed = tierEvidence?.observed;
+          const checkedAt = isServiceTier(kind) ? tierEvidence?.checked_at : c?.result?.checked_at;
           return (
             <div key={kind} className="detail-check-item">
               <button
                 className="button small"
                 aria-label={label}
-                title={applicable(kind) ? description : capabilityCheckScope}
+                title={applicable(kind) || isServiceTier(kind) ? description : capabilityCheckScope}
                 aria-busy={busy}
-                disabled={!applicable(kind) || busy || !row.source_id}
+                disabled={!applicable(kind) || busy || !row.source_id || isServiceTier(kind) && tierBlocked}
                 onClick={() => void run(kind)}
               >
                 {busy ? <Spinner small /> : <Play size={13} />} {label}
               </button>
               <span
                 className={
-                  status.includes("失败") ||
+                  status === "已验证支持" ? "positive" :
+                    status === "未命中" || status === "结果未确认" || status === "已中断" ? "detail-check-warning" :
+                  status.includes("失败") || status === "明确不支持" ||
                   status.startsWith("不支持") ||
                   status === "降智"
                     ? "negative"
                     : "muted"
                 }
                 role="status"
-                title={c?.result?.checked_at ? time(c.result.checked_at) : undefined}
+                title={[observed && `实际档位：${observed}`, checkedAt && time(checkedAt)].filter(Boolean).join(" · ") || undefined}
               >
                 {submitting.has(kind) ? "正在提交…" : accepted[kind] && !c ? "已提交" : status}
               </span>

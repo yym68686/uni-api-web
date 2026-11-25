@@ -1,8 +1,17 @@
 import { expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { SourceSettings } from "./SourceSettings";
+
+it("removes the legacy protocol repair entry without removing source management actions", () => {
+  render(<SourceSettings sources={[{id:"one", name:"Fixture", base:"https://example.test", has_storage:true, created_at:1}]} onSaved={vi.fn()} />, {wrapper:Tooltip.Provider});
+  fireEvent.click(screen.getByRole("button", { name:"管理 Fixture" }));
+  expect(screen.queryByRole("menuitem", {name:/协议修复/})).not.toBeInTheDocument();
+  expect(screen.getByRole("menuitem", {name:"配置托管"})).toBeVisible();
+  expect(screen.getByRole("menuitem", {name:"全局设置"})).toBeVisible();
+  expect(screen.getByRole("menuitem", {name:"编辑来源"})).toBeVisible();
+});
 
 it("does not present a failed source directory read as an empty directory", () => {
   render(<SourceSettings sources={[]} onSaved={vi.fn()} readError="网络断开" />, {wrapper:Tooltip.Provider});

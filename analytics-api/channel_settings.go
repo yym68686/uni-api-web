@@ -22,10 +22,11 @@ type channelSettingChange struct {
 	Reset       bool           `json:"reset"`
 }
 type channelSettingMutation struct {
-	Revision  string                 `json:"revision"`
-	Operation string                 `json:"operation_id"`
-	Changes   []channelSettingChange `json:"changes"`
-	Sample    map[string]any         `json:"sample,omitempty"`
+	Revision    string                     `json:"revision"`
+	Operation   string                     `json:"operation_id"`
+	Changes     []channelSettingChange     `json:"changes"`
+	Sample      map[string]any             `json:"sample,omitempty"`
+	TierChoices []serviceTierRoutingChoice `json:"service_tier_choices,omitempty"`
 }
 
 func settingsPublic(value map[string]any) map[string]any { delete(value, "intent"); return value }
@@ -146,7 +147,7 @@ func settingsInput(w http.ResponseWriter, r *http.Request) (channelSettingMutati
 	if !decodeConfiguration(w, r, &in) {
 		return in, false
 	}
-	if in.Operation == "" || len(in.Operation) > 128 || len(in.Revision) > 256 || len(in.Changes) == 0 {
+	if in.Operation == "" || len(in.Operation) > 128 || len(in.Revision) > 256 || (len(in.Changes) == 0 && len(in.TierChoices) == 0) {
 		http.Error(w, "无效设置请求", 400)
 		return in, false
 	}
@@ -161,6 +162,19 @@ func (s *Service) channelSettingsValidate(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		http.Error(w, "来源不存在", 404)
 		return
+	}
+	if len(in.TierChoices) > 0 {
+		original, err := s.control.source(r.Context(), r.PathValue("id"))
+		if err != nil {
+			http.Error(w, "来源读取失败", 503)
+			return
+		}
+		resolved, code, err := s.resolveServiceTierChoices(r.Context(), original, in)
+		if err != nil {
+			http.Error(w, err.Error(), code)
+			return
+		}
+		in = resolved
 	}
 	v, status, err := s.settingsGateway(r.Context(), src, "POST", "/v1/channel-settings/validate", in)
 	if err != nil {
@@ -242,6 +256,12 @@ func (s *Service) applyChannelSettings(w http.ResponseWriter, r *http.Request, i
 		http.Error(w, "配置已更新或已完成重启恢复，请刷新后重新编辑；本次修改尚未发送", 409)
 		return
 	}
+	resolved, code, err := s.resolveServiceTierChoices(ctx, original, in)
+	if err != nil {
+		http.Error(w, err.Error(), code)
+		return
+	}
+	in = resolved
 	// Prepare and persist recoverable intent before touching the gateway.
 	preview, code, err := s.settingsGateway(ctx, src, "POST", "/v1/channel-settings/validate", in)
 	if err != nil {

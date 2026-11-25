@@ -965,7 +965,7 @@ it.each([
   await user.click(run);
   const preview = await screen.findByRole("dialog", {name: "核对批量检测范围"});
   expect(within(preview).getByText(/本次计划 61 \/ 63 个渠道/)).toBeVisible();
-  expect(within(preview).getByText("最多 61 次可能计费的上游请求")).toBeVisible();
+  expect(within(preview).getByText("61 个检测项")).toBeVisible();
   expect(writes).toHaveLength(0);
 
   await user.click(within(preview).getByRole("button", {name: "确认提交检测"}));

@@ -17,6 +17,7 @@ import type { Connection, ModelPrice } from "./types";
 import { Spinner } from "./ui";
 import { WorkbenchDisclosure, WorkbenchNotice } from "./Workbench";
 import { TableColumns, useTableColumns } from "./TableColumns";
+import { serviceTierPrice, tierPriceText } from "./serviceTierPrices";
 import {
   chargesCacheWrite,
   salePercent,
@@ -44,15 +45,22 @@ const priceColumns = [
       id === "cache_write_1h" ? "缓存写入 · 长时 / 1 小时" : label,
   })),
   { id: "sale_percent", label: "售卖比例" },
+  { id: "fast", label: "Fast" },
+  { id: "ultrafast", label: "Ultrafast" },
 ] as const;
 const priceColumnLabels = new Map(priceColumns.map(({ id, label }) => [id, label]));
-const defaultPriceColumns = ["input", "output", "cache_read"] as const;
+const defaultPriceColumns = ["input", "output", "cache_read", "fast", "ultrafast"] as const;
 const references = new Map(MODEL_PRICE_CATALOG.map(entry => [entry.model, entry] as const));
 const MAX_PRICE = 1_000_000_000;
 const MAX_SALE = 1_000_000;
 
 function priceColumnValue(price: ModelPrice, column: (typeof priceColumns)[number]["id"]) {
   const reference = references.get(price.model)!;
+  if (column === "fast" || column === "ultrafast") {
+    const entry = serviceTierPrice(price.model, column);
+    return entry ? <a className="price-tier-reference" href={entry.source} target="_blank" rel="noreferrer"
+      title={`官方参考价 · 输入 / 输出 / 缓存读取${entry.note ? " · " + entry.note : ""}`}>{tierPriceText(entry.rate)}</a> : "—";
+  }
   if (column === "sale_percent") return `${salePercent(price)}%`;
   if (!price.verified && !reference.verified && price.source !== "manual") return "—";
   if (column === "cache_write" || column === "cache_write_1h") {
@@ -74,6 +82,15 @@ function PriceDetails({ model }: { model: string }) {
           : "缓存写入分别使用 5 分钟与 1 小时价格。"}
       关闭写入计费后不计该项费用，价格设置仍保留。
     </p>
+    {(["fast", "ultrafast"] as const).map(tier => {
+      const entry = serviceTierPrice(model, tier);
+      return entry && <div className="price-tier-detail" key={tier}>
+        <strong>{tier === "fast" ? "Fast" : "Ultrafast"} 官方参考价</strong>
+        <div>输入 / 输出 / 缓存读取：{tierPriceText(entry.rate)}</div>
+        <div>缓存写入（{entry.cacheDuration.join(" / ")}）：${entry.rate[3]} / ${entry.rate[4]}</div>
+        {entry.note && <small>{entry.note}</small>}
+      </div>;
+    })}
     {reference.verified && reference.source.startsWith("https://") && (
       <a
         className="price-reference-link"
@@ -389,7 +406,8 @@ export function PriceSettings({
   onPendingChange?: Dispatch<SetStateAction<Set<string>>>;
 }) {
   const [filter, setFilter] = useState("");
-  const [customColumns, setCustomColumns] = useTableColumns("uni-console:price-columns:v1", priceColumns);
+  const [customColumns, setCustomColumns] = useTableColumns("uni-console:price-columns:v2", priceColumns,
+    {key:"uni-console:price-columns:v1", append:["fast","ultrafast"]});
   const visibleColumns = customColumns ?? defaultPriceColumns;
   const [editing, setEditing] = useState("");
   const [details, setDetails] = useState(false);
@@ -445,7 +463,7 @@ export function PriceSettings({
           <thead>
             <tr>
               <th scope="col">模型</th>
-              {visibleColumns.map(column => <th scope="col" key={column}>{priceColumnLabels.get(column)}{column !== "sale_percent" && <small className="price-column-unit">美元 / 百万 token</small>}</th>)}
+              {visibleColumns.map(column => <th scope="col" key={column}>{priceColumnLabels.get(column)}{column !== "sale_percent" && <small className="price-column-unit">{column === "fast" || column === "ultrafast" ? "输入 / 输出 / 缓存读取" : "美元 / 百万 token"}</small>}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -457,7 +475,7 @@ export function PriceSettings({
                   setDetails(false);
                   setEditing(price.model);
                 }}><span>{price.model}</span><span className="price-edit-affordance" aria-hidden="true"><Pencil /></span></button>
-                {(drafts.has(price.model) || !price.verified) && <small>{drafts.has(price.model) ? "未保存" : published ? "待确认" : "未定价"}</small>}</th>
+                {(drafts.has(price.model) || !price.verified) && <small>{drafts.has(price.model) ? "未保存" : published ? "待确认" : "Standard 未定价"}</small>}</th>
                 {visibleColumns.map(column => <td key={column}>{priceColumnValue(price, column)}</td>)}
               </tr>;
             })}
@@ -477,7 +495,7 @@ export function PriceSettings({
             ? `显示 ${visible.length} / ${all.length} 个模型`
             : `共 ${all.length} 个模型`}
         </span>
-        <span>美元 / 百万 token{dirtyCount > 0 && ` · ${dirtyCount} 项未保存`}</span>
+        <span>美元 / 百万 token · Fast / Ultrafast 官方参考价{dirtyCount > 0 && ` · ${dirtyCount} 项未保存`}</span>
       </div>
       </>}
       <Dialog.Root open={!!editedPrice} onOpenChange={open => { if (!open && !pendingModels.has(editing)) setEditing(""); }}>

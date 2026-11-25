@@ -21,7 +21,7 @@ function mount(channel = row) {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <Tooltip.Provider><ChannelDetailChecks row={channel} /></Tooltip.Provider>
+        <Tooltip.Provider><ChannelDetailChecks row={channel} owner="audit" /></Tooltip.Provider>
       </QueryClientProvider>,
     ),
   };
@@ -102,7 +102,7 @@ it("allows probes before history finishes loading, even if that read fails", asy
   await user.click(button);
   expect(writes).toHaveLength(1);
   await act(async () => finish(new Response("读取失败", { status: 503 })));
-  await waitFor(() => expect(screen.getByText(/检测状态读取失败/)).toBeVisible());
+  await waitFor(() => expect(screen.getByRole("button", {name:/检测状态读取失败/})).toBeVisible());
   expect(screen.getByRole("button", { name: "降智检测" })).toBeEnabled();
 });
 it("keeps queued work disabled across reads and shows the corresponding completed result", async () => {
@@ -200,7 +200,7 @@ it("does not let Astra quality work disable its independent availability check",
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      <Tooltip.Provider><ChannelDetailChecks row={astra} /></Tooltip.Provider>
+      <Tooltip.Provider><ChannelDetailChecks row={astra} owner="audit" /></Tooltip.Provider>
     </QueryClientProvider>,
   );
   await waitFor(() =>
@@ -221,7 +221,57 @@ it.each(["claude-opus-4-8","gemini-3.1-pro","deepseek"])('does not offer Codex c
  for(const name of ['Tool use 检测','远程压缩检测']) {
   const button=screen.getByRole('button',{name});expect(button).toBeDisabled();await user.click(button);
  }
- expect(screen.getAllByText('不适用')).toHaveLength(2);
+ await waitFor(() => expect(screen.getAllByText('不适用')).toHaveLength(4));
  expect(screen.getByRole('button',{name:'可用性检测'})).toBeEnabled();
  expect(fetcher.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
+it("independently submits Fast and Ultrafast with the verified inventory scope and preserves separate statuses", async () => {
+  const model = "gpt-6.2-sol";
+  const channel = {...row, model, upstream_model: model, engine:"codex"};
+  const scope = "a".repeat(64);
+  const now = Math.floor(Date.now()/1000);
+  let checks: Partial<ConfiguredCheck>[] = [];
+  const writes: unknown[] = [];
+  const confirm = vi.fn(() => false);
+  vi.stubGlobal("confirm", confirm);
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("channel-management?view=service-tiers")) return Response.json({data:[{
+      source_id: channel.source_id, provider: channel.provider, models:[model], engine:"codex", service_tier_scope:scope,
+    }], unavailable_sources:[]});
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body));
+      writes.push(body);
+      checks = [...checks, {...channel, kind:body.kind, fingerprint:scope, state:"queued", result:null, message:""}];
+      return Response.json({queued:1});
+    }
+    return Response.json({data: url.includes("channel-management/checks") ? checks : []});
+  }));
+  const {client} = mount(channel);
+  const fast = screen.getByRole("button",{name:"Fast 检测"});
+  const ultra = screen.getByRole("button",{name:"Ultrafast 检测"});
+  await waitFor(() => expect(fast).toBeEnabled());
+  const user = userEvent.setup();
+  await user.click(fast);
+  await waitFor(() => expect(fast).toBeDisabled());
+  expect(ultra).toBeEnabled();
+  await user.click(ultra);
+  await waitFor(() => expect(ultra).toBeDisabled());
+  expect(writes).toEqual(["fast","ultrafast"].map(kind => ({kind,manual:true,confirmed:true,
+    targets:[{source_id:row.source_id,provider:row.provider,models:[model],expected_scope:scope}]})));
+  expect(confirm).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getAllByText("已排队")).toHaveLength(2));
+  checks = checks.map(c => ({...c,state:"done",result:{status:c.kind==="fast"?"supported":"not_honored",
+    checked_at:now,binding:scope,observed:c.kind==="fast"?"priority":"default",
+    ...(c.kind==="fast"?{verified_binding:scope,verified_at:now}: {})}}));
+  await act(async () => { await client.invalidateQueries({queryKey:["configured-checks"]}); });
+  await waitFor(() => expect(within(fast.closest(".detail-check-item") as HTMLElement).getByText("已验证支持")).toHaveClass("positive"));
+  await waitFor(() => expect(within(ultra.closest(".detail-check-item") as HTMLElement).getByText("未命中")).toHaveClass("detail-check-warning"));
+  expect(fast).toBeEnabled();
+  expect(ultra).toBeEnabled();
+  // A previous source/model/credential receipt cannot claim support.
+  checks = checks.map(c => ({...c, fingerprint:"b".repeat(64)}));
+  await act(async () => { await client.invalidateQueries({queryKey:["configured-checks"]}); });
+  await waitFor(() => expect(within(fast.closest(".detail-check-item") as HTMLElement).getByText("未确认")).toBeVisible());
+  vi.unstubAllGlobals();
 });

@@ -16,8 +16,18 @@ const channels = Array.from({length:30},(_,i)=>{
   return {source_id:s.id,source_name:s.name,label:provider,provider,model,upstream_model:i===0?model+'-very-long-upstream-model-identifier-2026':model,endpoint:'all',stream:null,eligible:i!==3&&i!==1,reason:i===3?'channel_cooldown':i===1?'temporarily_disabled':'eligible',engine:'gpt',stats:i===2?baseStats:{...baseStats,started,success,failed:started-success,success_rate_denominator:started,success_rate:success/started,inflight:i%6,input_tokens:1234567,output_tokens:199002,cache_read_tokens:763226,usage_samples:2432,estimated_cost_usd:10.65+i/17,last_success_at:Math.floor(at/1000)-i*32}};
 });
 const managed = channels.map(c=>({...c,name:c.provider,kind:'configured',account_id:'',group_id:0,account_ids:[],base:'https://mock-gateway.example.test/v1',api_key_id:'',key_position:0,key_prefix:'',positions:{},revision:'r1',manageable:true,models:[c.model],model_mappings:{[c.model]:c.upstream_model},probe_fingerprint:'audit-only'}));
+const tierScope = 'a'.repeat(64);
+const fixtureRouting = new Map();
+const tierRouting = provider => fixtureRouting.get(provider) || {fast:'enabled',ultrafast:'disabled_verified'};
+for (const member of managed) member.service_tier_scope = tierScope;
+const fixtureChecks = [];
 const testAccount = {id:'wallet-fixture',name:'跨区域演示钱包账号',base:'https://long-wallet-site.example.test/account-management',email:'visual-audit@example.test',provider_kind:'sub2api',state:'idle',message:'',synced_at:Math.floor(at/1000),targets:[]};
 const logs = Array.from({length:16},(_,i)=>({event_id:'evt-'+i,source_id:sources[i%3].id,instance_id:'fixture-instance',request_id:'request-audit-a-long-deliberate-trace-id-for-layout-review-'+String(i).padStart(4,'0'),trace_id:'trace-'+i,key_id:'demo',model:models[i%4],endpoint:'/v1/responses',stream:i%4!==3,at_ms:at-i*7300,started_ms:at-i*7300-3900,status:i%3===1?502:200,outcome:i%3===1?'failed':'success',result:i%3===1?'failed':'success',failure_reason:i%3===1?'missing_response_completed':'',response_headers_status:200,duration_ms:3901+i*377,dispatch_ms:88+i*8,response_created_ms:344+i*11,first_text_ms:i%4!==3?1500+i*127:null,input_tokens:19293+i*367,output_tokens:548+i*208,cache_read_tokens:9810}));
+for (const [i, log] of logs.entries()) {
+  if (i%5===4) continue;
+  log.request_type = i%3===0 ? 'compaction' : 'standard';
+  log.requested_service_tier = ['ultrafast','fast','default'][i%3];
+}
 let managementRows;
 const prices = models.map(model => ({model, input: 2.75, output: 12, cache_read: 0.25, cache_write: 2.75, cache_write_1h: 2.75, long_context_premium: false, sale_percent: 100, source: 'manual', verified: true}));
 const sortStatus = new Map();
@@ -48,7 +58,7 @@ const plugin = {
       const fail = () => json({message:mode==='long'?longError:mode==='uncertain'?'模拟网关未回执，请核对原操作':'模拟配置版本冲突'},mode==='uncertain'?502:409);
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         // In-memory fixture only. All unlisted writes are denied.
-        if (!/^\/analytics\/v1\/(?:prices\/[^/]+|channel-management(?:\/checks)?|sources\/source-\d+\/(?:channel-sort|channel-checks)|automations\/audit\/1\/(?:apply|review|rollback))$/.test(path))
+        if (!/^\/analytics\/v1\/(?:prices\/[^/]+|channel-management(?:\/checks)?|sources\/source-\d+\/(?:channel-sort|channel-checks|channel-settings(?:\/validate)?)|automations\/audit\/1\/(?:apply|review|rollback))$/.test(path))
           return json({message:'该写操作未在本地审查夹具中实现'},409);
         let data;
         try {
@@ -76,7 +86,21 @@ const plugin = {
           return json({price:data});
         }
         if (path.endsWith('/channel-checks')) return json({source_id:sid,provider:data.provider,model:data.model,verdict:'pass',text:'模拟检测通过',checked_at:Math.floor(at/1000),duration_ms:520});
-        if (path.endsWith('/checks')) return json({queued:data.targets?.length || 1});
+        if (path.endsWith('/channel-settings/validate')) return json({status:'validated',operation_id:data.operation_id,revision:'r1',previews:[]});
+        if (path.endsWith('/channel-settings')) {
+          for (const choice of data.service_tier_choices || []) fixtureRouting.set(choice.provider,{...tierRouting(choice.provider),[choice.tier]:choice.enabled?'enabled':'disabled_verified'});
+          return json({status:'applied',operation_id:data.operation_id,revision:'r1',previews:[]});
+        }
+        if (path.endsWith('/checks')) {
+          if (['fast','ultrafast'].includes(data.kind)) for (const target of data.targets || []) {
+            const model = target.models?.[0];
+            const check = {source_id:target.source_id,provider:target.provider,model,kind:data.kind,fingerprint:tierScope,state:'queued',result:null};
+            fixtureChecks.splice(0,fixtureChecks.length,...fixtureChecks.filter(c=>!(c.provider===check.provider&&c.kind===check.kind&&c.model===check.model)));
+            fixtureChecks.push(check);
+            setTimeout(()=>Object.assign(check,{state:'done',result:{status:'supported',observed:data.kind,checked_at:Math.floor(Date.now()/1000),verified_at:Math.floor(Date.now()/1000),binding:tierScope,verified_binding:tierScope}}),3000);
+          }
+          return json({queued:data.targets?.length || 1});
+        }
         return json({message:'模拟操作已确认'});
       }
       const scope = rows => sid?rows.filter(r=>r.source_id===sid):rows;
@@ -85,6 +109,18 @@ const plugin = {
       if (path.endsWith('/prices')) return json({data:prices});
       if (path.endsWith('/channel-options')) return json({revision:'r1',keys:scope(keys).map(k=>({...k,key_id:'demo'})),channels:[]});
       if (path.endsWith('/channel-controls')) return json({revision:'r1',rules:[]});
+      if (path.endsWith('/service-tier-routing')) return json({scope:tierScope,routing:tierRouting(url.searchParams.get('provider'))});
+      if (path.endsWith('/channel-settings')) {
+        const provider=url.searchParams.get('provider'), member=managed.find(m=>m.provider===provider&&m.source_id===sid);
+        if (!member) return json({message:'模拟渠道不存在'},404);
+        const document={provider:member.provider,engine:'gpt',base_url:member.base,model:member.models,exclude_endpoints:[],only_request_types:[],exclude_request_types:[]};
+        return json({provider,revision:'r1',kind:'configured',base:document,effective:document,override_paths:[],affected_keys:[],available_keys:[],global_preferences:{},schema:{version:1,engines:['gpt','codex'],fields:[
+          {path:'/base_url',type:'string',group:'基本与模型'},
+          {path:'/exclude_endpoints',type:'json',group:'请求规则'},
+          {path:'/only_request_types',type:'json',group:'请求规则'},
+          {path:'/exclude_request_types',type:'json',group:'请求规则'},
+        ]}});
+      }
       if (path.endsWith('/automations/audit')) return json({data:[{id:1,task_id:'fixture-task',task_name:'模拟路由排序',run_at:new Date(at).toISOString(),status:'suggested',source_id:'source-1',model:models[0],reason:'样本达到阈值，建议检查顺序。',before_order:[longName,'渠道-13'],after_order:['渠道-13',longName],changes:[],policy:{},metrics:{comparisons:['按最近一小时的成功率比较']}}]});
       if (path.endsWith('/model-channels') || path.endsWith('/channel-metrics')) return json({data:scope(channels),snapshot_revision:'r1',generated_at:Math.floor(at/1000)});
       if (path.endsWith('/analytics')) return json({data:scope(channels),total:{requests:25391,attempts:33011,success:31740,failed:1271,input_tokens:32901122,output_tokens:3918242,cache_read_tokens:23045018,estimated_cost_usd:431.289}, models:[],from:Math.floor(at/1000)-86400,to:Math.floor(at/1000),generated_at:Math.floor(at/1000),coverage:'full',source_freshness:sources.map(s=>({source_id:s.id,latest_fact_at:Math.floor(at/1000)-5,last_exporter_seen_at:Math.floor(at/1000)-4}))});
@@ -106,6 +142,7 @@ const plugin = {
         const offset=Number(url.searchParams.get('cursor')||0),page=rows.slice(offset,offset+25);
         return json({format:'management-page-v1',revision:'fixture-only',read_at_ms:Date.now(),rows:page,total:rows.length,eligible_count:rows.length,offset,page_size:25,next_cursor:offset+25<rows.length?'25':undefined,previous_cursor:offset?'0':undefined,selection_token:'fixture-only',accounts:[testAccount],rates:[],platforms:['gpt'],models,detection_models:models,context:{prices:[],imports:[],routes:{},fingerprints:Object.fromEntries(page.map(r=>[r.id,[]])),fingerprint_models:models}});
       }
+      if (path.endsWith('/channel-management/checks')) return json({data:fixtureChecks});
       if (path.endsWith('/channel-management')) return json({data:scope(managed),unavailable_sources:[]});
       if (path.endsWith('/sub2api/accounts')) return json({data:[testAccount]});
       if (path.endsWith('/sub2api/accounts/progress')) return json({data:[]});
@@ -121,7 +158,8 @@ const plugin = {
   }
 };
 const cacheDir = resolve(process.env.UNI_VISUAL_CACHE || tmpdir(), 'uni-console-visual-vite');
-const server = await createServer({ root, plugins: [plugin], cacheDir, server: { host: '127.0.0.1', port: 43971, strictPort: true, fs: {allow:[root, cacheDir]} } });
+const port = Number(process.env.UNI_VISUAL_PORT || 43971);
+const server = await createServer({ root, plugins: [plugin], cacheDir, server: { host: '127.0.0.1', port, strictPort: true, fs: {allow:[root, cacheDir]} } });
 ({managementRows}=await server.ssrLoadModule('/src/channelManagement.ts'));
 await server.listen();
-console.log('Local visual fixture: http://127.0.0.1:43971');
+console.log('Local visual fixture: http://127.0.0.1:'+port);
