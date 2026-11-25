@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/andybalholm/brotli"
 	"io"
 	"net/http"
@@ -14,6 +15,28 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestManagementEncodingDeadlineLeavesPlainTextErrorDecodable(t *testing.T) {
+	for _, encoding := range []string{"gzip", "br"} {
+		t.Run(encoding, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 0)
+			defer cancel()
+			r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/optimization-preview", nil).WithContext(ctx)
+			r.Header.Set("Accept-Encoding", encoding)
+			w := httptest.NewRecorder()
+			body, _ := json.Marshal(strings.Repeat("compressible evidence", 4000))
+			if err := writeEncodedManagementJSONMedia(w, r, body, "application/json"); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal("expired response did not preserve its deadline error", err)
+			}
+			http.Error(w, managementOptimizationTimeoutMessage, http.StatusServiceUnavailable)
+			if w.Code != http.StatusServiceUnavailable || w.Result().Header.Get("Content-Encoding") != "" ||
+				!strings.HasPrefix(w.Result().Header.Get("Content-Type"), "text/plain") ||
+				w.Body.String() != managementOptimizationTimeoutMessage+"\n" {
+				t.Fatal("discarded compressed success corrupted the plain error", w.Code, w.Result().Header)
+			}
+		})
+	}
+}
 
 func TestManagementResponseEncodingPreservesCompleteJSON(t *testing.T) {
 	value := map[string]any{"rows": strings.Repeat("latest current model evidence", 4000), "revision": "same-current-revision"}

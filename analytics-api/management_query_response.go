@@ -115,6 +115,7 @@ func writeEncodedManagementJSONMedia(w http.ResponseWriter, r *http.Request, bod
 			}
 		}
 	}
+	var encoding string
 	brQuality, gzipQuality := managementEncodingQuality(r.Header.Get("Accept-Encoding"), "br"), managementEncodingQuality(r.Header.Get("Accept-Encoding"), "gzip")
 	if len(body) > 1024 && brQuality > 0 && brQuality >= gzipQuality {
 		var compressed bytes.Buffer
@@ -127,7 +128,7 @@ func writeEncodedManagementJSONMedia(w http.ResponseWriter, r *http.Request, bod
 		}
 		if compressed.Len() < len(body) {
 			body = compressed.Bytes()
-			w.Header().Set("Content-Encoding", "br")
+			encoding = "br"
 		}
 	} else if len(body) > 1024 && managementAcceptsGzip(r.Header.Get("Accept-Encoding")) {
 		var compressed bytes.Buffer
@@ -136,11 +137,16 @@ func writeEncodedManagementJSONMedia(w http.ResponseWriter, r *http.Request, bod
 		_ = writer.Close()
 		if compressed.Len() < len(body) {
 			body = compressed.Bytes()
-			w.Header().Set("Content-Encoding", "gzip")
+			encoding = "gzip"
 		}
 	}
 	if err := r.Context().Err(); err != nil {
 		return err
+	}
+	// A caller may still write a plain-text error on cancellation. Do not
+	// advertise the discarded success body's encoding on that response.
+	if encoding != "" {
+		w.Header().Set("Content-Encoding", encoding)
 	}
 	w.Header().Set("Content-Type", mediaType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))

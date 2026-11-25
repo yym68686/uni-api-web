@@ -109,12 +109,25 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 	}
 	trace.next("database_account_details")
 	var signals []managementModelSignals
+	var typedPreview bool
 	if predicates {
 		endPredicates := managementReadSpan(ctx, "database_predicate_snapshot")
 		if catalogOnly {
 			out.Input.ModelsRevision, signals, err = readManagementRevisionCatalogFrom(ctx, db, owner, true)
 		} else if model != "" {
-			signals, out.Input.ModelsRevision, err = readManagementScopedSignalsWithReceipts(ctx, db, owner, model, managementScopeModelNames(model, facts, out.Bindings), reuse)
+			names := managementScopeModelNames(model, facts, out.Bindings)
+			preview, _ := ctx.Value(managementOptimizationPreviewKey{}).(bool)
+			tiers, _ := ctx.Value(managementOptimizationTierFiltersKey{}).(bool)
+			if !tiers {
+				signals, out.Input.ModelsRevision, err = readManagementScopedSignalsWithReceipts(ctx, db, owner, model, names, reuse)
+			}
+			// The preview is read-only and has no global action token. An
+			// incompatible projection (e.g. service_tiers) must not force
+			// it to decode the entire owner's historical model evidence.
+			if preview && (tiers || errors.Is(err, errManagementPredicateFallback)) {
+				typedPreview = true
+				signals, out.Input.ModelsRevision, err = readManagementTypedPreviewSignals(ctx, db, owner, model, names)
+			}
 		} else {
 			signals, out.Input.ModelsRevision, err = readManagementScopedStreams(ctx, db, owner, true, managementStreamScope{ReceiptReuse: reuse})
 		}
@@ -165,7 +178,7 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 	current := out.receiptReuse.current(db, owner)
 	readUsage := func(accounts []subAccount) error {
 		accountCtx := context.WithValue(ctx, managementAccountReceiptsKey{}, true)
-		if out.ProjectedModels && current != nil {
+		if out.ProjectedModels && (current != nil || typedPreview) {
 			return s.attachManagementSummaryUsageFrom(accountCtx, db, owner, accounts, out.receiptReuse)
 		}
 		accountCtx = out.receiptReuse.traceRawIDs(accountCtx, db, owner)

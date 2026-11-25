@@ -16,6 +16,9 @@ type managementOptimizationResponse struct {
 }
 
 type managementOptimizationPreviewKey struct{}
+type managementOptimizationTierFiltersKey struct{}
+
+const managementOptimizationTimeoutMessage = "优化预览读取超时，请重新读取"
 
 // This endpoint can only read a new preview. It issues no selection token and
 // cannot submit a check or change a route. Applying the user's chosen changes
@@ -44,6 +47,9 @@ func (s *Service) managementOptimizationPreview(w http.ResponseWriter, r *http.R
 		ctx = context.WithValue(ctx, managementOptimizationPreviewKey{}, true)
 		ctx = context.WithValue(ctx, managementSelectedReceiptsKey{}, true)
 		ctx = context.WithValue(ctx, managementSelectedModelsKey{}, true)
+		if filters.hasServiceTiers() {
+			ctx = context.WithValue(ctx, managementOptimizationTierFiltersKey{}, true)
+		}
 	}
 	start := time.Now()
 	snapshot, err := s.readManagementQuerySnapshotWithPreview(ctx, owner, filters, "", false, false, true)
@@ -56,6 +62,8 @@ func (s *Service) managementOptimizationPreview(w http.ResponseWriter, r *http.R
 		class = databaseErrorClass(err)
 		if errors.Is(err, errManagementSourceRevision) || errors.Is(err, errManagementRevision) {
 			status, message, class = http.StatusConflict, "读取期间渠道配置已变化，请重新打开优化预览", "management_source_changed"
+		} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			message = managementOptimizationTimeoutMessage
 		}
 		http.Error(w, message, status)
 	} else {
@@ -79,7 +87,7 @@ func (s *Service) managementOptimizationPreview(w http.ResponseWriter, r *http.R
 		if err != nil {
 			class = "management_response_write_failed"
 			if errors.Is(err, context.DeadlineExceeded) && w.Header().Get("Content-Length") == "" {
-				http.Error(w, "优化预览读取超时，请重新读取", http.StatusServiceUnavailable)
+				http.Error(w, managementOptimizationTimeoutMessage, http.StatusServiceUnavailable)
 			}
 		}
 	}
