@@ -1,0 +1,141 @@
+
+/* Shared console geometry. Data tables may scroll internally; controls stay in the page grid. */
+:root { --radius-control: 8px; --radius-popover: 12px; --radius-dialog: 24px; }
+svg[data-console-icon] { inline-size: 24px !important; block-size: 24px !important; flex: none; }
+svg[data-console-icon] > svg { inline-size: 18px !important; block-size: 18px !important; }
+body { font-size: 14px; }
+h1, h2, h3 { overflow-wrap: anywhere; }
+.button, .app-shell .observatory-nav button, .icon-button, .locate-trigger { border-radius: var(--radius-control); }
+.button:is(.small,.ghost), .observatory-topbar .locate-trigger, .app-shell .observatory-nav button { font-size: 14px; }
+.button, .button:hover, .button.small, .button.small:hover { box-shadow: none; }
+.app-shell .observatory-nav button { padding: 8px; gap: 8px; min-height: 40px; }
+.app-shell .sidebar { padding-inline: 12px; }
+.observatory-topbar .account-menu .avatar { color: var(--ink); background: var(--subtle); }
+.account-menu .account-menu-panel { border-radius: var(--radius-popover); padding: 12px; box-shadow: var(--shadow); }
+.locate-trigger kbd { visibility: hidden; border-radius: 8px; }
+.locate-trigger:is(:hover,:focus-visible) kbd { visibility: visible; }
+.locator-results button { grid-template-columns: auto minmax(0,1fr); font-size: 14px; gap: 12px; }
+.locator-results :is(small,p) { font-size: 14px; }
+.observatory-brand { letter-spacing: -.025em; font-weight: 700; }
+.observatory-login .connect-card { background: transparent; padding: 0; border: 0; }
+.workspace .workbench-heading { gap: 12px 20px; }
+.workspace .workbench-tools { gap: 8px; }
+.workspace :is(.data-actions,.workbench-tools) :is(.button,.select-field), .workspace .management-toolbar :is(.button,.search-field) { min-height: 40px; }
+.workspace .channel-browser .workbench-popover :is(.select-field,.button) { max-width: 100%; }
+.workbench-disclosure > .workbench-popover {
+  position: fixed; inset: var(--workbench-top, 104px) auto auto var(--workbench-left, 12px);
+  padding: 0 16px 16px; border-radius: var(--radius-popover); z-index: 60; overscroll-behavior: contain;
+}
+.receipt-diagnostic { overflow-wrap: anywhere; }
+.drawer-body .detail-stats > div { padding: 0; border: 0; background: transparent; }
+.workbench-popover .workbench-tabs { border: 0; background: transparent; padding-inline: 0; }
+.settings-field-heading .settings-field-origin { flex: 0 1 auto; color: var(--muted); font-size: 14px; }
+@media (hover:hover) and (pointer:fine) {
+  .settings-field:not(:hover):not(:focus-within) .settings-field-actions { opacity: 0; }
+}
+.channel-import-workspace .route-destination-grid { padding-inline: 0; background: transparent; border: 0; }
+.create-channel-mode, .model-aliases { border: 0; }
+.sort-preview-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.sort-preview-scope { font-size: 14px; color: var(--muted); }
+@media (max-width:440px) {
+  .model-aliases .model-alias-row { grid-template-columns: minmax(0,1fr) 40px; }
+  .model-alias-row label { grid-column: 1; }
+  .model-alias-row > button { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+}
+.login-feedback { block-size: 48px; overflow: auto; overscroll-behavior: contain; }
+.login-feedback .error-banner { margin: 0; padding: 4px 0; border: 0; background: transparent; overflow-wrap: anywhere; }
+.workspace .channel-browser .wallet-summary { border: 0; padding: 12px 0; }
+.route-edit-scope { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.management-filter-reset { position: sticky; top: 48px; z-index: 1; background: var(--surface); padding-block: 4px; }
+.workspace .management-filter-reset .sub-filter-reset { min-height: 40px; }
+.management-actions .sub-model-check-group .sub-model-settings-trigger svg[data-console-icon],
+.management-actions .sub-model-check-group > :last-child svg[data-console-icon] { display: inline-block; }
+.workspace .observation-table[data-compact] .column-balance { min-width: 0; }
+.workspace .observation-table[data-compact] .status-pill { white-space: normal; }
+@media (min-width: 560px) and (max-width: 1180px) {
+  .workspace .sub-table :is(th,td).management-actions-cell { position: sticky; right: 0; z-index: 2; background: var(--surface); }
+  .workspace .sub-table th.management-actions-cell { background: var(--subtle); }
+}
+.workbench-disclosure > .workbench-popover .workbench-popover-heading {
+  position: sticky; inset-block-start: 0; z-index: 1; padding-block: 8px;
+  margin: 0 0 8px; font-size: 14px; background: var(--surface);
+}
+.workbench-popover .icon-button { min-width: 36px; min-height: 36px; }
+.secondary-actions .workbench-popover > :is(.button, .detection-action, div:not(.workbench-popover-heading)),
+.site-row-menu .workbench-popover > .button { margin-block: 0 8px; }
+@media (max-width:780px) {
+  .app-shell .observatory-topbar,.app-shell .workspace { padding-inline: 12px; }
+  .workbench-disclosure > .workbench-popover {
+    inset: auto 12px max(12px, env(safe-area-inset-bottom)); max-height: min(72dvh,38rem);
+    border-radius: var(--radius-dialog);
+  }
+}
+.workspace :is(.table-scroll,.sub-results-table,.request-log-table-wrap,.price-overview-wrap) { overscroll-behavior-inline: contain; scrollbar-width: auto; max-inline-size: 100%; }
+.workspace .request-log-table :is(th,td) { font-size: 14px; padding: 8px; white-space: normal; }
+.workspace .request-log-table td[data-align="end"] { font-family: inherit; font-variant-numeric: tabular-nums; }
+.workspace .request-log-table .trace-status {
+  display: inline; font-size: 14px; padding: 0; background: none; border: 0; white-space: normal; overflow: visible;
+}
+.workspace .request-log-table .tip-target { display: inline; }
+.workspace .request-log-table .request-log-id { font: 400 14px/1.5 inherit; font-family: inherit; font-size: 14px; max-inline-size: 100%; }
+.log-id-narrow { display: none; }
+.workspace .request-log-table .log-extra-column small { overflow-wrap: anywhere; }
+.workspace .request-log-table time { font-variant-numeric: tabular-nums; }
+.workspace .request-log-table small { font-size: 14px; margin-top: 4px; }
+.workspace .request-logs-panel[data-columns="custom"] .request-log-table :is(th,td).log-identity:first-child {
+  position: sticky; inset-inline-start: 0; z-index: 1; background: var(--surface); min-width: 152px;
+}
+@media (max-width: 560px) {
+  .workspace .request-log-table time span { display: block; white-space: nowrap; }
+  .workspace .request-log-table :is(th,td) { padding-inline: 4px; }
+  .log-id-wide { display: none; }
+  .log-id-narrow { display: inline; }
+  .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:first-child { width: 31%; }
+  .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:nth-child(2) { width: 25%; }
+  .workspace .request-logs-panel .workbench-tools .button { font-size: 14px; }
+}
+.workspace .balance-table:not([data-details]) :is(td,th) { overflow: visible; white-space: normal; }
+.workspace .balance-table .balance-check { min-width: 0; font-size: 14px; }
+.workspace .balance-table .balance-check-time { display: block; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; font-size: 14px; }
+.workspace .balance-table :is(td,th)[data-align="end"] { font-variant-numeric: tabular-nums; }
+.balance-progress-slot { min-block-size: 24px; font-size: 14px; color: var(--muted); }
+.balance-progress-slot > span { display: flex; align-items: center; gap: 8px; }
+.wallet-status-detail { display: inline-flex; flex-wrap: wrap; align-items: center; font-size: 14px; gap: 4px; }
+.wallet-status-detail svg { color: var(--muted); }
+.wallet-count { font-size: 14px; color: var(--muted); }
+.sources-settings .source-item { grid-template-columns: auto minmax(0,1fr) auto; padding: 12px 8px; column-gap: 12px; }
+.source-url, .source-save-status, .password-status { overflow-wrap: anywhere; }
+.source-save-status, .password-status { min-height: 44px; max-height: 44px; overflow: auto; }
+.source-url { margin: 0 0 16px; }
+.source-form .password-status { font-size: 14px; }
+.channel-add-receipts {
+  position: fixed; inset: auto 12px max(12px,env(safe-area-inset-bottom)) auto;
+  z-index: 59; align-items: start; inline-size: min(420px,calc(100% - 24px)); max-block-size: 40dvh;
+  overflow: auto; margin: 0; overscroll-behavior: contain;
+}
+.channel-add-receipt { background: var(--surface); padding: 12px; box-shadow: var(--shadow); border-radius: 12px; font-size: 14px; }
+.workspace .sub-accounts.management-sites { border: 0; background: transparent; box-shadow: none; overflow: visible; }
+.management-sites .sub-account-status { min-block-size: 44px; }
+.management-sites .sub-account-message { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.site-row-menu > summary { inline-size: 44px; overflow: hidden; white-space: nowrap; font-size: 0; }
+.site-row-menu > summary::before { content: "…"; font-size: 18px; }
+.site-row-menu > summary svg { display:none; }
+@media (hover:hover) and (pointer:fine) {
+  .workspace .sub-management-row:not(:hover):not(:focus-within) .sub-row-actions { opacity: 0; }
+}
+@media (max-width: 780px) {
+  .workspace .management-toolbar { padding: 12px 0; gap: 8px; }
+  .workspace .management-actions { flex-wrap: nowrap; gap: 4px; }
+  .workspace .management-actions .button { padding-inline: 8px; white-space: nowrap; }
+  .management-actions .button svg[data-console-icon] { display: none; }
+  .management-actions .secondary-actions .workbench-popover .button svg[data-console-icon] { display: inline-block; }
+  .management-status-slot { flex: 0 0 24px; }
+}
+@media (max-width: 440px) {
+  .sources-settings .source-item { grid-template-columns: minmax(0,1fr) auto; }
+  .sources-settings .source-item > svg { display: none; }
+  .workspace .management-actions .sub-model-check-group { gap: 0; }
+  .workspace .management-actions .secondary-actions > summary { padding-inline: 4px; }
+  .workspace .management-actions .sub-model-check-group .icon-button { min-width: 36px; }
+  .workspace .management-actions .sub-model-check-group .icon-button svg[data-console-icon] { display: inline-block; }
+}

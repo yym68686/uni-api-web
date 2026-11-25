@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw, X } from "lucide-react";
+import { Plus, RefreshCw, X } from "./icons";
 import { controlRequest } from "./api";
 import { channelReadRecovery } from "./channelReadRecovery";
 import { LoadingIndicator } from "./LoadingIndicator";

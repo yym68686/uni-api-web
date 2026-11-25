@@ -2,7 +2,7 @@ import type { SubTarget } from "./Sub2apiChecks";
 import type { ManagedChannel } from "./channelManagement";
 import { billingRate } from "./billingRates";
 import { time } from "./format";
-import { CircleAlert } from "lucide-react";
+import { CircleAlert } from "./icons";
 import { Tip } from "./ui";
 
 export function BillingRate({

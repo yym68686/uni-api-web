@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
-import { Sparkles, X } from "lucide-react";
+import { Sparkles, X } from "./icons";
 import { Spinner } from "./ui";
 import { rate } from "./format";
 import { channelEngineLabel, channelProtocolLabel } from "./channelProtocol";
@@ -393,22 +393,24 @@ export function ChannelOptimization({
                           }
                         >
                           {c.action === "migrate"
-                            ? "协议升级"
-                            : c.splitProtocol || c.reuseBinding
-                              ? "按协议接入"
+                            ? "协议 · 升级"
+                            : c.reuseBinding
+                              ? "协议 · 复用接入"
+                              : c.splitProtocol
+                                ? "协议 · 新接入"
                               : c.tier
                                 ? c.action === "tier-add"
-                                  ? "新增档位"
-                                  : "取消档位"
+                                  ? "接入档位 · 新增"
+                                  : "接入档位 · 取消"
                                 : c.action === "add"
-                                  ? "新增勾选"
-                                  : "取消勾选"}
+                                  ? "模型 · 新增"
+                                  : "模型 · 取消"}
                         </span>
                         <span>
                           <strong>
                             {c.action === "migrate"
                               ? "旧版默认 gpt → 自动识别 codex"
-                              : c.model}
+                              : c.tier ? `整个接入 · ${c.tier}` : c.model}
                           </strong>
                           {c.model !== c.upstream && (
                             <small>原模型：{c.upstream}</small>

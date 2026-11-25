@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, SlidersHorizontal, Braces, Download } from "lucide-react";
+import { Plus, SlidersHorizontal, Braces, Download } from "./icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { parse, stringify } from "yaml";
 import { ApiError, controlRequest } from "./api";

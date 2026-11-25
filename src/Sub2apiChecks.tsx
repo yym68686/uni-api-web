@@ -23,11 +23,9 @@ import {
   RefreshCw,
   ScanLine,
   Search,
-  Settings2,
   Square,
-  Trash2,
   X,
-} from "lucide-react";
+} from "./icons";
 import { ApiError, controlRequest, currentControlWriteGeneration } from "./api";
 import { accountBalanceQuery, refreshAccountBalanceAfterLogin } from "./accountBalance";
 import type { AccountBalance as SubAccountBalance } from "./accountBalance";
@@ -868,7 +866,7 @@ function ManagementChannelDrawer({
   );
 }
 
-import { WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
+import { ResponsiveActions, WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
 
 type SiteImportDialog = { account: SubAccount; target: SubTarget; configured?: ManagedChannel; draft?: SiteChannelAddDraft };
 type ConfiguredImportDialog = { item: ManagedChannel; draft?: ConfiguredChannelAddDraft };
@@ -1039,6 +1037,18 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const { data: addReceipts = noAddReceipts } = useQuery<ChannelAddReceipt[]>({
     queryKey: receiptKey, queryFn: async () => noAddReceipts, enabled: false,
   });
+  const [receiptDetails, setReceiptDetails] = useState<string | null>(null);
+  const activeReceipt = addReceipts.find(receipt => receipt.id === receiptDetails && receipt.state === "error");
+  const dismissReceipt = (id: string) => client.setQueryData<ChannelAddReceipt[]>(receiptKey, (previous = []) => previous.filter(item => item.id !== id));
+  useEffect(() => {
+    const ids = addReceipts.filter(receipt => receipt.state === "success").map(receipt => receipt.id);
+    if (!ids.length) return;
+    const timer = window.setTimeout(() => {
+      client.setQueryData<ChannelAddReceipt[]>(["channel-add-receipts", user], (previous = []) =>
+        previous.filter(item => !ids.includes(item.id) || item.state !== "success"));
+    }, 5500);
+    return () => window.clearTimeout(timer);
+  }, [addReceipts, client, user]);
   function submitChannelAdd<D extends ChannelAddDraft>(
     request: ChannelAddRequest<D>,
     close: () => void,
@@ -1475,25 +1485,38 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         </div>
         {onRouting && <button type="button" className="button small" onClick={onRouting}>路由顺序</button>}
       </div>
-      {!!addReceipts.length && <div className="channel-add-receipts" aria-label="渠道添加回执">
+      {!!addReceipts.length && <aside className="channel-add-receipts" aria-label="渠道添加回执">
         {addReceipts.map(receipt => <div key={receipt.id} className="channel-add-receipt">
-          <span role={receipt.state === "error" ? "alert" : "status"}><strong>{receipt.label}</strong> · {receipt.message}</span>
-          {receipt.recovery && <button type="button" className="button small" onClick={() => {
-            const recovery = receipt.recovery!;
-            if ("site" in recovery) setImporting(recovery.site);
-            else setConfiguredDialog(recovery.configured);
-          }}>{receipt.action === "save" ? "恢复编辑草稿" : "恢复添加配置"}</button>}
-          {receipt.state !== "pending" && <button type="button" className="icon-button" aria-label={`关闭 ${receipt.label} 的添加回执`} onClick={() =>
-            client.setQueryData<ChannelAddReceipt[]>(receiptKey, (previous = []) => previous.filter(item => item.id !== receipt.id))}><X size={14} /></button>}
+          <span role={receipt.state === "error" ? "alert" : "status"}>
+            <strong>{receipt.label}</strong> · {receipt.state === "error" ? "请核对添加回执" : receipt.message}
+          </span>
+          {receipt.state === "error" && <button type="button" className="button small" onClick={() => setReceiptDetails(receipt.id)}>查看回执</button>}
+          {receipt.state !== "pending" && <button type="button" className="icon-button" aria-label={`关闭 ${receipt.label} 的添加回执`} onClick={() => dismissReceipt(receipt.id)}><X /></button>}
         </div>)}
-      </div>}
+      </aside>}
+      {activeReceipt && <Dialog.Root open onOpenChange={open => { if (!open) setReceiptDetails(null); }}>
+        <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="guide-dialog compact-dialog">
+          <CompactDialogHeader context={activeReceipt.label}>渠道添加回执</CompactDialogHeader>
+          <div className="compact-dialog-scroll receipt-diagnostic">
+            <Dialog.Description>{activeReceipt.message}</Dialog.Description>
+            <small>操作编号：{activeReceipt.id}</small>
+          </div>
+          <div className="compact-dialog-footer">
+            {activeReceipt.recovery && <button type="button" className="button" onClick={() => {
+              const recovery = activeReceipt.recovery!;
+              setReceiptDetails(null);
+              if ("site" in recovery) setImporting(recovery.site);
+              else setConfiguredDialog(recovery.configured);
+            }}>{activeReceipt.action === "save" ? "恢复编辑草稿" : "恢复添加配置"}</button>}
+            <Dialog.Close className="button">关闭回执</Dialog.Close>
+          </div>
+        </Dialog.Content></Dialog.Portal>
+      </Dialog.Root>}
       <WorkbenchTabs label="管理视图" value={section} onChange={setSection} tabs={[["channels","渠道"],["sites","站点账号"]]} />
       <section className="data-panel sub-accounts management-sites" id="management-sites" aria-label="站点账号设置" hidden={section !== "sites"}>
         <div className="data-heading">
           <div className="data-title">
-            <Globe2 size={19} />
-            <h2>站点账号</h2>
-            <span className="count-badge">{!query.data && !accountHeaders.data ? "…" : statusAccounts.length}</span>
+            <h2 className="sr-only">站点账号</h2>
             <WorkbenchNotice label="账号同步状态" messages={[
               syncSubmitted && (syncSubmitted.count
                 ? `已提交 ${syncSubmitted.count} 个账号，${syncSubmitted.detect ? "正在后台同步并检测。" : "正在后台同步，不执行检测。"}`
@@ -1628,7 +1651,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         : a.synced_at > 0 ? dateTime(a.synced_at) : "查看进度"}</small></Tip> : null}
                     </div>
                     <div className="sub-account-actions">
-                      <button className="button ghost small" aria-label={`设置站点 ${a.name}`} onClick={() => setSettingsAccount(a)}><Settings2 size={13} />设置</button>
+
                       {pending(a.state) ? (
                         <button
                           className="button small"
@@ -1653,23 +1676,16 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             {accountBusy(a.id) ? <Spinner small /> : <RefreshCw size={13} />}
                             同步并检测
                           </button>
-                          <button
-                            className="button ghost small"
-                            disabled={accountBusy(a.id)}
-                            onClick={() => setForm({ account: a })}
-                          >
-                            重新登录
-                          </button>
-                          <button
-                            className="icon-button"
-                            aria-label={`移除账号 ${a.name}`}
-                            disabled={accountBusy(a.id)}
-                            onClick={() => { setRemoveError(""); setRemoving(a); }}
-                          >
-                            <Trash2 size={15} />
-                          </button>
                         </>
                       )}
+                      <WorkbenchDisclosure label={`更多 · ${a.name}`} title="站点账号操作" className="site-row-menu">
+                        <button className="button ghost small" aria-label={`设置站点 ${a.name}`} onClick={() => setSettingsAccount(a)}>设置</button>
+                        {!pending(a.state) && <>
+                          <button className="button ghost small" disabled={accountBusy(a.id)} onClick={() => setForm({ account: a })}>重新登录</button>
+                          <button className="button ghost small" aria-label={`移除账号 ${a.name}`} disabled={accountBusy(a.id)}
+                            onClick={() => { setRemoveError(""); setRemoving(a); }}>移除账号</button>
+                        </>}
+                      </WorkbenchDisclosure>
                     </div>
                   </article>
                 );
@@ -1691,6 +1707,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           <div className="compact-dialog-scroll">
             <p className="dialog-summary">
               <span>本次计划 {batchPreview.items.length} / {batchPreview.total} 个渠道；跳过 {Math.max(0,batchPreview.total-batchPreview.items.length)} 个</span>
+              <span>{new Set(batchPreview.items.flatMap(item => item.models)).size} 个模型</span>
               <span>{batchPreview.kind==="fingerprint" ? `去重后 ${batchPreview.fingerprintTargets.length} 项` :
                 isServiceTier(batchPreview.kind) ? `最多 ${batchPreview.tierTargets.length} 次可能计费的上游请求` :
                 `${batchPreview.items.reduce((count,item)=>count+item.models.length,0)} 个检测项`}</span>
@@ -1698,7 +1715,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <details className="data-disclosure"><summary>渠道与模型</summary><ul className="dialog-preview-list">
               {batchPreview.items.map(item=><li key={item.id}><strong>{item.label}</strong><small>{item.models.join("、")}</small></li>)}
             </ul></details>
-            <p className="dialog-inline-note">{batchPreview.kind === "check" ? modelCheckScope : "每项可能发送多次请求，产生上游费用。"}</p>
+            <p className="dialog-inline-note">{batchPreview.kind === "check" ? modelCheckScope : "上游可能计费；每项可能发出多次请求，当前没有可确认的总次数上限。"}</p>
             {batchPreview.scope!==batchScope && <p className="dialog-inline-note" role="alert">筛选或检测数据已变化，请重新预览。</p>}
           </div>
           <div className="compact-dialog-footer">
@@ -1751,6 +1768,20 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <WorkbenchDisclosure className="management-filters" label="筛选">
             <WorkbenchTabs label="渠道管理筛选面板" value={filterTab} onChange={setFilterTab} tabs={[["conditions","条件"],["columns","数据列"]]} />
             <section hidden={filterTab !== "conditions"}>
+            <div className="management-filter-reset">
+              <button
+                className="filter-chip sub-filter-reset"
+                onClick={() => {
+                  const defaults = JSON.stringify(subFilterDefaults);
+                  if (defaults !== JSON.stringify(filters) || cursor)
+                    navigation.current = { owner: user, filter: defaults, cursor: "", action: "reset", started: performance.now() };
+                  setFilters({ ...subFilterDefaults });
+                  setPage(0);
+                }}
+              >
+                <X size={12} /> 重置筛选
+              </button>
+            </div>
             <div className="filters sub-filters" role="region" aria-label="渠道管理筛选" tabIndex={0}>
               <label className="select-field">
                 <select
@@ -1995,18 +2026,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 </select>
                 <ChevronDown size={13} />
               </label>
-              <button
-                className="filter-chip sub-filter-reset"
-                onClick={() => {
-                  const defaults = JSON.stringify(subFilterDefaults);
-                  if (defaults !== JSON.stringify(filters) || cursor)
-                    navigation.current = { owner: user, filter: defaults, cursor: "", action: "reset", started: performance.now() };
-                  setFilters({ ...subFilterDefaults });
-                  setPage(0);
-                }}
-              >
-                <X size={12} /> 重置筛选
-              </button>
             </div>
             </section>
             <section hidden={filterTab !== "columns"} aria-label="渠道管理数据列">
@@ -2044,6 +2063,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             )}
           </div>
           <div className="management-actions" role="group" aria-label="渠道管理操作">
+            <ResponsiveActions label="更多操作" width={1180}>
             <DetectionAction projects={detectionProjects} project={detectionProject} onSelect={project => { setDetectionProject(project); setBatchNotice(""); }} selectDisabled={batchBusy}>
               <button
                 className="button small"
@@ -2070,6 +2090,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             >
               <RefreshCw size={15} className={query.isFetching || pageQuery.updating ? "spin" : ""} />
             </button>
+            <ChannelOptimization
+              disabled={!usablePage || !total || readingSelection}
+              snapshot={async()=>managementOptimizationSnapshot(await withSelectionRequest(signal=>readManagementOptimizationPreview(user,filters,signal)),filters)}
+            />
+            </ResponsiveActions>
             <div className="sub-model-check-group" role="group" aria-label="模型检测与设置">
               <button
                 className="button primary small"
@@ -2088,10 +2113,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               }} />
             </div>
             <CreateChannel sources={sources.data?.data || []} />
-            <ChannelOptimization
-              disabled={!usablePage || !total || readingSelection}
-              snapshot={async()=>managementOptimizationSnapshot(await withSelectionRequest(signal=>readManagementOptimizationPreview(user,filters,signal)),filters)}
-            />
             <span className="management-status-slot">
               <WorkbenchNotice label="渠道管理状态" messages={[
                 pageQuery.updating && "正在更新渠道结果，暂显示更新前内容…",

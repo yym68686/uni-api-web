@@ -3,7 +3,7 @@ import { useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { Check, ChevronDown, CircleHelp, Fingerprint, X } from "lucide-react";
+import { Check, ChevronDown, CircleHelp, Fingerprint, X } from "./icons";
 import { ApiError, controlRequest } from "./api";
 import { channelMembers, useChannelManagement } from "./channelManagement";
 import type { ManagementRow } from "./channelManagement";

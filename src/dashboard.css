@@ -27,20 +27,20 @@
   font:inherit;font-size:12px;text-overflow:ellipsis;cursor:pointer;
 }
 .overview-tools .overview-refresh {min-width:34px;height:34px;padding:0;justify-content:center}
-.overview-content {display:grid;gap:14px;min-width:0}
+.overview-content {display:grid;gap:24px;min-width:0}
 .overview-grid {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;min-width:0}
 .workspace .overview-grid .metric-card {
-  min-width:0;min-height:79px;padding:11px 12px;display:grid;align-content:center;gap:8px;
-  border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:none;
+  min-width:0;min-height:80px;padding:12px 0;display:grid;align-content:center;gap:8px;
+  border:0;background:none;box-shadow:none;
 }
-.workspace .overview-grid .metric-card-label {min-width:0;display:flex;align-items:center;justify-content:space-between;gap:4px;white-space:nowrap;font-size:11px;letter-spacing:0}
+.workspace .overview-grid .metric-card-label {min-width:0;display:flex;align-items:center;justify-content:space-between;gap:4px;white-space:normal;font-size:14px;letter-spacing:0}
 .overview-grid .metric-card-label svg {width:14px;height:14px;flex:none}
 .workspace .overview-grid .metric-card-number {
-  color:var(--ink);margin:0;font:550 22px/1.15 var(--font-mono);
-  min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  color:var(--ink);margin:0;font:600 18px/1.4 'Geist Variable',system-ui,sans-serif;
+  min-width:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;
 }
-.overview-panels {display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);align-items:start;gap:12px}
-.overview-panel {min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--surface)}
+.overview-panels {display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);align-items:start;gap:24px}
+.overview-panel {min-width:0}
 .overview-panel-header {display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:45px;padding:6px 12px}
 .overview-panel-header h3 {margin:0;font-size:14px;font-weight:650;white-space:nowrap}
 .overview-panel-actions {display:flex;gap:2px}
@@ -69,20 +69,20 @@
 @media (max-width:1319px) {.overview-grid {grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:850px) {.overview-panels {grid-template-columns:minmax(0,1fr)}}
 @media (max-width:580px) {
-  .overview-tools {display:grid;width:100%;grid-template-columns:repeat(4,minmax(0,1fr)) 33px}
-  .overview-select select {max-width:none;padding-inline:6px 18px;font-size:11px}
+  .overview-tools {display:grid;width:100%;grid-template-columns:repeat(2,minmax(0,1fr)) 40px}
+  .overview-select select {max-width:none;padding-inline:6px 18px;font-size:14px}
   .overview-select > svg:first-child {display:none}
   .overview-select > svg:last-child {right:4px;width:10px}
-  .workspace .overview-grid .metric-card {min-height:64px;padding:8px}
+  .workspace .overview-grid .metric-card {min-height:68px;padding:8px 0}
   .overview-grid .metric-card-label svg {width:12px;height:12px}
-  .workspace .overview-grid .metric-card-number {font-size:16px}
+  .overview-tools .overview-refresh {grid-area:1 / 3;}
   .overview-table :is(th,td) {padding-inline:6px;font-size:11px}
   .overview-share-track {display:none}
   .overview-models :is(th,td):last-child {width:15%}
 }
 @media (max-width:420px) {.overview-grid {grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:365px) {
-  .overview-tools {grid-template-columns:repeat(2,minmax(0,1fr)) 34px}
+  .overview-tools {grid-template-columns:repeat(2,minmax(0,1fr)) 40px}
   .overview-tools .overview-refresh {grid-area:1 / 3}
 }
 .chart-inspection { color:var(--muted); font-size:.8rem; }

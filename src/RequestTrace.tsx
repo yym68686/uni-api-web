@@ -1,3 +1,4 @@
+import { Copy } from "./icons";
 import { DetailLoading } from "./PageLoading";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
@@ -11,7 +12,7 @@ import {
   Clock3,
   Route,
   Activity,
-} from "lucide-react";
+} from "./icons";
 import { analyticsRequest, initializationRetryInterval } from "./api";
 import type { Connection, Metrics } from "./types";
 import { SiteLink } from "./ChannelSite";
@@ -91,6 +92,7 @@ export function RequestTraceDialog({
   instanceId?: string;
   onClose: () => void;
 }) {
+  const [copied, setCopied] = useState("");
   const query = useQuery(
     requestTraceOptions(connection, requestId, sourceId, instanceId),
   );
@@ -109,7 +111,12 @@ export function RequestTraceDialog({
               <Dialog.Title>请求详情 <WorkbenchNotice messages={[
                 query.data?.import?.caught_up === false && "历史同步中，当前链路可能不完整。",
               ]} /></Dialog.Title>
-              <Dialog.Description>{requestId}</Dialog.Description>
+              <Dialog.Description className="trace-request-id">{requestId}</Dialog.Description>
+              <button type="button" className="button small" onClick={async () => {
+                try { await navigator.clipboard.writeText(requestId); setCopied("已复制"); }
+                catch { setCopied("无法复制，请选择上方 ID"); }
+              }}><Copy />复制 ID</button>
+              <span className="trace-copy-status" role="status">{copied}</span>
             </div>
             <button
               className="button small"
@@ -638,6 +645,7 @@ export function TraceTimeline({
   );
   const hasTimes = !run.ambiguous && trace.events.length > 0;
   const downstream = run.ambiguous ? [] : downstreamTiming(trace.gateway);
+  const headers = trace.events.find(event => event.stage === "response_headers");
   const open = (attempt: TraceAttempt) => {
     if (document.activeElement instanceof HTMLElement) attemptOpeners.current.set(attempt.id,document.activeElement);
     setSelected(attempt.id);
@@ -689,7 +697,7 @@ export function TraceTimeline({
       </div>
       {trace.statusConflict && (
         <p className="trace-notice warning">
-          实际返回 HTTP {trace.downstreamHTTP}；历史汇总记录为 {final?.status}。
+          {headers?.status === trace.downstreamHTTP ? "响应头" : "观测响应"} HTTP {trace.downstreamHTTP}；网关最终 HTTP {final?.status}（请求汇总）。
         </p>
       )}
       {trace.httpSource === "legacy" && (

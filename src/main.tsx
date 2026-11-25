@@ -3,10 +3,12 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-// System fonts keep cold navigation independent of additional font downloads.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "./styles.css";
 import "./observatory.css";
 import "./compactDialog.css";
+import "./consoleDesign.css";
 import App from "./App";
 import { PageBoundary } from "./PageBoundary";
 const client = new QueryClient({

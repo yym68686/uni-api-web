@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, X, CircleHelp, Play } from "lucide-react";
+import { Check, X, CircleHelp, Play } from "./icons";
 import { controlRequest } from "./api";
 import { LoadingIndicator } from "./LoadingIndicator";
 import { providerId, channelName } from "./format";

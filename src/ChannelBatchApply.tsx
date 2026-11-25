@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
-import { Layers, Trash2, X } from "lucide-react";
+import { Layers, Trash2, X } from "./icons";
 import { Spinner } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";
 import {

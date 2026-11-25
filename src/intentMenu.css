@@ -1,0 +1,32 @@
+
+.intent-menu-trigger { min-block-size: 40px; }
+.intent-menu-panel, .intent-menu-child {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  inline-size: 224px;
+  padding: 8px;
+}
+.intent-menu-panel { position: fixed; z-index: 65; }
+.intent-menu-panel ul { margin: 0; list-style: none; }
+.intent-menu-panel > ul:not(.intent-menu-child) { padding: 0; }
+.intent-menu-context { display: block; padding: 8px; overflow-wrap: anywhere; font-size: 14px; }
+.intent-menu-panel button[role="menuitem"] {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  text-align: start; width: 100%; min-height: 40px; padding: 8px;
+  background: transparent; color: var(--ink); border: 0; border-radius: 8px; font: inherit;
+}
+.intent-menu-panel button:is(:hover,:focus-visible,[aria-expanded="true"]) { background: var(--subtle); }
+.intent-menu-panel button[data-danger] { margin-top: 8px; }
+.intent-menu-child { position: absolute; inset-inline-start: 100%; }
+.intent-menu-panel[data-side="left"] .intent-menu-child { inset-inline: auto 100%; }
+.intent-menu-panel[data-touch] .intent-menu-child { position: static; inline-size: auto; box-shadow: none; margin-top: 8px; }
+@media (max-width: 780px) {
+  .intent-menu-panel {
+    inset: auto 12px max(12px, env(safe-area-inset-bottom)); inline-size: auto;
+    max-height: 72dvh; overflow: auto; border-radius: 24px; overscroll-behavior: contain;
+  }
+  .intent-menu-child { position: static; inline-size: auto; box-shadow: none; margin-top: 8px !important; }
+  .intent-menu-trigger { min-inline-size: 44px; min-block-size: 44px; }
+}

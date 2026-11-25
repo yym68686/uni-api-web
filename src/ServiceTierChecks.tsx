@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "./icons";
 import { controlRequest } from "./api";
 import { submitTierChecks, tierTarget } from "./serviceTierTable";
 import type { ConfiguredCheck } from "./channelManagement";

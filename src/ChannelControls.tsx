@@ -4,7 +4,7 @@ import {
   ArrowUpToLine,
   ChevronDown,
   RotateCcw,
-} from "lucide-react";
+} from "./icons";
 import { channelParams, controlRequest, request } from "./api";
 import type { Catalog, Channel, Connection, KeyInfo } from "./types";
 import type { ConsoleSource } from "./SourceSettings";

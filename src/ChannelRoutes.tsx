@@ -5,7 +5,7 @@ import { useChannelImportKeys, useDefaultChannelChoice } from "./channelImportKe
 import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Ellipsis, Plus, X } from "lucide-react";
+import { Ellipsis, Plus, X } from "./icons";
 import { controlRequest } from "./api";
 import { channelReadRecovery } from "./channelReadRecovery";
 import { Spinner } from "./ui";

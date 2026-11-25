@@ -1,15 +1,24 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ChevronDown, CircleAlert, X } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ChevronDown, CircleAlert, X } from "./icons";
 import { Tip } from "./ui";
 
-const compactQuery = "(max-width: 650px)";
-function subscribeCompact(listener: () => void) {
-  const query = globalThis.matchMedia?.(compactQuery);
-  query?.addEventListener("change", listener);
-  return () => query?.removeEventListener("change", listener);
+export function useViewportQuery(query: string) {
+  const subscribe = useCallback((listener: () => void) => {
+    const media = globalThis.matchMedia?.(query);
+    media?.addEventListener("change", listener);
+    return () => media?.removeEventListener("change", listener);
+  }, [query]);
+  const snapshot = useCallback(() => !!globalThis.matchMedia?.(query)?.matches, [query]);
+  return useSyncExternalStore(subscribe, snapshot, () => false);
 }
-const compactSnapshot = () => !!globalThis.matchMedia?.(compactQuery).matches;
-export const useCompactWorkbench = () => useSyncExternalStore(subscribeCompact, compactSnapshot, () => false);
+export const useCompactWorkbench = () => useViewportQuery("(max-width: 650px)");
+
+export function ResponsiveActions({ children, label = "更多", width = 1100 }: {
+  children: ReactNode; label?: string; width?: number;
+}) {
+  const compact = useViewportQuery(`(max-width: ${width}px)`);
+  return compact ? <WorkbenchDisclosure label={label} className="secondary-actions">{children}</WorkbenchDisclosure> : <>{children}</>;
+}
 
 export function useWorkbenchTools() {
   const [heading, observeHeading] = useState<HTMLDivElement | null>(null);
@@ -49,14 +58,35 @@ export function WorkbenchDisclosure({ label, children, icon, className = "", tit
 }) {
   const id = useId();
   const disclosure = useRef<HTMLDetailsElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const insidePointer = useRef<PointerEvent | null>(null);
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
       const panel = disclosure.current;
       if (panel?.open && insidePointer.current !== event && !event.composedPath().includes(panel)) panel.open = false;
     };
+    const position = () => {
+      const anchor = disclosure.current?.querySelector("summary")?.getBoundingClientRect();
+      const popover = body.current;
+      if (!disclosure.current?.open || !anchor || !popover || window.innerWidth <= 780) return;
+      const width = popover.offsetWidth;
+      const height = popover.offsetHeight;
+      popover.style.setProperty("--workbench-left", Math.max(12, Math.min(anchor.right - width, innerWidth - width - 12)) + "px");
+      const top = anchor.bottom + height + 20 <= innerHeight || anchor.top < height + 20
+        ? Math.min(anchor.bottom + 8, innerHeight - height - 12) : anchor.top - height - 8;
+      popover.style.setProperty("--workbench-top", Math.max(12, top) + "px");
+    };
+    const details = disclosure.current;
+    details?.addEventListener("toggle", position);
     document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      details?.removeEventListener("toggle", position);
+      document.removeEventListener("pointerdown", closeOutside);
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+    };
   }, []);
   return <details ref={disclosure} className={`workbench-disclosure ${className}`} onPointerDownCapture={event => {
     // React portal children are inside this disclosure even though they are outside its DOM.
@@ -68,7 +98,7 @@ export function WorkbenchDisclosure({ label, children, icon, className = "", tit
     event.currentTarget.querySelector("summary")?.focus();
   }}>
     <summary className="button small" aria-controls={id} title={title}>{icon}{label}<ChevronDown size={12} aria-hidden="true" /></summary>
-    <div id={id} className="workbench-popover">
+    <div ref={body} id={id} className="workbench-popover">
       <div className="workbench-popover-heading"><strong>{label}</strong><button type="button" className="icon-button" aria-label={`关闭${label}`} onClick={event => {
         const panel = event.currentTarget.closest("details");
         if (panel) {

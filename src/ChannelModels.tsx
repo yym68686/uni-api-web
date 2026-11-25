@@ -1,6 +1,6 @@
 import { DetailLoading } from "./PageLoading";
 import { lazy, Suspense, useRef, useState } from "react";
-import { Check, Pencil } from "lucide-react";
+import { Check, Pencil } from "./icons";
 const ChannelModelEditor = lazy(() => import("./ChannelModelEditor").then(m=>({default:m.ChannelModelEditor})));
 import { useSubGroupAccounts } from "./sub2apiAccounts";
 import { availableModelChecks } from "./sub2apiResults";

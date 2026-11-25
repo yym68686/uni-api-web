@@ -566,10 +566,11 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           <p>
             {quote.merchant} · {quote.name}（1 件）
           </p>
-          <p>
-            实付 ¥{quote.total_cny}，含手续费 ¥{quote.fee_cny}
-          </p>
-          <p>兑换到：{quote.target}</p>
+          <dl className="recharge-quote-data">
+            <div><dt>实付 · 人民币</dt><dd>¥{quote.total_cny}</dd></div>
+            <div><dt>手续费</dt><dd>¥{quote.fee_cny}</dd></div>
+            <div className="recharge-quote-target"><dt>目标站点账号</dt><dd>{quote.target}</dd></div>
+          </dl>
           <p>报价有效至：{Number.isFinite(quote.expires_at) ? orderTime(quote.expires_at) : "无法确认"}</p>
           {quoteExpired && <p role="status">报价已失效，请重新获取报价或先核对原订单。</p>}
           <label>
@@ -599,7 +600,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           </button>
         </div>
       )}
-      {uncertain && payment.current && <div className="recharge-quote">
+      {uncertain && payment.current && <section className="recharge-uncertain" aria-label="原支付尚未核实">
         <p>原提交尚未核实 · {payment.current.quote.name} · ¥{payment.current.quote.total_cny}。先刷新下方订单；不要获取新报价重复购买。</p>
         <button type="button" className="button small" disabled={busy || !jobsVerified || hasActiveJobs || !!settingsError} onClick={() => {
           const original = payment.current;
@@ -611,7 +612,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
             rememberSubmission(null); setQuote(undefined); setConfirmed(false); setError("");
           }
         }}>核对后解除过期提醒</button>}
-      </div>}
+      </section>}
       <h4>充值记录</h4>
       {pollError && (
         <p role="alert" className="error-banner">

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search } from "./icons";
 import { ChannelModelSelection } from "./ChannelModelSelection";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
 import type { ModelAlias } from "./ModelAliases";

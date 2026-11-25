@@ -1,7 +1,7 @@
 import { DetailLoading } from "./PageLoading";
 import { lazy, Suspense, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Settings2, X } from "lucide-react";
+import { Settings2, X } from "./icons";
 import type { Channel, ModelPrice } from "./types";
 import type { ManagedChannel } from "./channelManagement";
 import type { ConfiguredChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
@@ -27,10 +27,11 @@ export function ChannelSettings({ triggerLabel, ...props }: ChannelConfiguration
   } />;
 }
 
-export function ChannelConfigurationDialog({ row, member, prices, initialModelTab, submitAdd, open, onOpenChange, trigger }: ChannelConfigurationProps & {
+export function ChannelConfigurationDialog({ row, member, prices, initialModelTab, submitAdd, open, onOpenChange, trigger, returnFocus }: ChannelConfigurationProps & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger?: React.ReactNode;
+  returnFocus?: () => void;
 }) {
   const title = row.provider === GLOBAL_SETTINGS_SCOPE ? "全局设置" : "渠道设置";
   return (
@@ -38,7 +39,7 @@ export function ChannelConfigurationDialog({ row, member, prices, initialModelTa
       {trigger && <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>}
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay channel-settings-overlay" />
-        <Dialog.Content className="channel-settings-dialog">
+        <Dialog.Content className="channel-settings-dialog" onCloseAutoFocus={returnFocus && (event => { event.preventDefault(); returnFocus(); })}>
           <header className="settings-dialog-header">
             <div className="settings-title-copy">
               <Dialog.Title>{title}</Dialog.Title>

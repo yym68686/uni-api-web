@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f7fb" />
+    <meta name="theme-color" content="#fafafa" />
     <script>
       (() => {
         let theme = "light";
@@ -14,7 +14,7 @@
         } catch {}
         document.documentElement.dataset.theme = theme;
         document.querySelector('meta[name="theme-color"]').content =
-          theme === "dark" ? "#141720" : "#f6f7fb";
+          theme === "dark" ? "#141414" : "#fafafa";
       })();
       // Check the existing session while the application bundle downloads.
       // The application still awaits this response before restoring private data.
@@ -30,11 +30,11 @@
     <script type="module" src="/src/managementBootstrap.ts"></script>
     <style>
       html {
-        background: #f6f7fb;
+        background: #fafafa;
         color-scheme: light;
       }
       html[data-theme="dark"] {
-        background: #141720;
+        background: #141414;
         color-scheme: dark;
       }
     </style>

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowRight, Eye, EyeOff, Globe2, KeyRound, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Globe2, KeyRound, ShieldCheck, TriangleAlert } from "./icons";
 import { ApiError, cleanBase, controlRequest } from "./api";
 import { readKeys, type Keys } from "./requestFilters";
 import { Spinner } from "./ui";
@@ -87,11 +87,7 @@ function AccountForm({ onConnect, shortSession }: { onConnect: () => void; short
           disabled={pending}
         />
       </div>
-      {error && (
-        <div role="alert" className="error-banner">
-          {error}
-        </div>
-      )}
+      <div className="login-feedback" aria-live="polite">{error && <div role="alert" className="error-banner">{error}</div>}</div>
       <button className="button primary connect-button" disabled={pending}>
         {pending ? (
           <Spinner small />
@@ -178,7 +174,6 @@ function ConnectionForm({
         <input
           id="access-key"
           type={visible ? "text" : "password"}
-          placeholder="配置中的第一个密钥或管理员密钥"
           value={key}
           onChange={(e) => setKey(e.target.value)}
           autoComplete="off"
@@ -195,12 +190,7 @@ function ConnectionForm({
           {visible ? <EyeOff size={17} /> : <Eye size={17} />}
         </button>
       </div>
-      {error && (
-        <div role="alert" className="error-banner">
-          <TriangleAlert size={17} />
-          <span>{error}</span>
-        </div>
-      )}
+      <div className="login-feedback" aria-live="polite">{error && <div role="alert" className="error-banner"><TriangleAlert /><span>{error}</span></div>}</div>
       <button className="button primary connect-button" disabled={pending}>
         {pending ? (
           <>

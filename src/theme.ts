@@ -18,7 +18,7 @@ export function useTheme() {
     document.documentElement.dataset.theme = theme;
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", theme === "dark" ? "#141720" : "#f6f7fb");
+      ?.setAttribute("content", theme === "dark" ? "#141414" : "#fafafa");
     try {
       localStorage.setItem("uni-console-theme", theme);
     } catch {

@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { X } from "./icons";
 
 export function CompactDialogHeader({ children, context, closeLabel = "关闭", busy }: {
   children: ReactNode;

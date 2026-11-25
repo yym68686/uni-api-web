@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChartNoAxesCombined, Table2 } from "lucide-react";
+import { ChartNoAxesCombined, Table2 } from "./icons";
 import "./trendView.css";
 
 export type TrendMode = "chart" | "table";

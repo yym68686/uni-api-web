@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Columns3, GripVertical, RotateCcw } from "lucide-react";
+import { ArrowDown, ArrowUp, Columns3, GripVertical, RotateCcw } from "./icons";
 
 export type TableColumn<K extends string> = { id: K; label: string };
 

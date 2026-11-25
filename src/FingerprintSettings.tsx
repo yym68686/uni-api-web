@@ -54,8 +54,11 @@ export function FingerprintSettings() {
 
   return <section className="fingerprint-settings" aria-labelledby="fingerprint-settings-title">
     <h3 id="fingerprint-settings-title">自动指纹检测模型</h3>
+    <details className="fingerprint-reference"><summary>自动检测与参考目录</summary>
     <p className="muted">勾选并保存后，下次可用性检测成功时自动检测该模型的指纹；保存不会立即补跑。不影响手动指纹检测、可用性或降智检测。</p>
     <p className="muted">服务会从 lm-detector 定期更新已验证的支持列表。新增模型默认不勾选，更新目录不会发起检测。</p>
+    {settings && <p className="muted">参考提交：<span className="mono">{settings.reference_commit}</span></p>}
+    </details>
     {query.isPending && <LoadingIndicator label="读取支持列表" />}
     {query.isError && <p role="alert" className="error-banner">指纹设置读取失败，已保存设置未改变。{query.error.message}</p>}
     {settings && <fieldset className="fingerprint-settings-models" disabled={saving || query.isError}>
@@ -77,7 +80,6 @@ export function FingerprintSettings() {
     <div className="fingerprint-settings-actions">
       <button className="button small primary" disabled={!changed || saving || query.isError} onClick={() => void save()}>{saving ? "保存中…" : "保存勾选"}</button>
       <button className="button small" disabled={saving || query.isFetching} onClick={() => void query.refetch()}>重新读取列表</button>
-      {settings && <small className="muted">参考目录 · <span className="mono">{settings.reference_commit.slice(0, 12)}</span></small>}
     </div>
   </section>;
 }

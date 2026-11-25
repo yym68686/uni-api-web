@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { X } from "./icons";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";

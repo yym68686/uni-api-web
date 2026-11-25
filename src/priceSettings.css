@@ -15,25 +15,29 @@
 .price-overview-table tbody tr:hover { background: var(--subtle); }
 .price-model-open { display: inline-flex; align-items: center; gap: 8px; padding: 0; background: none; border: 0; text-align: left; font-weight: 650; color: var(--ink); }
 .price-model-open:hover { color: var(--accent); }
-.price-edit-affordance { display: inline-flex; align-items: center; gap: 3px; padding: 2px 5px; border-radius: 5px; color: var(--accent); background: var(--selection); font-size: 10px; font-weight: 500; }
+.price-edit-affordance { display: inline-flex; inline-size: 24px; color: var(--muted); }
+@media (hover:hover) and (pointer:fine) {
+  .price-edit-affordance { visibility: hidden; }
+  .price-model-open:is(:hover,:focus-visible) .price-edit-affordance { visibility: visible; }
+}
 .price-overview-table small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
 .price-overview-table .price-empty { padding: 32px 16px; color: var(--muted); text-align: center; }
 .price-table-footer { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 11px; color: var(--muted); }
 
-.price-edit-dialog.connection-dialog { width: min(38rem, calc(100vw - 24px)); padding: 0; max-height: 94dvh; overflow: hidden; border-radius: 12px; }
+.price-edit-dialog.connection-dialog { width: min(38rem, calc(100vw - 24px)); padding: 0; max-height: 94dvh; overflow: hidden; border-radius: 24px; }
 .price-editor { display: flex; flex-direction: column; max-height: 92dvh; min-width: 0; }
-.price-edit-header, .price-edit-footer { padding: 13px 20px; flex: none; }
-.price-edit-header { border-bottom: 1px solid var(--line); }
+.price-edit-header, .price-edit-footer { padding: 16px 24px; flex: none; }
+
 .price-edit-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.price-edit-heading h2 { margin: 2px 0 0; font-size: 19px; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.price-edit-heading h2 { margin: 2px 0 0; font-size: 18px; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .price-edit-heading .icon-button { flex: none; }
 .price-edit-kicker { color: var(--muted); font-size: 11px; }
 .price-edit-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .price-source-badge { display: inline-flex; padding: 3px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--subtle); color: var(--muted); font-size: 11px; flex: none; }
 .price-edit-meta .price-info { min-height: 26px; }
-.price-edit-body { min-height: 0; overflow: auto; scrollbar-width: thin; padding: 14px 20px; display: grid; gap: 15px; }
-.price-edit-section { min-width: 0; margin: 0; padding: 8px 11px 10px; border: 1px solid var(--line); border-radius: 8px; }
-.price-edit-section legend { padding: 0 5px; color: var(--ink); font-size: 13px; font-weight: 650; }
+.price-edit-body { min-height: 0; overflow: auto; scrollbar-width: thin; padding: 8px 24px 24px; display: grid; gap: 24px; }
+.price-edit-section { min-width: 0; margin: 0; padding: 0; border: 0; }
+.price-edit-section legend { padding: 0 0 8px; color: var(--ink); font-size: 14px; font-weight: 600; }
 .price-edit-section legend small { padding-left: 7px; color: var(--muted); font-size: 10px; font-weight: 400; }
 .price-rate-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 11px; }
 .price-rate-grid[data-ttl] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -80,3 +84,10 @@
   .price-edit-header, .price-edit-body, .price-edit-footer { padding-inline: 12px; }
   .price-rate-grid[data-ttl] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.price-editor [hidden] { display:none; }
+.price-form-status { block-size: 44px; overflow: auto; }
+.price-form-status p { margin: 0; }
+.price-edit-actions > p { min-inline-size: 0; }
+.price-reference-panel { overflow-wrap: anywhere; }
+.price-overview-table :is(th,td), .price-overview-table thead th { font-size: 14px; }
+.price-overview-table thead .price-column-unit { margin-top: 4px; font-size: 14px; }

@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "./icons";
 import { ApiError, controlRequest } from "./api";
 import { readCompleteSubTarget } from "./subTargetDetails";
 import { readSummary } from "./summaryFeed";

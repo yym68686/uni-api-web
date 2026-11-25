@@ -11,7 +11,7 @@ import {
   Search,
   SlidersHorizontal,
   X,
-} from "lucide-react";
+} from "./icons";
 import { analyticsRequest } from "./api";
 import type { Connection, ModelPrice } from "./types";
 import { Spinner } from "./ui";
@@ -64,54 +64,27 @@ function priceColumnValue(price: ModelPrice, column: (typeof priceColumns)[numbe
 
 function PriceDetails({ model }: { model: string }) {
   const reference = references.get(model)!;
-  return (
-    <Dialog.Root>
-      <Dialog.Trigger asChild>
-        <button
-          className="button small price-info"
-          type="button"
-          aria-label={`查看 ${model} 价格说明`}
-          title="价格说明与来源"
-        >
-          <Info size={14} aria-hidden="true" /> 价格说明
-        </button>
-      </Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="guide-dialog price-details">
-          <Dialog.Title>{model}</Dialog.Title>
-          <Dialog.Description>价格说明 · 美元 / 百万 token</Dialog.Description>
-          <p className="price-details-note">{reference.note}</p>
-          <p>
-            {reference.cache_write_kind === "input"
-              ? "缓存写入按输入价格计算。修改输入价格后，两个缓存写入价格会同步更新。"
-              : reference.cache_write_kind === "flat"
-                ? "缓存写入使用统一价格，不按缓存时长分档。"
-                : "缓存写入分别使用 5 分钟与 1 小时价格。"}
-            关闭写入计费后不计该项费用，价格设置仍保留。
-          </p>
-          {reference.verified && reference.source.startsWith("https://") && (
-            <a
-              className="price-reference-link"
-              href={reference.source}
-              target="_blank"
-              rel="noreferrer"
-            >
-              查看官方价格来源 <ExternalLink size={14} />
-            </a>
-          )}
-          <Dialog.Close asChild>
-            <button
-              className="icon-button detail-close"
-              aria-label="关闭价格说明"
-            >
-              <X size={18} />
-            </button>
-          </Dialog.Close>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
+  return <section className="price-reference-panel" aria-label={`${model} 价格说明`}>
+    <p className="price-details-note">{reference.note}</p>
+    <p>
+      {reference.cache_write_kind === "input"
+        ? "缓存写入按输入价格计算。修改输入价格后，两个缓存写入价格会同步更新。"
+        : reference.cache_write_kind === "flat"
+          ? "缓存写入使用统一价格，不按缓存时长分档。"
+          : "缓存写入分别使用 5 分钟与 1 小时价格。"}
+      关闭写入计费后不计该项费用，价格设置仍保留。
+    </p>
+    {reference.verified && reference.source.startsWith("https://") && (
+      <a
+        className="price-reference-link"
+        href={reference.source}
+        target="_blank"
+        rel="noreferrer"
+      >
+        查看官方价格来源 <ExternalLink size={14} />
+      </a>
+    )}
+  </section>;
 }
 
 function PriceEditor({
@@ -122,7 +95,7 @@ function PriceEditor({
   edit,
   onEdit,
   pending,
-  onPending,
+  onPending, details, setDetails, detailsTrigger,
 }: {
   price: ModelPrice;
   connection: Connection;
@@ -132,6 +105,9 @@ function PriceEditor({
   onEdit: (model: string, edit?: PriceEdit) => void;
   pending: boolean;
   onPending: (model: string, pending: boolean) => void;
+  details: boolean;
+  setDetails: (value: boolean) => void;
+  detailsTrigger: React.RefObject<HTMLButtonElement | null>;
 }) {
   const reference = references.get(price.model)!;
   const [receipt, setReceipt] = useState<{ value: ModelPrice; against: ModelPrice }>();
@@ -270,17 +246,22 @@ function PriceEditor({
       <header className="price-edit-header">
         <div className="price-edit-heading">
           <div>
-            <Dialog.Description className="price-edit-kicker">编辑模型价格</Dialog.Description>
+            <Dialog.Description className="sr-only">编辑模型价格</Dialog.Description>
             <Dialog.Title tabIndex={-1}>{price.model}</Dialog.Title>
           </div>
           <Dialog.Close type="button" className="icon-button" aria-label="关闭价格编辑" disabled={pending}><X size={18} /></Dialog.Close>
         </div>
         <div className="price-edit-meta">
-          <span className="price-source-badge">{sourceLabel}</span>
-          <PriceDetails model={price.model} />
+          <button ref={detailsTrigger} className="button small price-info" type="button" aria-expanded={details}
+            aria-label={details ? "返回价格编辑" : `查看 ${price.model} 价格说明`} onClick={() => setDetails(!details)}>
+            <Info />{details ? "返回编辑" : "价格说明"}
+          </button>
         </div>
       </header>
-      <div className="price-edit-body">
+      {details && <div className="price-edit-body">
+        <strong>{sourceLabel}</strong><PriceDetails model={price.model} />
+      </div>}
+      <div className="price-edit-body" hidden={details}>
         <fieldset className="price-edit-section">
           <legend>基础单价 <small>美元 / 百万 token</small></legend>
           <div className="price-rate-grid">
@@ -303,7 +284,7 @@ function PriceEditor({
         <fieldset className="price-edit-section">
           <legend>估算规则</legend>
           <label className="price-rule">
-            <span><strong>售卖比例</strong><small>按原价的百分比计算售卖金额。</small></span>
+            <span><strong>售卖比例</strong></span>
             <span className="price-input-wrap price-percent">
               <input
                 className="price-number-input"
@@ -340,11 +321,13 @@ function PriceEditor({
             onChange={verified => change({ verified })} />
         </fieldset>
       </div>
-      <footer className="price-edit-footer">
+      <footer className="price-edit-footer" hidden={details}>
+        <div className="price-form-status" aria-live="polite">
         {readOnly && <p role="status">当前价格读取失败，刷新成功后才能编辑。</p>}
         {conflicted && <p role="alert">服务端价格已变化，请放弃草稿以查看最新价格。</p>}
         {error && <p role="alert">{price.model}：{error}</p>}
         {dirty && invalid && <p role="status">请核对价格和售卖比例的范围。</p>}
+        </div>
         <div className="price-edit-actions">
           <p role="status">{pending ? "正在保存…" : saved ? "价格已保存" : dirty
             ? "未保存 · 修改会重算历史估算，不影响实际扣费。"
@@ -409,6 +392,8 @@ export function PriceSettings({
   const [customColumns, setCustomColumns] = useTableColumns("uni-console:price-columns:v1", priceColumns);
   const visibleColumns = customColumns ?? defaultPriceColumns;
   const [editing, setEditing] = useState("");
+  const [details, setDetails] = useState(false);
+  const detailsTrigger = useRef<HTMLButtonElement>(null);
   const editorOpener = useRef<HTMLElement | null>(null);
   const [localDrafts, setLocalDrafts] = useState<PriceDrafts>(() => new Map());
   const drafts = externalDrafts ?? localDrafts;
@@ -460,7 +445,7 @@ export function PriceSettings({
           <thead>
             <tr>
               <th scope="col">模型</th>
-              {visibleColumns.map(column => <th scope="col" key={column}>{priceColumnLabels.get(column)}</th>)}
+              {visibleColumns.map(column => <th scope="col" key={column}>{priceColumnLabels.get(column)}{column !== "sale_percent" && <small className="price-column-unit">美元 / 百万 token</small>}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -469,9 +454,10 @@ export function PriceSettings({
               return <tr key={price.model}>
                 <th scope="row"><button type="button" className="price-model-open" aria-label={`编辑 ${price.model}`} title={`编辑 ${price.model}`} onClick={event => {
                   editorOpener.current = event.currentTarget;
+                  setDetails(false);
                   setEditing(price.model);
-                }}><span>{price.model}</span><span className="price-edit-affordance"><Pencil size={12} aria-hidden="true" />编辑</span></button>
-                <small>{drafts.has(price.model) ? "未保存" : price.verified ? "已确认" : published ? "待确认" : "未定价"}</small></th>
+                }}><span>{price.model}</span><span className="price-edit-affordance" aria-hidden="true"><Pencil /></span></button>
+                {(drafts.has(price.model) || !price.verified) && <small>{drafts.has(price.model) ? "未保存" : published ? "待确认" : "未定价"}</small>}</th>
                 {visibleColumns.map(column => <td key={column}>{priceColumnValue(price, column)}</td>)}
               </tr>;
             })}
@@ -497,11 +483,14 @@ export function PriceSettings({
       <Dialog.Root open={!!editedPrice} onOpenChange={open => { if (!open && !pendingModels.has(editing)) setEditing(""); }}>
         {editedPrice && <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="connection-dialog price-edit-dialog" onCloseAutoFocus={event => {
+          <Dialog.Content className="connection-dialog price-edit-dialog" onEscapeKeyDown={event => {
+            if (details) { event.preventDefault(); setDetails(false); detailsTrigger.current?.focus(); }
+          }} onCloseAutoFocus={event => {
             event.preventDefault();
             editorOpener.current?.focus({preventScroll:true});
           }}>
               <PriceEditor key={editedPrice.model} price={editedPrice} connection={connection} onSaved={onSaved} readOnly={!!error}
+                details={details} setDetails={setDetails} detailsTrigger={detailsTrigger}
                 edit={drafts.get(editedPrice.model)} pending={pendingModels.has(editedPrice.model)}
                 onPending={(model, pending) => setPendingModels(previous => {
                   const next = new Set(previous);

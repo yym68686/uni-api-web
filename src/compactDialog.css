@@ -5,7 +5,7 @@
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: 24px;
 }
 .compact-dialog-header {
   display: flex;
@@ -13,27 +13,27 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 15px 19px;
-  border-bottom: 1px solid var(--line);
+  padding: 16px 24px;
 }
 .compact-dialog-header > div { min-width: 0; align-self: center; }
 .compact-dialog .compact-dialog-header h2 {
   margin: 0;
-  font-size: 17px;
-  line-height: 1.35;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 .compact-dialog-header p {
   margin: 3px 0 0;
   font-size: 12px;
   color: var(--muted);
 }
-.compact-dialog-header :is(h2, p) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compact-dialog-header :is(h2, p) { overflow-wrap: anywhere; }
 .compact-dialog-header > button { flex: none; }
 .compact-dialog-form { display: flex; flex-direction: column; min-height: 0; }
 .compact-dialog-scroll {
   min-height: 0;
   min-width: 0;
-  padding: 17px 19px;
+  padding: 4px 24px 24px;
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -45,9 +45,8 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
-  gap: 7px;
-  border-top: 1px solid var(--line);
-  padding: 11px 19px;
+  gap: 8px;
+  padding: 12px 24px;
   background: var(--surface);
 }
 .compact-dialog-footer > .button { min-height: 34px; }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Eye, EyeOff, Trash2, Check, Link2 } from "lucide-react";
+import { Copy, Eye, EyeOff, Trash2, Check, Link2 } from "./icons";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import type { Channel } from "./types";

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Settings2 } from "lucide-react";
+import { Settings2 } from "./icons";
 import { CompactDialogHeader } from "./CompactDialog";
 import { SUB_MODELS, subModelProtocolLabel } from "./sub2apiModels";
 import type { SubModel } from "./sub2apiModels";

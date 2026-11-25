@@ -34,12 +34,12 @@ it("shows official GPT 6.2 Standard prices and explains cache retention limits",
   expect(screen.getByRole('checkbox',{name:model+' 计算缓存写入费用'})).not.toBeChecked();
   expect(screen.getByLabelText(model+' 售卖价格百分比')).toHaveValue(2.5);
   expect(screen.getByRole('checkbox',{name:model+' 超过272k加价'})).toBeChecked();
-  expect(within(screen.getByLabelText(model+' 输入价格').closest('form')!).getByText('官方参考价')).toBeVisible();
  }
  const sol=screen.getByLabelText('gpt-6.2-sol 输入价格').closest('form')!;
  expect(within(sol).getByRole('button',{name:'采用参考价'})).toBeEnabled();
  await user.click(screen.getByRole('button',{name:'查看 gpt-6.2-sol 价格说明'}));
  const dialog=screen.getByRole('dialog',{name:'gpt-6.2-sol'});
+ expect(within(dialog).getByText('官方参考价')).toBeVisible();
  expect(dialog).toHaveTextContent('30 分钟 $2.50');
  expect(dialog).toHaveTextContent('12 小时为 $5');
  expect(dialog).toHaveTextContent('不自动套用 12 小时费率');
@@ -202,8 +202,9 @@ it("keeps aligned table columns, searchable models and accessible pricing detail
   const props = { prices: [] as ModelPrice[], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
   render(<PriceSettings {...props} />);
   const table = screen.getByRole("table", { name: "模型价格" });
-  expect(screen.getByRole("button", { name: "编辑 gemini-4-argon" })).toHaveTextContent("编辑");
+  expect(screen.getByRole("button", { name: "编辑 gemini-4-argon" })).toHaveTextContent("gemini-4-argon");
   expect(within(table).getAllByRole("columnheader")).toHaveLength(4);
+  expect(within(table).getAllByText("美元 / 百万 token")).toHaveLength(3);
   expect(within(table).getAllByRole("rowheader")).toHaveLength(MODEL_PRICE_CATALOG.length);
   for (const row of table.querySelectorAll("tbody tr")) expect(row.children).toHaveLength(4);
   const user = userEvent.setup();
@@ -236,7 +237,7 @@ it("chooses price data columns in the filter, persists the choice and restores t
   const props = { prices: [], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
   const user = userEvent.setup();
   const headers = () => within(screen.getByRole("table", { name: "模型价格" }))
-    .getAllByRole("columnheader").map(header => header.textContent);
+    .getAllByRole("columnheader").map(header => header.firstChild?.textContent);
   const openColumns = async () => {
     await user.click(screen.getByText("筛选", { selector: "summary" }));
     await user.click(screen.getByText("数据列", { selector: "summary" }));

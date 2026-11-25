@@ -1,3 +1,9 @@
+.recharge-quote-data { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px 20px; margin: 0; font-size: 14px; }
+.recharge-quote-data dt { color: var(--muted); }
+.recharge-quote-data dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.recharge-quote-target { grid-column: 1 / -1; }
+.recharge-quote, .recharge-job { border: 0; background: transparent; }
+.recharge-uncertain { display: grid; gap: 8px; justify-items: start; overflow-wrap: anywhere; }
 .recharge-panel {
   display: grid;
   gap: 10px;

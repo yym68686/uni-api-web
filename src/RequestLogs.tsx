@@ -19,7 +19,7 @@ import {
   SlidersHorizontal,
   Wallet,
   X,
-} from "lucide-react";
+} from "./icons";
 import { analyticsRequest, initializationRetryInterval } from "./api";
 import type { Connection, Metrics } from "./types";
 import { ranges } from "./analytics";
@@ -85,7 +85,7 @@ const logColumns = [
   { id: "model", label: "模型 / 端点" },
   { id: "result", label: "最终结果" },
   { id: "duration", label: "总耗时" },
-  { id: "latency", label: "首字延迟" },
+  { id: "latency", label: "响应创建" },
   { id: "wait", label: "请求前等待" },
   { id: "tokens", label: "输入 / 输出 Token" },
 ] as const;
@@ -429,18 +429,26 @@ export function RequestLogsPage({
   const traceSource =
     filters.sourceId ||
     (filters.keyId.includes("::") ? filters.keyId.split("::")[0] : "");
-  const traceButton = (row: RequestLog, compact = false) => <button type="button" className="request-log-id"
-    title={row.request_id || row.trace_id}
-    aria-label={compact && (row.request_id || row.trace_id) ? `查看请求 ${row.request_id || row.trace_id}` : undefined}
-    disabled={!row.request_id && !row.trace_id} onClick={event => { event.stopPropagation(); open(row); }}>
-    {compact ? "查看" : row.request_id || row.trace_id || "请求 ID 未记录"}
-  </button>;
+  const traceButton = (row: RequestLog, compact = false) => {
+    const id = row.request_id || row.trace_id;
+    return <button type="button" className="request-log-id" title={id}
+      aria-label={id ? (compact ? `查看请求 ${id}` : id) : undefined}
+      disabled={!id} onClick={event => { event.stopPropagation(); open(row); }}>
+      {compact ? "查看" : !id ? "—" : <>
+        <span className="log-id-wide">{id}</span>
+        <span className="log-id-narrow" aria-hidden="true">{id.length > 10 ? `${id.slice(0, 4)}…${id.slice(-5)}` : id}</span>
+      </>}
+    </button>;
+  };
   function renderCell(row: RequestLog, id: LogColumn) {
     switch (id) {
-      case "request": return <td key={id} className="log-identity">
-        <time dateTime={new Date(row.at_ms).toISOString()}>{new Date(row.at_ms).toLocaleString("zh-CN", { hour12: false })}</time>
+      case "request": {
+        const at = new Date(row.at_ms);
+        return <td key={id} className="log-identity">
+        <time dateTime={at.toISOString()}><span>{at.toLocaleDateString("zh-CN")}</span>{" "}<span>{at.toLocaleTimeString("zh-CN", { hour12: false })}</span></time>
         {traceButton(row)}
       </td>;
+      }
       case "source": return <td key={id} className="log-extra-column">
         <strong title={sourceName(row.source_id)}>{sourceName(row.source_id)}</strong>
         <small title={row.key_id}>{keyLabels.get(rowKey(row))?.replace(`${sourceName(row.source_id)} · `, "") ||
@@ -461,7 +469,7 @@ export function RequestLogsPage({
             {interrupted && <div>网关最终判定：{row.status}</div>}
             {row.failure_reason && <div>{friendlyReason(row.failure_reason)}</div>}
           </div>}>
-            <span className={`trace-status ${state?.tone || "neutral"}`}>
+            <span className={`trace-status ${state?.tone || "neutral"}`} data-interrupted={interrupted || undefined}>
               {interrupted ? "响应头 HTTP 200 · 流中断" : `${state?.label || "未知"}${row.status > 0 ? ` · HTTP ${row.status}` : ""}`}
             </span>
           </Tip>
@@ -470,7 +478,7 @@ export function RequestLogsPage({
       case "duration": return <td key={id} className="mono" data-align="end">{ms(row.duration_ms)}</td>;
       case "latency": return <td key={id} className="mono" data-align="end">
         <LatencyBadge value={row.response_created_ms ?? row.first_text_ms} />
-        {(row.response_created_ms != null || row.first_text_ms != null) && <small>{row.response_created_ms != null ? "响应创建" : "首个文本"}</small>}
+        {row.response_created_ms == null && row.first_text_ms != null && <small>首个文本</small>}
       </td>;
       case "wait": return <td key={id} className="mono log-extra-column" data-align="end">{ms(row.dispatch_ms)}</td>;
       case "tokens": return <td key={id} className="mono log-extra-column" data-align="end">

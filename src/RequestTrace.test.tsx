@@ -123,7 +123,7 @@ it("shows actual HTTP, a legacy conflict, and expandable skips without inflating
   expect(
     view.container.querySelector(".trace-run-heading .trace-status"),
   ).toHaveTextContent("HTTP 401");
-  expect(screen.getByText(/历史汇总记录为 400/)).toBeVisible();
+  expect(screen.getByText(/网关最终 HTTP 400/)).toBeVisible();
   await user.click(screen.getByText("发送前跳过 · 1 个候选"));
   const skipList = view.container.querySelector<HTMLElement>(
     ".trace-route-decisions",

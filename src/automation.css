@@ -2,7 +2,7 @@
 .automation-list,.automation-editor,.automation-audit { padding:20px; }
 .automation-list h3,.automation-editor h3,.automation-audit h3 { margin:0; }
 .automation-card { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; padding:13px 10px; border-top:1px solid var(--line); }
-.automation-card.selected { color:var(--accent); }
+.automation-card.selected { color:var(--ink); }
 .automation-card p { margin:5px 0 0; color:var(--muted); font-size:12px; }
 .automation-state { font-size:12px; color:var(--muted); }
 .automation-state.on { color:var(--green); }
@@ -17,7 +17,7 @@
 .automation-audit-list article { border-top:1px solid var(--line); padding:12px 0; }
 .automation-audit-list article > div { display:flex; gap:12px; justify-content:space-between; }
 .automation-audit-list article p { margin:6px 0; color:var(--muted); font-size:13px; }
-.automation-audit-list article :is(p,strong) {min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.automation-audit-list article :is(p,strong) {min-width:0;white-space:normal;overflow-wrap:anywhere}
 .automation-audit-list article > div > span {white-space:nowrap}
 .automation-audit-list article small { color:var(--green); }
 @media(max-width:560px){.automation-form{grid-template-columns:1fr;}.automation-list,.automation-editor,.automation-audit{padding:15px;}}
@@ -53,3 +53,10 @@
 }
 .automation-task-dialog .error-banner { color:var(--danger); }
 .automation-card-actions { flex-wrap: wrap; }
+.automation-audit-list article p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.automation-advanced { margin-block: 16px; }
+.automation-advanced > summary { cursor: pointer; }
+.automation-task-actions .button { display: flex; width: 100%; justify-content: flex-start; white-space: normal; }
+.automation-task-actions .automation-delete { margin-top: 12px; }
+.automation-create-row { display: flex; justify-content: flex-end; }
+.automation-create-row[data-empty] { justify-content: start; padding-block: 16px; }

@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  ArrowUpRight, Bot, Gauge, ListTree, Menu, Moon, Network, Route, Search,
+  Bot, Gauge, ListTree, Menu, Moon, Network, Route, Search,
   Settings, Sun, Tag, Wallet, Waypoints, X,
-} from "lucide-react";
+} from "./icons";
 import type { View } from "./preferences";
 import type { Theme } from "./theme";
 import type { Channel } from "./types";
@@ -49,7 +49,7 @@ export function ConsoleNavigation({ view, account, onSelect }: {
       <div className="observatory-rail-brand"><ConsoleBrand /></div>
       <nav className="observatory-nav" aria-label="主导航">
         {groups.map(group => <div key={group.name} className="observatory-nav-group">
-          <span>{group.name}</span>
+          <h2 className="sr-only">{group.name}</h2>
           {group.pages.filter(page => allowed(page, account)).map(link)}
         </div>)}
         {account && <div className="observatory-nav-end">{link(settings)}</div>}
@@ -75,7 +75,7 @@ export function ConsoleHeader({ theme, onMenu, onTheme, onConnection, onDisconne
       <div className="observatory-context">
         <button type="button" className="icon-button menu-toggle" disabled={!onMenu} onClick={onMenu} aria-label="打开菜单"><Menu size={18} /></button>
         <div className="observatory-mobile-brand"><ConsoleBrand /></div>
-        <span className="observatory-environment"><span className="tiny-dot" />{account ? "控制台" : "直连"}</span>
+        {!account && <span className="observatory-environment">直连</span>}
       </div>
       <div className="topbar-actions">
         {onLocate && <button type="button" className="locate-trigger" onClick={onLocate} aria-keyshortcuts="Meta+K Control+K">
@@ -172,13 +172,13 @@ export function ConsoleLocator({ open, onOpenChange, account, channels, loading,
         </label>
         <div ref={resultsRef} className="locator-results">
           {pageMatches.map(page => <button key={page.view} type="button" onClick={() => closeThen(() => onPage(page.view))}>
-            <page.icon size={15} aria-hidden="true" /><span>{page.label}</span><ArrowUpRight size={14} aria-hidden="true" />
+            <page.icon size={15} aria-hidden="true" /><span>{page.label}</span>
           </button>)}
           {channelMatches.map(row => <button key={rowId(row)} type="button" onClick={() => closeThen(() => onChannel(row))}>
-            <Network size={15} aria-hidden="true" /><span>{channelName(row)}<small>{[row.source_name, row.model].filter(Boolean).join(" · ")}</small></span><ArrowUpRight size={14} aria-hidden="true" />
+            <Network size={15} aria-hidden="true" /><span>{channelName(row)}<small>{[row.source_name, row.model].filter(Boolean).join(" · ")}</small></span>
           </button>)}
           {requestMatch && <button type="button" onClick={() => closeThen(() => onRequest(value))}>
-            <ListTree size={15} aria-hidden="true" /><span>追踪请求<small>{value}</small></span><ArrowUpRight size={14} aria-hidden="true" />
+            <ListTree size={15} aria-hidden="true" /><span>追踪请求<small>{value}</small></span>
           </button>}
           {needle && (loading || failed || (!pageMatches.length && !channelMatches.length && !requestMatch)) &&
             (loading ? <LoadingIndicator size="compact" label="读取渠道" /> : <p role="status">{failed ? "暂时无法读取渠道" : "没有匹配结果"}</p>)}

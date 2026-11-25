@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { Activity } from "lucide-react";
+import { Activity } from "./icons";
 export function Tip({
   children,
   text,

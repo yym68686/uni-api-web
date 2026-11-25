@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Play, ScanLine, X } from "lucide-react";
+import { Play, ScanLine, X } from "./icons";
 import { controlRequest } from "./api";
 import { checkTargets, type Checks } from "./ChannelChecks";
 import { detectionKey, useChannelDetection } from "./channelDetection";

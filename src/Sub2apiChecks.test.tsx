@@ -230,7 +230,7 @@ it("keeps channel loading honest and does not read every source key directory on
   vi.stubGlobal("fetch", fetcher);
   mount("quick-entry", client);
   await openSites();
-  expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("…");
+  expect(screen.getByRole("region", { name: "站点账号设置" })).not.toHaveTextContent("暂无站点账号");
   await openChannels();
   expect(screen.getByRole("status", { name: "加载渠道检测" })).toBeInTheDocument();
   expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
@@ -240,7 +240,7 @@ it("keeps channel loading honest and does not read every source key directory on
     replies.management(Response.json({ data: [], unavailable_sources: [] }));
   });
   await openSites();
-  await waitFor(() => expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("2"));
+  await waitFor(() => expect(within(screen.getByRole("region", { name: "站点账号列表" })).getAllByRole("listitem")).toHaveLength(2));
   await openChannels();
   expect(screen.getAllByText("same-group", { selector: "strong" })).toHaveLength(2);
 });

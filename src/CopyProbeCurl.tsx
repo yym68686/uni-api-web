@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy } from "./icons";
 import { controlRequest } from "./api";
 import type { Probe } from "./Sub2apiChecks";
 import { Spinner } from "./ui";

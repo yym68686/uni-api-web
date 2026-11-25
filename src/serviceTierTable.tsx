@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
-import { Check } from "lucide-react";
+import { Check } from "./icons";
 import { ApiError, controlRequest } from "./api";
 import { channelMembers, type ConfiguredCheck, type ManagementRow } from "./channelManagement";
 import type { InstalledChannel } from "./sub2apiImports";

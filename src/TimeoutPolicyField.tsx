@@ -1,4 +1,4 @@
-import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Trash2, ArrowUp, ArrowDown } from "./icons";
 import { useEffect, useRef, useState } from "react";
 
 type Rule = { match: Record<string, unknown>; timeout: Record<string, number> };

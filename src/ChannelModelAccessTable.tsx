@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, FlaskConical, Info, Plus, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, FlaskConical, Info, Plus, Search, X } from "./icons";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Spinner } from "./ui";
 

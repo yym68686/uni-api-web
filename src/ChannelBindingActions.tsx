@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2, X } from "lucide-react";
+import { Pencil, Trash2, X } from "./icons";
 import { ChannelSettings } from "./ChannelSettings";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";

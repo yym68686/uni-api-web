@@ -11,8 +11,8 @@ interface Status {
   failure?: string;
 }
 
-export function ManagedConfiguration({ source }: { source: string }) {
-  const [open, setOpen] = useState(false);
+export function ManagedConfiguration({ source, initiallyOpen = false }: { source: string; initiallyOpen?: boolean }) {
+  const [open, setOpen] = useState(initiallyOpen);
   const [document, setDocument] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

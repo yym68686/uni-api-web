@@ -27,7 +27,7 @@ import {
   ShieldCheck,
   CircleCheck,
   ChevronDown,
-} from "lucide-react";
+} from "./icons";
 import { parse, stringify } from "yaml";
 import { controlRequest } from "./api";
 import { TimeoutPolicyField, HedgingField } from "./TimeoutPolicyField";
@@ -894,6 +894,7 @@ export function Editor({
                 >
                   <header className="settings-field-heading">
                     <h4>{label}</h4>
+                    {resolved && <small className="settings-field-origin">{inherited ? (isGlobal ? "运行时默认" : "继承全局") : (isGlobal ? "全局配置" : "渠道覆盖")}</small>}
                     <div className="settings-field-actions">
                     {resolved?.can_inherit && (
                       <button

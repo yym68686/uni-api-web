@@ -1,4 +1,4 @@
-import { Check, RefreshCw, RotateCcw, X } from "lucide-react";
+import { Check, RefreshCw, RotateCcw, X } from "./icons";
 import type { RouteSorting } from "./routeSorting";
 
 export function RouteSortReceipt({ routing }: { routing: RouteSorting }) {

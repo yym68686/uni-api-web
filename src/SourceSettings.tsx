@@ -2,15 +2,16 @@ import { SourceLoading } from "./PageLoading";
 import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import type { FormEvent, ReactNode } from "react";
-import { Plus, Server, Trash2, Pencil, Check } from "lucide-react";
+import { Plus, Server, Check } from "./icons";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
-import { ChannelSettings, GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
+import { ChannelConfigurationDialog, GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
 import { ControlPersistence } from "./ControlPersistence";
 import { ManagedConfiguration } from "./ManagedConfiguration";
 import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 import { FingerprintSettings } from "./FingerprintSettings";
-import { WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
+import { WorkbenchNotice, WorkbenchTabs } from "./Workbench";
+import { IntentMenu } from "./IntentMenu";
 import { CompactDialogHeader, RemovalDialog } from "./CompactDialog";
 export interface ConsoleSource {
   id: string;
@@ -21,6 +22,11 @@ export interface ConsoleSource {
   temporarily_unavailable?: boolean;
   created_at: number;
 }
+function sourceHost(base: string) {
+  try { return new URL(base).host; } catch { return base; }
+}
+type SourceAction = "global" | "retention" | "managed" | "protocol";
+
 export function SourceSettings({
   sources,
   onSaved,
@@ -46,6 +52,12 @@ export function SourceSettings({
   const [managedBootstrap, setManagedBootstrap] = useState(false);
   const [section, setSection] = useState("sources");
   const opener = useRef<HTMLElement | null>(null);
+  const [management, setManagement] = useState<{ src: ConsoleSource; action: SourceAction } | null>(null);
+  const manage = (src: ConsoleSource, action: SourceAction) => {
+    opener.current = document.activeElement as HTMLElement;
+    setManagement({src, action});
+  };
+  const setupTitles = {retention: "保留临时配置设置", managed: "完整配置托管", protocol: "旧渠道协议修复"} as const;
   function edit(source: ConsoleSource | null) {
     opener.current = document.activeElement as HTMLElement;
     setEditing(source);
@@ -121,25 +133,18 @@ export function SourceSettings({
           <Server size={20} />
           <div className="source-identity">
             <strong title={src.name}>{src.name}</strong>
-            <small title={src.base}>{src.base}{src.temporarily_unavailable && <span role="status"> · 暂时不可用</span>}</small>
+            <small title={src.base}>{sourceHost(src.base)}{src.temporarily_unavailable && <span role="status"> · 暂时不可用</span>}</small>
           </div>
-          <WorkbenchDisclosure label="管理">
-          <ChannelSettings row={{provider:GLOBAL_SETTINGS_SCOPE,provider_name:"全局设置",source_id:src.id,source_name:src.name,model:""}} />
-          <ControlPersistence source={src.id} name={src.name} lazyLoad />
-          <ManagedConfiguration source={src.id} />
-          <ChannelProtocolRepair source={src.id} provider="" onApplied={onSaved} />
-          </WorkbenchDisclosure>
-          <button
-            className="icon-button"
-            aria-label={`编辑 ${src.name}`}
-            onClick={() => edit(src)}
-          >
-            <Pencil size={16} />
-          </button>
-          <button className="icon-button" aria-label={`移除 ${src.name}`} disabled={busy}
-            onClick={() => { setError(""); setRemoving(src.id); }}>
-            <Trash2 size={16} />
-          </button>
+          <IntentMenu label={`管理 ${src.name}`} context={src.name} items={[
+            {label: "全局设置", run: () => manage(src, "global")},
+            {label: "配置托管", children: [
+              {label: setupTitles.retention, run: () => manage(src, "retention")},
+              {label: setupTitles.managed, run: () => manage(src, "managed")},
+            ]},
+            {label: "协议修复", run: () => manage(src, "protocol")},
+            {label: "编辑来源", run: () => edit(src)},
+            {label: "移除来源", danger: true, disabled: busy, run: () => { setError(""); setRemoving(src.id); }},
+          ]} />
           {removing === src.id && <RemovalDialog title="移除来源" context={`${src.name} · ${src.base}`}
             close={() => { setRemoving(null); setError(""); }} confirm={() => void remove(src.id)} busy={busy} error={error}>
             停止接收此来源的新日志，已保存历史保留。请先核对引用此来源的自动化任务和站点绑定。
@@ -147,6 +152,23 @@ export function SourceSettings({
         </div>
       ))}
       {!loading && !readError && !sources.length && !open && <p className="sources-empty">暂无来源</p>}
+      {management?.action === "global" && <ChannelConfigurationDialog
+        row={{provider: GLOBAL_SETTINGS_SCOPE, provider_name: "全局设置", source_id: management.src.id, source_name: management.src.name, model: ""}}
+        open onOpenChange={next => { if (!next) setManagement(null); }} returnFocus={() => opener.current?.focus()} />}
+      {management && management.action !== "global" && <Dialog.Root open onOpenChange={next => { if (!next) setManagement(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="connection-dialog compact-dialog" onCloseAutoFocus={event => { event.preventDefault(); opener.current?.focus(); }}>
+            <CompactDialogHeader context={management.src.name}>{setupTitles[management.action]}</CompactDialogHeader>
+            <div className="compact-dialog-scroll">
+              <details className="source-url"><summary>来源地址</summary><p>{management.src.base}</p></details>
+              {management.action === "retention" && <ControlPersistence source={management.src.id} name={management.src.name} />}
+              {management.action === "managed" && <ManagedConfiguration source={management.src.id} initiallyOpen />}
+              {management.action === "protocol" && <ChannelProtocolRepair source={management.src.id} provider="" onApplied={onSaved} />}
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>}
       <Dialog.Root open={open} onOpenChange={next => {if (!busy) setOpen(next);}}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
@@ -174,7 +196,8 @@ export function SourceSettings({
                       value={key} onChange={e => setKey(e.target.value)} required={!editing} />
                   </label>
                 </fieldset>
-                <div className="compact-dialog-options">
+                <details className="compact-dialog-options">
+                  <summary>高级设置{editing?.has_storage ? " · 已启用存储" : ""}</summary>
                   {!editing && <label className="dialog-check-row">
                     <input type="checkbox" checked={managedBootstrap} disabled={busy} onChange={event => {
                       setManagedBootstrap(event.target.checked);
@@ -191,8 +214,8 @@ export function SourceSettings({
                         value={configKey} disabled={busy} onChange={e => setConfigKey(e.target.value)} maxLength={4096} />
                     </label>
                   </details>}
-                </div>
-                {error && <p role="alert" className="error-banner">{error}</p>}
+                </details>
+                <div className="source-save-status" aria-live="polite">{error && <p role="alert" className="error-banner">{error}</p>}</div>
               </div>
               <div className="compact-dialog-footer">
                 <button className="button small" type="button" disabled={busy} onClick={() => setOpen(false)}>取消</button>
@@ -214,10 +237,20 @@ export function SourceSettings({
 function PasswordSettings() {
   const [current, setCurrent] = useState(""),
     [password, setPassword] = useState(""),
+    [confirmation, setConfirmation] = useState(""),
+    [invalid, setInvalid] = useState<"password" | "confirmation" | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
+    const bytes = new TextEncoder().encode(password).length;
+    const issue = bytes < 12 || bytes > 72 ? "password" : confirmation !== password ? "confirmation" : null;
+    setInvalid(issue);
+    if (issue) {
+      setError(issue === "password" ? "新密码须为 12–72 字节。" : "确认密码与新密码不一致。");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -247,18 +280,23 @@ function PasswordSettings() {
           />
         </label>
         <label>
-          新密码（至少 12 个字符）
+          新密码
           <input
             type="password"
             autoComplete="new-password"
-            minLength={12}
-            maxLength={72}
+            aria-invalid={invalid === "password" || undefined}
+            aria-describedby="password-status"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
         </label>
-        {error && <p role="alert">{error}</p>}
+        <label>确认新密码
+          <input type="password" autoComplete="new-password" required value={confirmation}
+            aria-invalid={invalid === "confirmation" || undefined} aria-describedby="password-status"
+            onChange={e => setConfirmation(e.target.value)} />
+        </label>
+        <div id="password-status" className="password-status" role="status">{error}</div>
         <p>保存后退出所有会话，使用新密码重新登录。</p>
         <button className="button" disabled={busy}>
           修改密码

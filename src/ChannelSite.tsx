@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight } from "./icons";
 import { controlRequest } from "./api";
 import { providerId } from "./format";
 import type { Channel, Connection } from "./types";

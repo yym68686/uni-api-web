@@ -15,7 +15,7 @@ import {
   Sparkles,
   Trash2,
   X,
-} from "lucide-react";
+} from "./icons";
 import { channelSortFields, qualityFirstRules } from "./channelSorting";
 import type { ChannelSortRule } from "./channelSorting";
 import type { SortTemplate } from "./channelSortPreferences";
@@ -642,8 +642,10 @@ export function ChannelSortDialog({
       </Dialog.Portal>
       {preview && !open && (() => {
         const actions = <>
+          <span className="sort-preview-scope">预览未发布 · {scopeLabel}</span>
+          <span className="sort-preview-buttons">
           <button
-            className="button small selected"
+            className="button small"
             disabled={routing?.busy}
             onClick={cancelPreview}
           >
@@ -667,6 +669,7 @@ export function ChannelSortDialog({
               )}
             </button>
           )}
+          </span>
           {preview.plan?.errors.map((error) => (
             <span role="alert" className="negative" key={error}>
               {error}

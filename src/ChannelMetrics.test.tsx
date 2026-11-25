@@ -30,7 +30,7 @@ it("renders the successful subset, and distinguishes missing clocks and an old e
     <Tooltip.Provider><ChannelFirstResponse stats={{ ...stats, successful_response_created }} showP95 /></Tooltip.Provider>;
   const view = render(display({ sample_count: 1, mean_ms: 0, p50_ms: 0, p95_ms: 0, last_ms: 0 }));
   expect(screen.getAllByText("0 ms")).toHaveLength(2);
-  expect(screen.getByText("1 次样本")).toBeVisible();
+  expect(screen.queryByText("1 次样本")).not.toBeInTheDocument();
   expect(screen.queryByText("5.00 s")).not.toBeInTheDocument();
   view.rerender(display(noCreated));
   expect(screen.getByText("无首字样本")).toBeVisible();
@@ -46,9 +46,9 @@ it("shows real body timing and its source for successful native streams without 
   render(<Tooltip.Provider delayDuration={0}><ChannelFirstResponse stats={stats} showP95 /></Tooltip.Provider>);
   expect(screen.getByText("3.00 s")).toBeVisible();
   expect(screen.getByText("10.00 s")).toBeVisible();
-  expect(screen.getByText("4 次样本 · 正文")).toBeVisible();
+  expect(screen.getByText("正文")).toBeVisible();
   expect(screen.queryByText("无首字样本")).not.toBeInTheDocument();
-  fireEvent.focus(screen.getByText("4 次样本 · 正文").closest("[tabindex]")!);
+  fireEvent.focus(screen.getByText("正文").closest("[tabindex]")!);
   const tip = await screen.findByRole("tooltip");
   expect(tip).toHaveTextContent("渠道请求发起 → 首个上游正文片段");
   expect(tip).toHaveTextContent("仅统计成功完成的渠道尝试 · 4 次首字样本");
@@ -80,16 +80,15 @@ it("mounts only compact observation metrics and keeps counts aligned", () => {
   expect(screen.getByRole("columnheader", {name:"站点余额"})).toBeVisible();
 });
 
-it.each([[.98, "healthy"], [.87, "warning"], [.55, "critical"], [0, "critical"]] as const)(
-  "draws a proportional, severity-coded attempt rate for %s",
-  (rate, expected) => {
+it.each([.98, .87, .55, 0])(
+  "renders the exact attempt rate for %s without severity bars",
+  (rate) => {
     const row = {provider: "channel", eligible: true, stats: {...emptyStats(), success_rate: rate, success_rate_denominator: 100}} as Channel;
     const {container} = render(<Tooltip.Provider><table><tbody><tr>
       <ChannelMetricCells row={row} actualRange={{supported:false}} columns={["success"]} />
     </tr></tbody></table></Tooltip.Provider>);
-    const track = container.querySelector(".rate-track");
-    expect(track).toHaveAttribute("data-tone", expected);
-    expect(track?.firstElementChild).toHaveStyle({width: `${rate * 100}%`});
+    expect(container.querySelector(".rate-track")).toBeNull();
+    expect(screen.getByText(`${(rate * 100).toFixed(1)}%`)).toBeVisible();
   },
 );
 

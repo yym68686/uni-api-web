@@ -2,7 +2,7 @@ import { FingerprintPanel } from "./ModelFingerprints";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Play, RefreshCw } from "lucide-react";
+import { Play, RefreshCw } from "./icons";
 import { controlRequest } from "./api";
 import { useConfiguredChecks } from "./channelManagement";
 import type { ConfiguredCheck } from "./channelManagement";

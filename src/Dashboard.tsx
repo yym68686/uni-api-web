@@ -46,7 +46,7 @@ import {
   Unplug,
   Wallet,
   X,
-} from "lucide-react";
+} from "./icons";
 import {
   ApiError,
   AnalyticsInitializingError,
@@ -269,10 +269,10 @@ function Overview({
         <section className="overview-panel" aria-label="模型消费">
           <header className="overview-panel-header">
             <h3>模型消费</h3>
-            <div className="overview-panel-actions">
+            <WorkbenchDisclosure label="日志">
               <button className="button small ghost" onClick={() => onLogs()}>请求日志</button>
               <button className="button small ghost" onClick={() => onLogs(undefined, true)}>失败请求</button>
-            </div>
+            </WorkbenchDisclosure>
           </header>
           {rankedModels.length ? <table className="overview-table overview-models">
             <thead><tr><th scope="col">模型</th><th scope="col">Token</th><th scope="col">估算消费</th><th scope="col" title="占已估价消费的比例">占比</th></tr></thead>
@@ -1533,7 +1533,7 @@ export default function Dashboard({
           theme={theme}
           onMenu={() => setMenu(true)}
           onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
-          onLocate={openLocator}
+          onLocate={view === "requests" ? undefined : openLocator}
           onGuide={() => setGuide(true)}
           identity={baseConnection.account ? baseConnection.session : undefined}
           account={!!baseConnection.account}
@@ -1946,6 +1946,7 @@ export default function Dashboard({
                 </div>
               </div>
               {canEditRoutes && <div className="channel-sort-preview-actions" ref={setSortPreviewActions} />}
+              {adjustingChannels && <p className="route-edit-scope">范围：{selectedSourceId ? sourceList.find(item => item.id === selectedSourceId)?.name || selectedSourceId : "按来源分别调整"} · {keyId ? "当前调用 Key" : "全局配置"}</p>}
               {adjustingChannels && <span id={routeHelpId} className="sr-only">在当前页的同一来源内拖动渠道。键盘可用上下方向键移动，Home 置顶。同一渠道的所有模型一起移动。</span>}
               {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","关联渠道"]]} />}
               {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="站点钱包">
@@ -1960,6 +1961,7 @@ export default function Dashboard({
                     <button type="button" className="button small" onClick={() => recoverWallet(entry.wallet)}>重新登录站点</button>}
                   {entry.wallet.provider_kind !== "openrouter" && <button type="button" className="button small" onClick={()=>setWalletDialog(id)}>充值设置与订单</button>}
                 </li>)}</ul>
+                {!!groupedWallets.size && <p className="wallet-count">共 {count(groupedWallets.size)} 个钱包</p>}
               </section> : null}
               <AnimatePresence>
                 {showTrend && channelView && !error && (
@@ -2010,7 +2012,7 @@ export default function Dashboard({
                         const upstreamGroup = fingerprints.groupRejections.get(providerId(row));
                         return (
                           <tr key={rowId(row)} data-route-row={!routeDisabled ? rowId(row) : undefined}
-                            data-route-alert={!row.eligible || !!upstreamGroup || undefined} data-source-name={row.source_name}>
+                            data-source-name={row.source_name}>
                             {routeView && <td className="rank mono">
                               {String(rowRanks.get(rowId(row))).padStart(
                                 2,
@@ -2092,8 +2094,7 @@ export default function Dashboard({
                         <th data-align="end">渠道利润参考</th>
                         </>}
                         <th data-align="end">站点余额</th>
-                        <th>状态</th>
-                        <th data-align="end">最近查询</th>
+                        <th className="balance-check">核验 / 查询</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2164,9 +2165,10 @@ export default function Dashboard({
                           <BalanceValue
                             balance={balance?.data}
                             loading={balanceLoading}
+                            placeholder
                           />
                         </td>
-                        <td rowSpan={modelRanks.length}>
+                        <td rowSpan={modelRanks.length} className="balance-check">
                           {balanceIsLow(balance?.data) ? (
                             <span className="status-pill cooling">余额不足</span>
                           ) : balanceLoading || balance?.isPending ? (
@@ -2178,10 +2180,8 @@ export default function Dashboard({
                           ) : (
                             <span className="muted">未核验</span>
                           )}
-                        </td>
-                        <td rowSpan={modelRanks.length} className="muted" data-align="end">
-                          {newest ? <>{newest !== oldest && <small>最早 {dateTime(oldest)}<br /></small>}{dateTime(newest)}
-                            {(balance?.data.length ?? 0) > 1 && <><br /><small>{checkedWallets.length} / {balance?.data.length} 个账号</small></>}</> : "暂无"}
+                          <small className="balance-check-time">{newest ? <>{newest !== oldest && <small>最早 {dateTime(oldest)}<br /></small>}{dateTime(newest)}
+                            {(balance?.data.length ?? 0) > 1 && <><br /><small>{checkedWallets.length} / {balance?.data.length} 个账号</small></>}</> : "暂无"}</small>
                         </td>
                         </>}
                       </tr>)}</Fragment>
@@ -2191,19 +2191,15 @@ export default function Dashboard({
                   </table>
                 </div>
               ) : null}
-              <div className="table-footer">
+              <div className="balance-progress-slot" role="status">
+                {pendingBalances > 0 && <span><Spinner small /> 余额查询 {balanceQueries.length - pendingBalances}/{balanceQueries.length}</span>}
+              </div>
+              {!(view === "balances" && balanceView === "wallets") && <div className="table-footer">
                 <span>
                   {error
                     ? "数据不可用"
                     : `${count(total)} ${channelView && !model ? "条渠道 / 模型" : "个渠道"}`}
                   {!error && balanceCatalog.length > 0 && <span className="balance-coverage">余额已核验 {knownBalances}/{balanceCatalog.length}{knownBalances > 0 ? ` · 不足 ${lowCount}` : ""}</span>}
-                  {pendingBalances > 0 && (
-                    <span className="footer-pending">
-                      <Spinner small />
-                      余额查询 {balanceQueries.length - pendingBalances}/
-                      {balanceQueries.length}
-                    </span>
-                  )}
                 </span>
                 <div className="pagination">
                   <button type="button" className="icon-button" aria-label="刷新数据" title="刷新数据" disabled={refreshBusy} onClick={reload}>
@@ -2230,7 +2226,7 @@ export default function Dashboard({
                     <ChevronRight size={16} />
                   </button>
                 </div>
-              </div>
+              </div>}
             </section>
           ) : null}
         </Suspense></PageBoundary></main>

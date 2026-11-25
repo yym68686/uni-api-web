@@ -21,10 +21,10 @@
     "@radix-ui/react-dialog": "1.1.23",
     "@radix-ui/react-tooltip": "1.2.16",
     "@tanstack/react-query": "5.102.8",
-    "lucide-react": "1.46.0",
     "motion": "13.2.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "reicon-react": "1.2.6",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

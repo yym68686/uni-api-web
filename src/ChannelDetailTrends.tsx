@@ -118,6 +118,8 @@ function Curve({
         <p className="detail-curve-empty muted">
           {empty || `当前范围暂无${title}样本。`}
         </p>
+      ) : !points.length ? (
+        <p className="muted">当前范围暂无首字延迟样本。</p>
       ) : (
         <>
           <svg

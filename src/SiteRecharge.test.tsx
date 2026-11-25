@@ -142,7 +142,9 @@ it("requires exact quote confirmation and never automatically retries an unknown
   await user.click(
     screen.getByRole("button", { name: /获取实时含手续费报价/ }),
   );
-  expect(await screen.findByText("实付 ¥1.03，含手续费 ¥0.03")).toBeVisible();
+  expect(await screen.findByText("¥1.03", { exact: true })).toBeVisible();
+  expect(screen.getByText("¥0.03", { exact: true })).toBeVisible();
+  expect(screen.getByText(quote.target, { exact: true })).toBeVisible();
   const pay = screen.getByRole("button", { name: "确认支付 ¥1.03 并自动兑换" });
   expect(pay).toBeDisabled();
   expect(writes).toHaveLength(1);

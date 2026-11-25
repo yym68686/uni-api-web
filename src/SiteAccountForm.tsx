@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Globe2 } from "lucide-react";
+import { Globe2 } from "./icons";
 import { controlRequest } from "./api";
 import { CompactDialogHeader } from "./CompactDialog";
 import { browserHelperAvailable, loginWithBrowser } from "./sub2apiBrowser";

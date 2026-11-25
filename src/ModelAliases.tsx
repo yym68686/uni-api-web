@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "./icons";
 import type { ReactNode } from "react";
 
 export interface ModelAlias {
@@ -66,7 +66,7 @@ export function ModelAliases({
       {aliases.map((alias, index) => (
         <div className="model-alias-row" key={index}>
           <label>
-            原来的名字
+            上游模型
             <select
               aria-label={`重命名 ${index + 1} 上游模型`}
               disabled={disabled}
@@ -84,9 +84,8 @@ export function ModelAliases({
               ))}
             </select>
           </label>
-          <span aria-hidden="true">→</span>
           <label>
-            重命名后的名字
+            对外模型名
             <input
               aria-label={`重命名 ${index + 1} 对外模型名`}
               disabled={disabled || (!!canSelect && !canSelect(alias.upstream))}

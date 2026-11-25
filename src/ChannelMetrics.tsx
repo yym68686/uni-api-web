@@ -3,7 +3,7 @@ import { channelLatency, channelLatencyKind } from "./channelLatency";
 import { FailureCounts } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
-import { CircleHelp, Info } from "lucide-react";
+import { CircleHelp, Info } from "./icons";
 import type { Channel, Distribution, SiteWallet, Stats } from "./types";
 import type { SiteBalanceResult } from "./ChannelAccountBalances";
 import { Tip } from "./ui";
@@ -38,7 +38,7 @@ export function WalletAmount({ wallet, inlineDetails = false }: { wallet: SiteWa
     {wallet.status === "error" && !inlineDetails ? <>
       {!known && <span className="muted">—</span>}
       <Tip text={<>{walletStatusLabel(wallet)}{wallet.checked_at ? <><br />查询于 {dateTime(wallet.checked_at)}</> : null}</>}>
-        <Info className="wallet-status-info" size={13} role="img" aria-label="余额更新详情" />
+        <span className="wallet-status-detail"><Info className="wallet-status-info" aria-label="余额更新详情" />{known ? "上次余额" : "更新失败"}</span>
       </Tip>
     </> : (wallet.status !== "ok" || !known) && <small className="muted"> {walletStatusLabel(wallet)}</small>}
   </>;
@@ -47,15 +47,17 @@ export function BalanceValue({
   balance,
   loading,
   detail = false,
+  placeholder = false,
 }: {
   balance?: SiteWallet[];
   loading?: boolean;
   detail?: boolean;
+  placeholder?: boolean;
 }) {
   if (!balance?.length) {
     return loading
       ? <LoadingIndicator size="inline" label="查询余额" />
-      : <span className="muted">站点账号未核验</span>;
+      : <span className="muted">{placeholder ? "—" : "站点账号未核验"}</span>;
   }
   if (!detail && balance.length > 1) {
     return <Tip text={<div className="table-diagnostic-tip">
@@ -143,7 +145,7 @@ export function ChannelFirstResponse({ stats, showP95 = false }: { stats?: Stats
       {samples > 0 ? <>
         <LatencyBadge value={value?.p50_ms} />
         {showP95 && <span className="muted mono">{ms(value?.p95_ms)}</span>}
-        <small className="muted">{count(samples)} 次样本{kind === "text" ? " · 正文" : ""}</small>
+        {kind === "text" && <small className="muted">正文</small>}
       </> : <span className="muted">
         {!value ? "未记录" : stats?.success === 0 ? "无成功样本" : "无首字样本"}
       </span>}
@@ -274,7 +276,6 @@ export function ChannelMetricCells({
       case "success": {
         const measured = row.stats?.success_rate;
         const success = measured != null && measured >= 0 && measured <= 1 ? measured : null;
-        const tone = success == null ? undefined : success >= 0.95 ? "healthy" : success >= 0.8 ? "warning" : "critical";
         return <td className="column-run column-success">
         <Tip keyboard={false} text={<FailureCounts channels={[row]} summary />}>
           <div className="success-cell">
@@ -284,9 +285,6 @@ export function ChannelMetricCells({
               {success == null ? <span className="observation-no-sample">{row.history_configured === false ? "未接入" : stale ? "未同步" : metricsUnavailable ? "未取得" : "无样本"}</span> : rate(success)}
             </span>
             {!!row.stats?.success_rate_denominator && <small>{count(row.stats.success || 0)}/{count(row.stats.success_rate_denominator)}</small>}
-            {success != null && <span className="rate-track" data-tone={tone} aria-hidden="true">
-              <span style={{ width: `${success * 100}%` }} />
-            </span>}
           </div>
         </Tip>
       </td>;
@@ -352,6 +350,7 @@ export function ChannelMetricCells({
         <BalanceValue
           balance={balance?.data}
           loading={balanceLoading || balance?.isPending}
+          placeholder={compact}
         />
       </td>;
       default: return renderDetection?.(id);

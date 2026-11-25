@@ -72,6 +72,7 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   await user.type(screen.getByLabelText("任务名称"), "调序");
   await screen.findByRole("option", { name: /Key 1/ });
   await user.selectOptions(screen.getByLabelText("API key"), "key-fixture");
+  await user.click(screen.getByText("高级参数", { selector: "summary" }));
   await user.clear(screen.getByLabelText("成功率最小样本"));
   await user.type(screen.getByLabelText("成功率最小样本"), "120");
   await user.click(screen.getByRole("checkbox", { name: "缓存率" }));
@@ -80,7 +81,7 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   );
   expect(screen.getByLabelText("启用任务")).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "保存任务" }));
-  await screen.findByRole("button", {name: "编辑 调序"});
+  await screen.findByRole("button", {name: /^调序\s*主来源/});
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   const post = requests.find((r) => r.init?.method === "POST");
   const body = JSON.parse(String(post?.init?.body));
@@ -107,6 +108,7 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   await user.click(screen.getByRole("button", { name: /^调序\s*主来源/ }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", {name:"任务"}));
+  await user.click(screen.getByText("更多", { selector: "summary" }));
   await user.click(screen.getByRole("button", { name: "编辑 调序" }));
   expect(
     screen.getByRole("dialog", { name: "编辑自动化任务" }),
@@ -188,6 +190,7 @@ it("pauses only the selected task and keeps another task's editor open after the
   await user.click(await screen.findByRole("button", {name: "暂停 Alpha"}));
   expect(screen.getByRole("button", {name: "暂停 Alpha"})).toBeDisabled();
   expect(screen.getByRole("button", {name: "暂停 Beta"})).toBeEnabled();
+  await user.click(screen.getByText("更多", { selector: "summary[title=Beta]" }));
   expect(screen.getByRole("button", {name: "运行已保存的任务 Beta"})).toBeEnabled();
   await user.click(screen.getByRole("button", {name: "编辑 Beta"}));
   await user.type(screen.getByLabelText("任务名称"), " changed");

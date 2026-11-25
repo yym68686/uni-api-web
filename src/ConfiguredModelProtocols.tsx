@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { controlRequest } from "./api";
 import { configuredChannelProtocols } from "./channelProtocol";
-import { ScanLine } from "lucide-react";
+import { ScanLine } from "./icons";
 import { Spinner } from "./ui";
 
 export function ConfiguredModelProtocols({ source, revision, scope, models, saved, choices, suggested, onChange, disabled, onDetecting, render }: {

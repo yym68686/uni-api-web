@@ -1,5 +1,5 @@
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
-import { Check, CircleHelp, X } from "lucide-react";
+import { Check, CircleHelp, X } from "./icons";
 import { Tip, Spinner } from "./ui";
 import { time } from "./format";
 import type { Probe, SubTarget } from "./Sub2apiChecks";

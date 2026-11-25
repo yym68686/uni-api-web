@@ -12,7 +12,7 @@ import {
   Save,
   Trash2,
   X,
-} from "lucide-react";
+} from "./icons";
 import { controlRequest } from "./api";
 import type { ConsoleSource } from "./SourceSettings";
 import { Spinner } from "./ui";
@@ -178,7 +178,7 @@ const number = (value: string) =>
 const time = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
 
-import { WorkbenchNotice, WorkbenchTabs } from "./Workbench";
+import { WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
 
 export function Automation({
   sources,
@@ -485,7 +485,6 @@ export function Automation({
           <div className="data-title">
             <Bot size={19} />
             <h2>自动化</h2>
-            <span className="count-badge">{tasks.length}</span>
             <WorkbenchNotice label="执行状态" messages={[runNotice]} />
             <WorkbenchNotice urgent label="自动化操作失败" messages={[!draft && error]} />
           </div>
@@ -494,15 +493,14 @@ export function Automation({
               <RefreshCw size={15} className={(section === "tasks" ? loading : auditLoading) ? "spin" : ""} />
               刷新数据
             </button>
-            <button className="button small" onClick={newTask}>
-              <Plus size={15} />
-              新建任务
-            </button>
           </div>
         </div>
       </div>
       <WorkbenchTabs label="自动化视图" value={section} onChange={value => {setSection(value);if (value === "history") setSelected("");}}
         tabs={[["tasks","任务"],["history","执行记录"]]} />
+      <div className="automation-create-row" data-empty={section === "tasks" && !tasks.length || undefined}>
+        <button className={`button small ${section === "tasks" && !tasks.length ? "primary" : ""}`} onClick={newTask}><Plus />新建任务</button>
+      </div>
       <div className="data-panel automation-list" hidden={section !== "tasks"}>
         {loading && !tasks.length && <TaskLoading />}
         {tasks.map((t) => (
@@ -528,12 +526,6 @@ export function Automation({
               <span className={`automation-state ${t.enabled ? "on" : ""}`}>
                 {t.enabled ? "已启用" : "已暂停"}
               </span>
-              <button className="button small" aria-label={`编辑 ${t.name}`} onClick={() => edit(t)} disabled={taskActions.has(t.id)}>
-                <Pencil size={14} /> 编辑
-              </button>
-              {t.enabled && <button className="button small" aria-label={`运行已保存的任务 ${t.name}`} aria-busy={taskActions.has(t.id)} disabled={taskActions.has(t.id)} onClick={() => void run(t)}>
-                {taskActions.has(t.id) ? <Spinner small /> : <Play size={14}/>} 运行已保存版本
-              </button>}
               <button
                 disabled={taskActions.has(t.id)}
                 className="icon-button"
@@ -542,20 +534,29 @@ export function Automation({
               >
                 {t.enabled ? <Pause size={15} /> : <Play size={15} />}
               </button>
+              <WorkbenchDisclosure label="更多" className="automation-task-actions" title={t.name}>
+              <button className="button small" aria-label={`编辑 ${t.name}`} onClick={event => {
+                const menu = event.currentTarget.closest("details");
+                if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
+                edit(t);
+              }} disabled={taskActions.has(t.id)}>
+                <Pencil size={14} /> 编辑
+              </button>
+              {t.enabled && <button className="button small" aria-label={`运行已保存的任务 ${t.name}`} aria-busy={taskActions.has(t.id)} disabled={taskActions.has(t.id)} onClick={() => void run(t)}>
+                {taskActions.has(t.id) ? <Spinner small /> : <Play size={14}/>} 运行已保存版本
+              </button>}
               <button
-                className="icon-button"
+                className="button small automation-delete"
                 disabled={taskActions.has(t.id)}
                 aria-label={`删除 ${t.name}`}
                 onClick={() => void remove(t)}
               >
-                <Trash2 size={15} />
+                <Trash2 size={15} />删除
               </button>
+              </WorkbenchDisclosure>
             </div>
           </article>
         ))}
-        {!tasks.length && !loading && (
-          <p className="muted">还没有自动化任务。</p>
-        )}
       </div>
       <Dialog.Root
         open={!!draft}
@@ -756,6 +757,7 @@ export function Automation({
                         </label>
                       ))}
                     </div>
+                    <details className="automation-advanced"><summary>高级参数</summary>
                     <h4>样本与置信度</h4>
                     <div className="automation-form automation-grid">
                       {numeric([
@@ -860,6 +862,7 @@ export function Automation({
                           ],
                         ])}
                       </div>
+                    </details>
                     </details>
                     <h4>确认与执行</h4>
                     <div className="automation-form automation-grid">
@@ -1074,6 +1077,7 @@ export function Automation({
                   </table>
                 </div>
                 {detail.metrics?.channels && (
+                  <details className="data-disclosure"><summary>指标与置信区间</summary>
                   <div className="automation-table-scroll">
                     <table>
                       <thead>
@@ -1142,13 +1146,14 @@ export function Automation({
                         )}
                       </tbody>
                     </table>
-                  </div>
+                  </div></details>
                 )}
+                {!!detail.metrics?.comparisons?.length && <details className="data-disclosure"><summary>比较依据</summary>
                 {detail.metrics?.comparisons?.map((reason, i) => (
                   <p className="field-note" key={i}>
                     {reason}
                   </p>
-                ))}
+                ))}</details>}
                 <details className="data-disclosure">
                   <summary>本次执行策略</summary>
                   <div className="automation-table-scroll">
