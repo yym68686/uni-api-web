@@ -341,9 +341,9 @@ it.each([false, true])(
     expect(within(row as HTMLElement).getAllByRole("combobox")[0]).toHaveValue(
       "codex-auto-review",
     );
-    expect(row.textContent?.indexOf("原来的名字")).toBeLessThan(
-      row.textContent?.indexOf("重命名后的名字")!,
-    );
+    const upstream = screen.getByLabelText("重命名 1 上游模型");
+    const alias = screen.getByLabelText("重命名 1 对外模型名");
+    expect(upstream.compareDocumentPosition(alias) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "添加到渠道" }));
     await screen.findByRole("status");
     expect(writes).toEqual([

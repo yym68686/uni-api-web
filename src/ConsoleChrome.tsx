@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   Bot, Gauge, ListTree, Menu, Moon, Network, Route, Search,
@@ -58,7 +58,7 @@ export function ConsoleNavigation({ view, account, onSelect }: {
   );
 }
 
-export function ConsoleHeader({ theme, onMenu, onTheme, onConnection, onDisconnect, identity, account, onLocate, onGuide }: {
+export function ConsoleHeader({ view, theme, onMenu, onTheme, onConnection, onDisconnect, identity, account, onLocate, onGuide }: {
   view: View;
   theme: Theme;
   onMenu?: () => void;
@@ -70,6 +70,18 @@ export function ConsoleHeader({ theme, onMenu, onTheme, onConnection, onDisconne
   onLocate?: () => void;
   onGuide?: () => void;
 }) {
+  const accountMenu = useRef<HTMLDetailsElement>(null);
+  const accountTrigger = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const menu = accountMenu.current;
+    if (!menu) return;
+    menu.open = false;
+    const dismiss = (event: PointerEvent) => {
+      if (menu.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [view, !!onConnection]);
   return (
     <header className="topbar observatory-topbar">
       <div className="observatory-context">
@@ -81,8 +93,14 @@ export function ConsoleHeader({ theme, onMenu, onTheme, onConnection, onDisconne
         {onLocate && <button type="button" className="locate-trigger" onClick={onLocate} aria-keyshortcuts="Meta+K Control+K">
           <Search size={15} aria-hidden="true" />定位<kbd>{/Mac|iPhone|iPad/i.test(navigator.platform) ? "⌘K" : "Ctrl K"}</kbd>
         </button>}
-        {onConnection && <details className="account-menu">
-          <summary aria-label={account ? `当前账号 ${identity}` : "管理服务连接"}>
+        {onConnection && <details className="account-menu" ref={accountMenu} onKeyDown={event => {
+          if (event.key !== "Escape" || !event.currentTarget.open) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.open = false;
+          accountTrigger.current?.focus();
+        }}>
+          <summary ref={accountTrigger} aria-label={account ? `当前账号 ${identity}` : "管理服务连接"}>
             <span className="avatar" aria-hidden="true">{identity?.trim().slice(0, 1).toUpperCase() || "↔"}</span>
           </summary>
           <div className="account-menu-panel">
@@ -91,14 +109,18 @@ export function ConsoleHeader({ theme, onMenu, onTheme, onConnection, onDisconne
               event.currentTarget.closest("details")?.removeAttribute("open");
               onConnection();
             }}>{account ? "设置来源" : "切换连接"}</button>
-            <button type="button" className="button ghost" onClick={onTheme}>
+            <button type="button" className="button ghost" onClick={() => {
+              onTheme?.();
+              if (accountMenu.current) accountMenu.current.open = false;
+              accountTrigger.current?.focus();
+            }}>
               {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}{theme === "dark" ? "浅色模式" : "深色模式"}
             </button>
             {onGuide && <button type="button" className="button ghost" onClick={event => {
               event.currentTarget.closest("details")?.removeAttribute("open");
               onGuide();
             }}>指标定义</button>}
-            <button type="button" className="button ghost" onClick={onDisconnect}>{account ? "退出登录" : "断开连接"}</button>
+            <button type="button" className="button ghost account-exit" onClick={onDisconnect}>{account ? "退出登录" : "断开连接"}</button>
           </div>
         </details>}
       </div>

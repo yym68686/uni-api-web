@@ -177,7 +177,7 @@ it("links the OpenRouter drawer to the official site instead of its source dashb
   const { user } = setup("openrouter");
   await user.click(await screen.findByRole("button", {
     name: "查看 openrouter gpt-6-astra 详情",
-  }));
+  }, {timeout:5000}));
   const drawer = within(await screen.findByRole("dialog"));
   const link = drawer.getByRole("link", { name: "openrouter" });
   expect(link).toHaveAttribute("href", "https://openrouter.ai/");

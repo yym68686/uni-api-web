@@ -85,7 +85,7 @@
   color:var(--ink);background:transparent;
 }
 .sidebar .observatory-nav,.mobile-sidebar .observatory-nav {
-  display:flex;flex-direction:column;flex:1;min-height:0;gap:19px;overflow-y:auto;
+  display:flex;flex-direction:column;flex:1;min-height:0;gap:20px;overflow-y:auto;
 }
 .observatory-nav-group,.observatory-nav-end {display:grid;gap:3px}
 .observatory-nav-group > span {
@@ -101,7 +101,7 @@
 .mobile-sidebar:has(.observatory-nav) {background:var(--sidebar);color:var(--ink)}
 .mobile-sidebar:has(.observatory-nav) .mobile-menu-close {color:var(--muted)}
 .mobile-sidebar .observatory-rail-brand {padding-left:0;margin-bottom:15px}
-.app-shell .observatory-topbar {position:sticky;top:0;z-index:30;height:var(--chrome-height);padding:0 25px;gap:10px}
+.app-shell .observatory-topbar {position:sticky;top:0;z-index:30;height:var(--chrome-height);padding:0 28px;gap:12px}
 .observatory-context,.observatory-environment {display:flex;align-items:center;gap:8px}
 .observatory-environment {font-size:12px;color:var(--muted)}
 .observatory-environment .tiny-dot {width:6px;height:6px;color:var(--green)}
@@ -120,7 +120,7 @@
 }
 .observatory-locator {
   max-width:min(32rem, calc(100vw - 24px));max-height:min(76dvh, 36rem);
-  overflow:auto;padding:16px;border-radius:9px;
+  overflow:auto;padding:16px;border-radius:24px;
 }
 .locator-heading {display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .locator-heading h2 {font-size:17px}
@@ -161,7 +161,7 @@
 .management-filters .table-column-options-inline {max-height: min(39dvh, 21rem);overflow:auto;overscroll-behavior:contain}
 .workspace .management-toolbar {
   display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
-  gap:8px 12px;padding:10px 0;min-width:0;
+  gap:8px 12px;padding:12px 0;min-width:0;
 }
 .management-query,.management-actions {
   display:flex;align-items:center;gap:6px;min-width:0;max-width:100%;
@@ -239,7 +239,7 @@
 .workspace .balance-table:not([data-details]) .channel-link {padding:0}
 .workspace .data-panel.channel-browser {background:transparent;border:0;overflow:visible}
 .workspace :is(.channel-browser,.request-logs-panel,.prices-panel,.sources-settings,.automation-intro) > .data-heading {
-  padding:9px 0 15px;gap:10px;
+  padding:12px 0 16px;gap:12px;
 }
 .workspace .data-heading h2 {
   font-size:18px;line-height:1.4;letter-spacing:-.02em;font-weight:700;
@@ -386,7 +386,6 @@
 .workspace .channel-browser .table-scroll {overscroll-behavior-inline:contain}
 .workspace .observation-table[data-columns="run"] {min-width:100%;table-layout:fixed}
 .workspace .observation-table .channel-identity {width:clamp(9rem,21vw,17rem);min-width:8.5rem;max-width:17rem}
-.workspace .observation-table[data-editing] .channel-identity {width:clamp(12rem,23vw,19rem);min-width:12rem;max-width:19rem}
 .workspace .observation-table[data-compact] .channel-identity {width:43%}
 .workspace .observation-table[data-compact] .observation-status {width:23%}
 .workspace .observation-table[data-compact] :is(th,td):not(.channel-identity) {white-space:normal}

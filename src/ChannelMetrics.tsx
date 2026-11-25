@@ -144,7 +144,7 @@ export function ChannelFirstResponse({ stats, showP95 = false }: { stats?: Stats
     <span className="dual-metric">
       {samples > 0 ? <>
         <LatencyBadge value={value?.p50_ms} />
-        {showP95 && <span className="muted mono">{ms(value?.p95_ms)}</span>}
+        {showP95 && <span className="muted mono" aria-label={`p95 ${ms(value?.p95_ms)}`}>{ms(value?.p95_ms)}</span>}
         {kind === "text" && <small className="muted">正文</small>}
       </> : <span className="muted">
         {!value ? "未记录" : stats?.success === 0 ? "无成功样本" : "无首字样本"}
@@ -347,11 +347,11 @@ export function ChannelMetricCells({
       </td>;
       }
       case "balance": return <td className="column-balance">
+        {compact && !balance?.data?.length && !balanceLoading && !balance?.isPending ? <span className="muted">未核验</span> :
         <BalanceValue
           balance={balance?.data}
           loading={balanceLoading || balance?.isPending}
-          placeholder={compact}
-        />
+        />}
       </td>;
       default: return renderDetection?.(id);
     }

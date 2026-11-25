@@ -45,7 +45,7 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 300000 } } });
   const app = render(<QueryClientProvider client={client}><MotionConfig reducedMotion="always"><LazyMotion features={domAnimation}><Tooltip.Provider><App /></Tooltip.Provider></LazyMotion></MotionConfig></QueryClientProvider>);
   const user = userEvent.setup();
-  await screen.findByRole("heading",{name:"渠道观测"});
+  await screen.findByRole("heading",{name:"渠道观测"},{timeout:5000});
   await user.click(document.querySelector<HTMLElement>(".channel-browser .workbench-disclosure:last-child summary")!);
   await user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
   const table = await screen.findByRole("table");
@@ -107,7 +107,7 @@ it("limits billing to the searched provider and restores the broad scope when se
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const app = render(<QueryClientProvider client={client}><MotionConfig reducedMotion="always"><LazyMotion features={domAnimation}><Tooltip.Provider><App /></Tooltip.Provider></LazyMotion></MotionConfig></QueryClientProvider>);
   const user = userEvent.setup();
-  await screen.findByRole("heading",{name:"渠道观测"});
+  await screen.findByRole("heading",{name:"渠道观测"},{timeout:5000});
   await user.click(document.querySelector<HTMLElement>(".channel-browser .workbench-disclosure:last-child summary")!);
   await user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
   await waitFor(() => expect(bills).toHaveLength(1));

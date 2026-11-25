@@ -2,9 +2,29 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { useState } from "react";
-import { ConsoleLocator } from "./ConsoleChrome";
+import { ConsoleHeader, ConsoleLocator } from "./ConsoleChrome";
 import { emptyStats } from "./analytics";
 import type { Channel } from "./types";
+
+it("dismisses the account menu without losing the keyboard trigger", async () => {
+  const switchTheme = vi.fn();
+  render(<><ConsoleHeader view="overview" theme="light" account identity="audit"
+    onConnection={() => {}} onTheme={switchTheme} /><button>其他操作</button></>);
+  const user = userEvent.setup();
+  const trigger = screen.getByLabelText("当前账号 audit");
+  await user.click(trigger);
+  await user.tab();
+  await user.keyboard("{Escape}");
+  expect(trigger).toHaveFocus();
+  expect(trigger.closest("details")).not.toHaveAttribute("open");
+  await user.click(trigger);
+  await user.click(screen.getByRole("button", { name: "其他操作" }));
+  expect(trigger.closest("details")).not.toHaveAttribute("open");
+  await user.click(trigger);
+  await user.click(screen.getByRole("button", { name: "深色模式" }));
+  expect(switchTheme).toHaveBeenCalledOnce();
+  expect(trigger).toHaveFocus();
+});
 
 it("locates results by keyboard without showing duplicate channels or unauthorized pages", async () => {
   const channel = { provider:"fixture-provider", model:"fixture-model", eligible:true, stats:emptyStats() } as Channel;

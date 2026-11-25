@@ -122,7 +122,8 @@ it("shows actual HTTP, a legacy conflict, and expandable skips without inflating
   expect(screen.getByText("实际发送")).toBeVisible();
   expect(
     view.container.querySelector(".trace-run-heading .trace-status"),
-  ).toHaveTextContent("HTTP 401");
+  ).toHaveTextContent("HTTP 400");
+  expect(screen.getByText(/响应头 HTTP 401/)).toBeVisible();
   expect(screen.getByText(/网关最终 HTTP 400/)).toBeVisible();
   await user.click(screen.getByText("发送前跳过 · 1 个候选"));
   const skipList = view.container.querySelector<HTMLElement>(
@@ -164,8 +165,9 @@ it("shows actual HTTP, a legacy conflict, and expandable skips without inflating
   const status = semanticView.container.querySelector<HTMLElement>(
     ".trace-run-heading .trace-status",
   );
-  expect(status).toHaveTextContent("HTTP 200");
+  expect(status).toHaveTextContent("判定 503");
   expect(status).not.toHaveTextContent("HTTP 503");
+  expect(screen.getByText(/终态记录的响应 HTTP 200/)).toBeVisible();
 });
 it("explains a skipped cache prefix and keeps its evidence in stage details", async () => {
   const skipped: TraceEvent = {

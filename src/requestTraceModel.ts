@@ -380,6 +380,7 @@ export function buildTrace(run: TraceRun) {
     skipped,
     unresolved,
     downstreamHTTP,
+    gatewayDecision: validHTTP(facts?.semantic_status),
     httpSource,
     statusConflict: !!(
       legacyHTTP &&

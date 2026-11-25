@@ -31,14 +31,11 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
-  Database,
   Clock3,
   Filter,
-  Gauge,
   GripVertical,
   KeyRound,
   Layers3,
-  Radio,
   RefreshCw,
   Search,
   Server,
@@ -232,37 +229,31 @@ function Overview({
       <MetricCard
         label="请求数量"
         value={countKnown(total?.requests)}
-        icon={<Activity size={17} />}
       />
       <MetricCard
         label="渠道尝试"
         value={countKnown(total?.attempts)}
         help="包含重试。"
-        icon={<Radio size={17} />}
       />
       <MetricCard
         label="Token 数量"
         value={tokenCount(total)}
         help={tokenLabel(total)}
-        icon={<Layers3 size={17} />}
       />
       <MetricCard
         label="估算消费"
         value={money(total?.estimated_cost_usd)}
         help="按当前模型价格估算。"
-        icon={<Wallet size={17} />}
       />
       <MetricCard
         label="渠道总并发"
         value={currentConcurrency == null ? "—" : count(currentConcurrency)}
         help={liveError ? "实时并发读取失败" : livePending ? "正在读取实时并发" : liveComplete ? "所列渠道的实时尝试，包含所有 API Key。" : `覆盖不完整 · 已知 ${knownLive.length} 项`}
-        icon={<Gauge size={17} />}
       />
       <MetricCard
         label="缓存率"
         value={rate(cacheRate)}
         help="缓存读取 / 输入 token"
-        icon={<Database size={17} />}
       />
       </section>
       <div className="overview-panels">
@@ -327,19 +318,17 @@ const reveal = {
 function MetricCard({
   label,
   value,
-  icon,
   help,
 }: {
   label: string;
   help?: ReactNode;
   value: string;
-  icon: ReactNode;
 }) {
   return (
     <div className="metric-card">
       <div className="metric-card-label">
         {label}
-        {help ? <Tip text={help}><span aria-label={`${label}说明`}>{icon}</span></Tip> : icon}
+        {help ? <Tip text={help}><span className="overview-metric-info" aria-label={`${label}说明`}><CircleHelp /></span></Tip> : null}
       </div>
       <div className="metric-card-number" title={value}>{value}</div>
     </div>
@@ -1497,8 +1486,16 @@ export default function Dashboard({
     </select>
     <ChevronDown size={13} aria-hidden="true" />
   </div>;
+  const currentRouteKey = keys.data?.data.find(key => key.key_id === keyId);
+  const routeKeyLabel = currentRouteKey ? `Key ${currentRouteKey.position} · ${currentRouteKey.prefix}` : keyId ? "所选调用 Key" : "全部调用 Key";
+  const routeScopeLabel = (source: string, rawKey: string, target: string) => {
+    const key = keys.data?.data.find(item => item.key_id === rawKey || item.key_id === `${source}::${rawKey}`);
+    return [sourceList.find(item => item.id === source)?.name || source, key ? `Key ${key.position} · ${key.prefix}` : rawKey ? "所选调用 Key" : "全部调用 Key", target || "全部模型"].join(" · ");
+  };
+  const pendingRouteScopes = [...controls.drafts.values()].map(({source, rule}) => routeScopeLabel(source, rule.api_key_id, rule.model));
+  const previousRanks = previewingSort ? new Map((routeView ? controls.arrange(rows, true) : rows).map((row, i) => [rowId(row), i + 1])) : undefined;
   const observationHeader = <>
-    {routeView && <th className="rank">#</th>}
+    {(routeView || previewingSort) && <th className="rank">{previewingSort ? "原 → 新" : "#"}</th>}
     <th className="channel-identity">渠道</th>
     {checkingChannels && <th className="observation-detection-actions">检测操作</th>}
     <ChannelMetricHeaders keySelected={!!keyId} channels={filtered} columns={visibleColumns} renderDetection={id => id === "quality"
@@ -1946,7 +1943,13 @@ export default function Dashboard({
                 </div>
               </div>
               {canEditRoutes && <div className="channel-sort-preview-actions" ref={setSortPreviewActions} />}
-              {adjustingChannels && <p className="route-edit-scope">范围：{selectedSourceId ? sourceList.find(item => item.id === selectedSourceId)?.name || selectedSourceId : "按来源分别调整"} · {keyId ? "当前调用 Key" : "全局配置"}</p>}
+              {adjustingChannels && <div className="route-edit-scope">
+                {pendingRouteScopes.length ? <details>
+                  <summary>草稿范围 · {pendingRouteScopes.length} 项</summary>
+                  <ul>{pendingRouteScopes.map(scope => <li key={scope}>{scope}</li>)}</ul>
+                </details> : <span>{selectedSourceId ? routeScopeLabel(selectedSourceId, currentRouteKey?.key_id.split("::").at(-1) || keyId, model) : `各来源独立 · ${routeKeyLabel} · ${model || "全部模型"}`}</span>}
+                <span>拖动仅调整本页顺位，应用保存各范围的完整顺序。</span>
+              </div>}
               {adjustingChannels && <span id={routeHelpId} className="sr-only">在当前页的同一来源内拖动渠道。键盘可用上下方向键移动，Home 置顶。同一渠道的所有模型一起移动。</span>}
               {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","关联渠道"]]} />}
               {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="站点钱包">
@@ -1997,7 +2000,7 @@ export default function Dashboard({
               ) : channelView ? (
                 <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道观测表">
                   <table className="channel-table observation-table" data-columns={observationLayout} data-compact={compactObservation || undefined}
-                    data-ranked={routeView || undefined} data-editing={adjustingChannels || undefined}
+                    data-ranked={routeView || previewingSort || undefined} data-preview={previewingSort || undefined} data-editing={adjustingChannels || undefined}
                     style={observationLayout === "custom" ? {minWidth: `max(100%, ${170 + 110 * visibleColumns.length}px)`} : undefined}>
                     <thead>
                       <tr>{observationHeader}</tr>
@@ -2013,11 +2016,9 @@ export default function Dashboard({
                         return (
                           <tr key={rowId(row)} data-route-row={!routeDisabled ? rowId(row) : undefined}
                             data-source-name={row.source_name}>
-                            {routeView && <td className="rank mono">
-                              {String(rowRanks.get(rowId(row))).padStart(
-                                2,
-                                "0",
-                              )}
+                            {(routeView || previewingSort) && <td className="rank mono">
+                              {previewingSort && <span className="rank-before">{previousRanks?.get(rowId(row)) ?? "—"} → </span>}
+                              {String(rowRanks.get(rowId(row))).padStart(2, "0")}
                             </td>}
                             <td className="channel-identity"><div className="channel-row-identity">
                               {control && <button type="button" className="icon-button route-grip" aria-label={`移动 ${routeLabel}`}

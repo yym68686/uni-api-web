@@ -33,7 +33,10 @@
 .automation-tolerance { margin:24px 0; }
 .automation-tolerance summary { cursor:pointer; }
 .automation-check { display:flex; align-items:center; gap:8px; margin:12px 0; }
-.automation-detail { width:min(1000px,calc(100vw - 32px)); max-width:1000px; max-height:85vh; overflow:auto; }
+.automation-detail { --dialog-width: min(60rem, calc(100vw - 24px)); }
+.automation-detail .audit-reason { overflow-wrap: anywhere; }
+.audit-actions { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: end; }
+.audit-action-feedback { inline-size: 100%; block-size: 44px; overflow: auto; overflow-wrap: anywhere; color: var(--muted); }
 .automation-table-scroll { overflow:auto; margin:16px 0; }
 .automation-table-scroll table { border-collapse:collapse; width:100%; font-size:13px; }
 .automation-table-scroll th,.automation-table-scroll td { padding:12px; text-align:left; border-bottom:1px solid var(--line); white-space:normal; overflow-wrap:anywhere; }
@@ -42,7 +45,7 @@
 .automation-form input[type="checkbox"] { width:auto; flex:0 0 auto; }
 .automation-page,.automation-audit,.automation-editor { min-width:0; }
 .automation-intro > .field-note { padding:0 20px 16px; margin:0; }
-.automation-detail .dialog-close { position:absolute; top:18px; right:18px; }
+
 .automation-metrics input[type="checkbox"],.automation-check input[type="checkbox"] { accent-color:var(--accent); }
 
 .automation-task-dialog { --dialog-width: 38rem; }

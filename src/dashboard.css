@@ -33,8 +33,11 @@
   min-width:0;min-height:80px;padding:12px 0;display:grid;align-content:center;gap:8px;
   border:0;background:none;box-shadow:none;
 }
-.workspace .overview-grid .metric-card-label {min-width:0;display:flex;align-items:center;justify-content:space-between;gap:4px;white-space:normal;font-size:14px;letter-spacing:0}
-.overview-grid .metric-card-label svg {width:14px;height:14px;flex:none}
+.workspace .overview-grid .metric-card-label {min-width:0;display:flex;align-items:center;gap:4px;white-space:normal;font-size:14px;letter-spacing:0}
+.overview-grid .overview-metric-info:where(:not(:focus-within)) {opacity:0}
+.overview-grid .metric-card:hover .overview-metric-info,
+.overview-grid .metric-card:focus-within .overview-metric-info {opacity:1}
+@media (hover:none) {.overview-grid .overview-metric-info:where(:not(:focus-within)) {opacity:1}}
 .workspace .overview-grid .metric-card-number {
   color:var(--ink);margin:0;font:600 18px/1.4 'Geist Variable',system-ui,sans-serif;
   min-width:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;

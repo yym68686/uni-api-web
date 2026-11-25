@@ -18,6 +18,7 @@ import {
   Check,
   ChevronDown,
   CircleHelp,
+  ArrowRight,
   Globe2,
   Plus,
   RefreshCw,
@@ -1635,7 +1636,19 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         {pending(a.state) && a.sync_phase && syncPhaseLabel[a.sync_phase] || (a.sync_only && pending(a.state) ? (a.state === "queued" ? "等待同步" : "同步中") : stateLabel[a.state] || a.state)}
                         {total > 0 && ` · ${completed}/${total} 个分组`}
                       </span>
-                      {accountMessage || a.progress || a.synced_at > 0 || pending(a.state) ? <Tip text={<div className="table-diagnostic-tip">
+                      <div className="sub-account-status-slot">
+                      {accountMessage || a.progress || a.synced_at > 0 || pending(a.state) ? <Dialog.Root>
+                        <Dialog.Trigger type="button" className="sub-account-message">
+                          {accountMessage && !pending(a.state) ? "查看状态"
+                            : preparingKeys && keyProgress ? keyProgress
+                            : a.progress && !a.sync_only ? `模型 ${a.progress.completed}/${a.progress.total}`
+                            : a.synced_at > 0 ? dateTime(a.synced_at) : "查看进度"}
+                        </Dialog.Trigger>
+                        <Dialog.Portal>
+                          <Dialog.Overlay className="dialog-overlay" />
+                          <Dialog.Content className="guide-dialog compact-dialog" aria-describedby={undefined}>
+                            <CompactDialogHeader context={a.name}>同步状态</CompactDialogHeader>
+                            <div className="compact-dialog-scroll account-diagnostic">
                         {a.sync_only && pending(a.state) && <div>仅同步信息，不执行检测</div>}
                         {pending(a.state) && keyProgress && <div>{keyProgress} 就绪{a.progress?.key_errors ? ` · ${a.progress.key_errors} 个不可用` : ""}</div>}
                         {pending(a.state) && !!a.sync_retry_at && <div>预计 {dateTime(a.sync_retry_at)} 重试</div>}
@@ -1645,10 +1658,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         {!a.sync_only && a.progress?.running_models.length ? <div>正在检测：{[...new Set(a.progress.running_models)].join("、")}</div> : null}
                         {a.synced_at > 0 && <div>上次同步 {dateTime(a.synced_at)}</div>}
                         {accountMessage && <div>{accountMessage}</div>}
-                      </div>}><small className="sub-account-message">{accountMessage && !pending(a.state) ? "查看状态"
-                        : preparingKeys && keyProgress ? keyProgress
-                        : a.progress && !a.sync_only ? `模型 ${a.progress.completed}/${a.progress.total}`
-                        : a.synced_at > 0 ? dateTime(a.synced_at) : "查看进度"}</small></Tip> : null}
+                            </div>
+                          </Dialog.Content>
+                        </Dialog.Portal>
+                      </Dialog.Root> : null}
+                      </div>
                     </div>
                     <div className="sub-account-actions">
 
@@ -2278,7 +2292,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             }
                           >
                             {checkBusy(account, t, "check", configured) ? <Spinner small /> : <ScanLine size={13} />}
-                            {model ? "检测此模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`}
+                            <span className="management-row-action-label">{model ? "检测此模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`}</span>
                           </button>
                           <button
                             className="button small"
@@ -2291,22 +2305,21 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                               })
                             }
                           >
-                            <Plus size={13} />
                             {(() => {
+                              let label: string;
                               if (configured) {
                                 const counts=configuredCount(configured);
-                                if (!counts) return "查看接入状态";
-                                return counts.count ? `已添加 · ${counts.partial ? "至少 " : ""}${counts.count} 个 key` : counts.partial ? "查看接入状态" : "添加到渠道";
-                              }
-                              if (imports.data?.data.some(i => i.kind === "configured" && boundGroups(i).some(g => g.account_id === account.id && g.group_id === t.group_id))) return "已配置 · 查看路由";
-                              const count =
-                                imports.data?.data.filter(
-                                  (i) =>
-                                    i.kind !== "configured" && i.account_id === account.id && i.group_id === t.group_id,
+                                label = !counts || (!counts.count && counts.partial) ? "查看接入状态" :
+                                  counts.count ? `已添加 · ${counts.partial ? "至少 " : ""}${counts.count} 个 key` : "添加到渠道";
+                              } else if (imports.data?.data.some(i => i.kind === "configured" && boundGroups(i).some(g => g.account_id === account.id && g.group_id === t.group_id))) {
+                                label = "已配置 · 查看路由";
+                              } else {
+                                const count = imports.data?.data.filter(i =>
+                                  i.kind !== "configured" && i.account_id === account.id && i.group_id === t.group_id,
                                 ).length || 0;
-                              return count
-                                ? `已添加 · ${count} 个 key`
-                                : "添加到渠道";
+                                label = count ? `已添加 · ${count} 个 key` : "添加到渠道";
+                              }
+                              return <>{label === "添加到渠道" ? <Plus /> : <ArrowRight />}<span className="management-row-action-label">{label}</span></>;
                             })()}
                           </button>
                           </div>

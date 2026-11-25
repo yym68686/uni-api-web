@@ -1549,9 +1549,12 @@ it.each(["success","conflict","unknown"])("closes the page-two import immediatel
  await user.click(within(otherDialog).getByRole("button",{name:"关闭添加渠道"}));
  if(outcome!=="success"){
   await act(async()=>finishPost(new Response("渠道状态已变化",{status:outcome==="conflict"?409:502})));
-  await screen.findByText(outcome==="conflict"?/添加失败：渠道状态已变化/:/添加结果未确认：渠道状态已变化/);
   expect(screen.queryByRole("dialog",{name:"添加到渠道"})).not.toBeInTheDocument();
   expect(otherAdd).toBeEnabled();
+  await user.click(await screen.findByRole("button",{name:"查看回执"},patience));
+  const receipt=within(screen.getByRole("dialog",{name:"渠道添加回执"}));
+  expect(receipt.getByText(outcome==="conflict"?/添加失败：渠道状态已变化/:/添加结果未确认：渠道状态已变化/)).toBeVisible();
+  expect(receipt.getByText(/操作编号/)).toBeVisible();
   if(outcome==="conflict"){
    await user.click(screen.getByRole("button",{name:"恢复添加配置"}));
    const restored=within(await screen.findByRole("dialog",{name:"添加到渠道"},patience));

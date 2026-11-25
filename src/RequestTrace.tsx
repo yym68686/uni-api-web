@@ -309,10 +309,12 @@ function Status({
   tone,
   label,
   status,
+  statusPrefix = "HTTP",
 }: {
   tone: TraceTone;
   label: string;
   status?: number;
+  statusPrefix?: string;
 }) {
   return (
     <span className={`trace-status ${tone}`}>
@@ -324,7 +326,7 @@ function Status({
         <Clock3 size={13} />
       )}{" "}
       {label}
-      {!!status && <span>HTTP {status}</span>}
+      {!!status && <span>{statusPrefix} {status}</span>}
     </span>
   );
 }
@@ -666,7 +668,9 @@ export function TraceTimeline({
                   : "请求记录"}
           </h3>
         </div>
-        <Status {...finalState} status={trace.downstreamHTTP || undefined} />
+        <Status {...finalState}
+          status={trace.gatewayDecision || (trace.statusConflict ? final?.status : trace.downstreamHTTP || undefined)}
+          statusPrefix={trace.gatewayDecision ? "判定" : "HTTP"} />
       </div>
       <div className="trace-summary">
         <div>
@@ -695,9 +699,13 @@ export function TraceTimeline({
           </strong>
         </div>
       </div>
-      {trace.statusConflict && (
-        <p className="trace-notice warning">
-          {headers?.status === trace.downstreamHTTP ? "响应头" : "观测响应"} HTTP {trace.downstreamHTTP}；网关最终 HTTP {final?.status}（请求汇总）。
+      {trace.gatewayDecision && trace.downstreamHTTP ? (
+        <p className="trace-notice">
+          {headers?.status === trace.downstreamHTTP ? "响应头" : trace.httpSource === "final_facts" ? "终态记录的响应" : "请求汇总"} HTTP {trace.downstreamHTTP} · 网关判定 {trace.gatewayDecision}
+        </p>
+      ) : trace.statusConflict && (
+        <p className="trace-notice">
+          {headers?.status === trace.downstreamHTTP ? "响应头" : "观测响应"} HTTP {trace.downstreamHTTP} · 网关最终 HTTP {final?.status}（请求汇总）
         </p>
       )}
       {trace.httpSource === "legacy" && (

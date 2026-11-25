@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Save,
   Trash2,
-  X,
 } from "./icons";
 import { controlRequest } from "./api";
 import type { ConsoleSource } from "./SourceSettings";
@@ -82,6 +81,8 @@ type Audit = {
   id: number;
   task_id: string;
   task_name: string;
+  source_id?: string;
+  model?: string;
   run_at: string;
   status: string;
   reason: string;
@@ -194,6 +195,8 @@ export function Automation({
     [auditLoading, setAuditLoading] = useState(true),
     auditScope = useRef<string>(""),
     [detail, setDetail] = useState<Audit | null>(null),
+    [auditError, setAuditError] = useState(""),
+    [auditBusy, setAuditBusy] = useState(false),
     [keys, setKeys] = useState<Key[]>([]),
     [loading, setLoading] = useState(true),
     [saving, setSaving] = useState(false),
@@ -440,41 +443,27 @@ export function Automation({
         />
       </label>
     ));
-  async function review(a: Audit) {
+  const auditActions: Record<string, [string, string, string]> = {
+    prepared: ["review", "核对当前配置并暂停任务", "核对失败"],
+    uncertain: ["review", "核对当前配置并暂停任务", "核对失败"],
+    suggested: ["apply", "按最新数据复核并应用", "建议应用失败"],
+    applied: ["rollback", "恢复此前顺序并暂停任务", "恢复失败"],
+  };
+  async function submitAuditAction(a: Audit) {
+    const action = auditActions[a.status];
+    if (!action || auditBusy) return;
+    if (action[0] === "rollback" &&
+      !confirm("恢复此次调整前的顺序并暂停任务？若配置已有变化，将取消恢复。")) return;
+    setAuditBusy(true);
+    setAuditError("");
     try {
-      await controlRequest(`/v1/automations/audit/${a.id}/review`, {
-        method: "POST",
-      });
+      await controlRequest(`/v1/automations/audit/${a.id}/${action[0]}`, { method: "POST" });
       setDetail(null);
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "核对失败");
-    }
-  }
-  async function approve(a: Audit) {
-    try {
-      await controlRequest(`/v1/automations/audit/${a.id}/apply`, {
-        method: "POST",
-      });
-      setDetail(null);
-      reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "建议应用失败");
-    }
-  }
-  async function rollback(a: Audit) {
-    if (
-      !confirm("恢复此次调整前的顺序并暂停任务？若配置已有变化，将取消恢复。")
-    )
-      return;
-    try {
-      await controlRequest(`/v1/automations/audit/${a.id}/rollback`, {
-        method: "POST",
-      });
-      setDetail(null);
-      reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "恢复失败");
+      setAuditError(e instanceof Error ? e.message : action[2]);
+    } finally {
+      setAuditBusy(false);
     }
   }
   const order = draft?.kind !== "quality";
@@ -972,7 +961,7 @@ export function Automation({
                     <span>{time(a.run_at)}</span>
                   </div>
                   <p title={a.reason}>{a.reason}</p>
-                  <button className="button small" onClick={() => setDetail(a)}>
+<button className="button small" onClick={() => { setAuditError(""); setDetail(a); }}>
                     查看详情
                   </button>
                 </article>
@@ -993,49 +982,22 @@ export function Automation({
       <Dialog.Root
         open={!!detail}
         onOpenChange={(open) => {
-          if (!open) setDetail(null);
+          if (!open && !auditBusy) setDetail(null);
         }}
       >
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="connection-dialog automation-detail">
-            <Dialog.Title>自动化运行详情</Dialog.Title>
-            <Dialog.Description>
-              {detail?.task_name} · {time(detail?.run_at)}
-            </Dialog.Description>
-            <Dialog.Close
-              className="icon-button dialog-close"
-              aria-label="关闭详情"
-            >
-              <X size={18} />
-            </Dialog.Close>
+          <Dialog.Content className="connection-dialog compact-dialog automation-detail"
+            onEscapeKeyDown={event => { if (auditBusy) event.preventDefault(); }}
+            onPointerDownOutside={event => { if (auditBusy) event.preventDefault(); }}>
+            <CompactDialogHeader context={detail && `${detail.task_name} · ${time(detail.run_at)}`} closeLabel="关闭详情" busy={auditBusy}>自动化运行详情</CompactDialogHeader>
             {detail && (
-              <>
-                <p>{detail.reason}</p>
-                {["prepared", "uncertain"].includes(detail.status) && (
-                  <button
-                    className="button"
-                    onClick={() => void review(detail)}
-                  >
-                    核对当前配置并暂停任务
-                  </button>
-                )}
-                {detail.status === "suggested" && (
-                  <button
-                    className="button"
-                    onClick={() => void approve(detail)}
-                  >
-                    按最新数据复核并应用
-                  </button>
-                )}
-                {detail.status === "applied" && (
-                  <button
-                    className="button"
-                    onClick={() => void rollback(detail)}
-                  >
-                    恢复此前顺序并暂停任务
-                  </button>
-                )}
+              <div className="compact-dialog-scroll">
+                <p className="audit-reason">{detail.reason}</p>
+                {(detail.source_id || detail.model) && <dl className="dialog-key-values">
+                  {detail.source_id && <><dt>来源</dt><dd>{sourceNames.get(detail.source_id) || detail.source_id}</dd></>}
+                  {detail.model && <><dt>模型</dt><dd>{detail.model}</dd></>}
+                </dl>}
                 <div className="automation-table-scroll">
                   <table>
                     <thead>
@@ -1175,8 +1137,15 @@ export function Automation({
                     </table>
                   </div>
                 </details>
-              </>
+              </div>
             )}
+            {detail && auditActions[detail.status] && <div className="compact-dialog-footer audit-actions">
+              <div className="audit-action-feedback" role="status">{auditError}</div>
+              <button className="button" disabled={auditBusy} aria-busy={auditBusy}
+                onClick={() => void submitAuditAction(detail)}>
+                {auditBusy ? "处理中…" : auditActions[detail.status][1]}
+              </button>
+            </div>}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

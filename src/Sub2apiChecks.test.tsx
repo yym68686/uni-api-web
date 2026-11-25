@@ -538,7 +538,8 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
   if (openrouter) {
     revision = "r2";
     await act(async () => resolveSave(new Response("配置版本已变化", {status:409})));
-    expect(await screen.findByText(/保存失败：配置版本已变化/)).toBeVisible();
+    await user.click(await screen.findByRole("button", {name:"查看回执"}));
+    expect(screen.getByText(/保存失败：配置版本已变化/)).toBeVisible();
     expect(screen.queryByRole("dialog",{name:"添加到渠道"})).not.toBeInTheDocument();
     await user.click(screen.getByRole("button",{name:"恢复编辑草稿"}));
     const recovered = within(screen.getByRole("dialog",{name:"添加到渠道"}));
@@ -723,11 +724,10 @@ it.each([
   await openSites();
   const row = await screen.findByRole("listitem", { name: account.name });
   expect(within(row).getByRole("status")).toHaveTextContent(label);
-  const summary = await within(row).findByText("测试密钥 7/29");
-  act(() => summary.parentElement?.focus());
-  const tooltip = await screen.findByRole("tooltip");
-  expect(tooltip).toHaveTextContent("模型进度：0/1254");
-  expect(tooltip).toHaveTextContent(/预计.*重试/);
+  await userEvent.click(await within(row).findByRole("button", { name: "测试密钥 7/29" }));
+  const detail = await screen.findByRole("dialog", { name: "同步状态" });
+  expect(detail).toHaveTextContent("模型进度：0/1254");
+  expect(detail).toHaveTextContent(/预计.*重试/);
 });
 
 it("shows upstream rejections and protocol skips separately from real interruptions", async () => {
@@ -742,9 +742,8 @@ it("shows upstream rejections and protocol skips separately from real interrupti
   mount("site-probe-outcomes");
   await openSites();
   const row = await screen.findByRole("listitem", { name: account.name });
-  const summary = await within(row).findByText("模型 614/722");
-  act(() => summary.parentElement?.focus());
-  expect(await screen.findByRole("tooltip")).toHaveTextContent("80 上游拒绝 · 15 已跳过 · 1 已中断");
+  await userEvent.click(await within(row).findByRole("button", { name: "模型 614/722" }));
+  expect(await screen.findByRole("dialog", { name: "同步状态" })).toHaveTextContent("80 上游拒绝 · 15 已跳过 · 1 已中断");
 
   const check = { model: "claude-fixture", state: "rejected", message: "HTTP 401：上游未通过测试密钥认证", result: account.targets[0].result };
   const forbidden = { ...check, message: "HTTP 403：上游拒绝访问，请检查分组或协议权限" };
@@ -2422,10 +2421,12 @@ it("explains missing legacy credentials and requires them once without submittin
   const user = userEvent.setup();
   mount();
   await openSites();
-  const accountStatus = (await screen.findByText("查看状态")).closest(".tip-target")!;
-  fireEvent.focus(accountStatus);
-  expect(await screen.findByRole("tooltip")).toHaveTextContent(/站点会话已失效，且尚未保存登录密码/);
-  fireEvent.blur(accountStatus);
+  const accountStatus = await screen.findByRole("button", { name: "查看状态" });
+  await user.click(accountStatus);
+  const diagnostic = await screen.findByRole("dialog", { name: "同步状态" });
+  expect(diagnostic).toHaveTextContent(/站点会话已失效，且尚未保存登录密码/);
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(accountStatus).toHaveFocus());
   await user.click(screen.getByRole("button", {name: "重新登录"}));
   const dialog = within(screen.getByRole("dialog"));
   expect(dialog.getByLabelText("账号密码")).toBeRequired();
