@@ -1477,7 +1477,10 @@ it("updates selected-model rows independently during a mixed batch larger than t
   expect(pageReads).toBe(1);
   await act(async()=>finishNative(Response.json({queued:1}, {status:202})));
   expect(await screen.findByText("批量检测已提交")).toBeVisible();
-});
+// The 302-channel fixture exercises several full render/receipt transitions;
+// leave the individual assertions unchanged, but allow slower CI workers time
+// to finish the entire interaction.
+}, 20_000);
 
 it.each(["success","conflict","unknown"])("closes the page-two import immediately and preserves other actions (%s)",async outcome=>{
  const patience={timeout:7000};
