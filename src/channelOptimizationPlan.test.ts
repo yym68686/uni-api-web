@@ -17,14 +17,65 @@ import {
 
 const events = optimizationEvents.map((e) => e.id);
 
+it("removes a confirmed fingerprint mismatch independently of the response model name", () => {
+  const snapshot = optimizationFixture();
+  const old = snapshot.accounts[0].targets[0].models![0];
+  expect(old.result?.availability.model_match).toBe("match");
+  const verdict = {
+    model: "old",
+    status: "mismatch",
+    probability: 0.1,
+    decision: "scored" as const,
+    prediction: "",
+    prediction_name: "",
+    expected_class: "",
+    checked_at: 100,
+    reference_commit: "",
+    candidates: [],
+    used_outputs: 3,
+  };
+  const record = {
+    account_id: "a",
+    group_id: 1,
+    model: "old",
+    revision: "site-rev",
+    state: "done",
+    message: "",
+    result: verdict,
+  };
+  snapshot.fingerprints = [record];
+  expect(buildOptimizationPlan(snapshot, ["match"]).changes).toEqual([]);
+  expect(
+    buildOptimizationPlan(snapshot, ["fingerprint"]).changes,
+  ).toMatchObject([
+    { model: "old", action: "remove", reasons: ["模型指纹不匹配"] },
+  ]);
+  snapshot.fingerprints = [
+    { ...record, state: "running", previous_result: verdict },
+  ];
+  expect(buildOptimizationPlan(snapshot, ["fingerprint"]).changes).toEqual([]);
+  snapshot.fingerprints = [
+    { ...record, result: { ...verdict, used_outputs: 2 } },
+  ];
+  expect(buildOptimizationPlan(snapshot, ["fingerprint"]).changes).toEqual([]);
+  snapshot.fingerprints = [{ ...record, group_id: 2 }];
+  expect(buildOptimizationPlan(snapshot, ["fingerprint"]).changes).toEqual([]);
+  snapshot.fingerprints = [record];
+  snapshot.fingerprintReference = "new-reference";
+  expect(buildOptimizationPlan(snapshot, ["fingerprint"]).changes).toEqual([]);
+});
 it("respects the billing discrepancy filter when proposing model additions", () => {
   const snapshot = optimizationFixture();
   const target = snapshot.accounts[0].targets[0];
-  target.billing = { rate: .3, source: "key", checked_at: 1 };
+  target.billing = { rate: 0.3, source: "key", checked_at: 1 };
   target.observed_rates = { new: { rate: 3, observed_at: 100 } };
   snapshot.filters.maxRate = "mismatch";
-  expect(buildOptimizationPlan(snapshot, ["add"]).changes.map(change => change.model)).toEqual(["new"]);
-  target.observed_rates.new.rate = .3;
+  expect(
+    buildOptimizationPlan(snapshot, ["add"]).changes.map(
+      (change) => change.model,
+    ),
+  ).toEqual(["new"]);
+  target.observed_rates.new.rate = 0.3;
   expect(buildOptimizationPlan(snapshot, ["add"]).changes).toEqual([]);
   target.observed_rates = {};
   expect(buildOptimizationPlan(snapshot, ["add"]).changes).toEqual([]);

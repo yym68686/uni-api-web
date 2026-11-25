@@ -10,62 +10,175 @@ import {
 
 it("keeps the toolbar unchanged on a long read error and retries from a dialog", async () => {
   const error = "数据读取超时。（请求编号：" + "x".repeat(200) + "）";
-  const snapshot = vi.fn().mockRejectedValueOnce(new Error(error)).mockResolvedValueOnce(optimizationFixture());
-  render(<QueryClientProvider client={new QueryClient()}>
-    <div data-testid="toolbar"><ChannelOptimization snapshot={snapshot} /></div>
-  </QueryClientProvider>);
+  const snapshot = vi
+    .fn()
+    .mockRejectedValueOnce(new Error(error))
+    .mockResolvedValueOnce(optimizationFixture());
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <div data-testid="toolbar">
+        <ChannelOptimization snapshot={snapshot} />
+      </div>
+    </QueryClientProvider>,
+  );
   const user = userEvent.setup();
   const toolbar = screen.getByTestId("toolbar");
   const button = screen.getByRole("button", { name: "优化渠道模型" });
   await user.click(button);
-  const failure = await screen.findByRole("dialog", { name: "优化预览读取失败" });
+  const failure = await screen.findByRole("dialog", {
+    name: "优化预览读取失败",
+  });
   expect(within(failure).getByRole("alert")).toHaveTextContent(error);
   expect(toolbar.children).toHaveLength(1);
   expect(toolbar.firstElementChild).toBe(button);
   expect(toolbar).toHaveTextContent(/^优化$/);
   await user.click(within(failure).getByRole("button", { name: "重新读取" }));
-  expect(await screen.findByRole("dialog", { name: "优化渠道模型" })).toBeVisible();
+  expect(
+    await screen.findByRole("dialog", { name: "优化渠道模型" }),
+  ).toBeVisible();
   expect(snapshot).toHaveBeenCalledTimes(2);
 });
 
-it("saves only the changed speed tier without running model optimization", async () => {
+it("offers all four speed-tier events and applies only chosen changes in the shared batch", async () => {
   const snapshot = optimizationFixture();
   const scope = "a".repeat(64);
+  const binding = "b".repeat(64);
+  const now = Math.floor(Date.now() / 1000);
+  snapshot.routes.s.optimize_extended = true;
   Object.assign(snapshot.imports.data[0], {
     service_tier_scope: scope,
-    service_tier_routing: {fast: "enabled", ultrafast: "enabled"},
+    models: ["gpt-old"],
+    service_tier_routing: { fast: "enabled", ultrafast: "disabled_verified" },
   });
+  snapshot.routes.s.data[0].model = snapshot.routes.s.data[0].upstream_model =
+    "gpt-old";
+  snapshot.accounts[0].targets[0].models![0] = modelCheck("gpt-old");
+  snapshot.checks = [
+    { kind: "fast", status: "not_honored" },
+    { kind: "ultrafast", status: "supported" },
+  ].map(({ kind, status }) => ({
+    source_id: "s",
+    provider: "p",
+    kind: kind as "fast" | "ultrafast",
+    model: "gpt-old",
+    fingerprint: scope,
+    state: "done",
+    message: "",
+    history: undefined,
+    result: {
+      binding,
+      status: status as "not_honored" | "supported",
+      checked_at: now,
+      verified_at: now,
+      verified_binding: binding,
+    },
+  }));
   const fetch = vi.fn(async (_url: string, _init?: RequestInit) =>
-    Response.json({status: "applied"}),
+    Response.json({ revision: "r2", tier_changes: 1 }),
   );
   vi.stubGlobal("fetch", fetch);
   try {
     const user = userEvent.setup();
-    render(<QueryClientProvider client={new QueryClient()}>
-      <ChannelOptimization snapshot={() => snapshot} />
-    </QueryClientProvider>);
-    await user.click(screen.getByRole("button", {name: "优化渠道模型"}));
-    await user.click(screen.getByText("Fast / Ultrafast"));
-    const fast = screen.getByRole("checkbox", {name: "Fugue Site-0.1 Fast"});
-    const ultra = screen.getByRole("checkbox", {name: "Fugue Site-0.1 Ultrafast"});
-    expect(fast).toBeChecked();
-    expect(ultra).toBeChecked();
-    await user.click(fast);
-    expect(ultra).toBeChecked();
-    await user.click(screen.getByRole("button", {name: "保存档位"}));
-    await screen.findByText("已保存 1 项档位变更");
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ChannelOptimization snapshot={() => snapshot} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+    const events = within(screen.getByRole("group", { name: "优化事件" }));
+    for (const name of [
+      "新增 Fast",
+      "取消 Fast",
+      "新增 Ultrafast",
+      "取消 Ultrafast",
+    ]) {
+      expect(events.getByRole("checkbox", { name })).toBeInTheDocument();
+    }
+    expect(
+      screen.queryByRole("button", { name: "保存档位" }),
+    ).not.toBeInTheDocument();
+    await user.click(events.getByRole("checkbox", { name: "新增 Ultrafast" }));
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "新增 Ultrafast · Fugue Key 1 Site-0.1",
+      }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "取消 Fast · Fugue Key 1 Site-0.1",
+      }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "新增 new · Fugue Key 1 Site-0.1" }),
+    );
+    await user.click(screen.getByRole("button", { name: "一键应用优化" }));
+    await screen.findByText("已应用");
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = fetch.mock.calls[0];
-    expect(new URL(url).pathname).toBe("/analytics/v1/sources/s/service-tier-routing");
+    expect(new URL(url).pathname).toBe("/analytics/v1/sources/s/channel-batch");
     expect(JSON.parse(String(init?.body))).toMatchObject({
       revision: "r1",
-      choices: [{provider: "p", scope, tier: "fast", enabled: false}],
+      targets: [
+        { provider: "p", models: { "gpt-old": "gpt-old", new: "new" } },
+      ],
+      tier_choices: [{ provider: "p", scope, tier: "fast", enabled: false }],
     });
   } finally {
     vi.unstubAllGlobals();
   }
 });
 
+it("previews a selectable new protocol on an automatic site import and submits the selected split", async () => {
+  const snapshot = optimizationFixture();
+  snapshot.routes.s.optimize_extended =
+    snapshot.routes.s.legacy_engine_migration = true;
+  Object.assign(snapshot.imports.data[0], {
+    provider: "p--messages",
+    engine: "claude",
+    engine_mode: "auto",
+  });
+  Object.assign(snapshot.routes.s.data[0], {
+    provider: "p--messages",
+    engine: "claude",
+    engine_mode: "auto",
+  });
+  const fetch = vi.fn(async (_url: string, _init?: RequestInit) =>
+    Response.json({ revision: "r2" }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ChannelOptimization snapshot={() => snapshot} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+    expect(
+      screen.getByText("当前协议：Claude Messages · claude"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("新接入协议：Responses / Codex · codex"),
+    ).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("checkbox", { name: "新增 new · Fugue Key 1 Site-0.1" }),
+    );
+    await user.click(screen.getByRole("button", { name: "一键应用优化" }));
+    await screen.findByText("已应用");
+    expect(
+      JSON.parse(String(fetch.mock.calls[0][1]?.body)).targets[0],
+    ).toMatchObject({
+      provider: "p--messages",
+      current: { old: "old" },
+      models: { old: "old", new: "new" },
+      split_protocols: { new: "responses" },
+      positions: { old: 1, new: 2 },
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 it("shows legacy retirement and couples a model addition to its selected protocol upgrade", async () => {
   const snapshot = optimizationFixture();
   snapshot.imports.data[0].engine = "gpt";

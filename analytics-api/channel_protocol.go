@@ -105,18 +105,29 @@ func (s *Service) validateBatchProtocols(ctx context.Context, in channelBatchInp
 			}
 		}
 		added := []string{}
-		for model := range newChannelModels(t.Current, t.Models) {
-			added = append(added, model)
+		for model, upstream := range t.Models {
+			if t.Current[model] != upstream {
+				added = append(added, model)
+			}
 		}
 		sort.Strings(added)
 		for _, model := range added {
-			resolved, err := s.importProtocols(ctx, t.Account, t.Group, []string{model}, nil)
+			upstream := t.Models[model]
+			resolved, err := s.importProtocols(ctx, t.Account, t.Group, []string{upstream}, nil)
 			if err != nil {
 				problems = append(problems, fmt.Sprintf("%s · %s：%s", t.Provider, model, err))
 				continue
 			}
-			if protocol == "" || resolved[model] != protocol {
-				problems = append(problems, fmt.Sprintf("%s · %s：当前 %s，检测 %s", t.Provider, model, channelProtocolLabel(protocol), channelProtocolLabel(resolved[model])))
+			expected := protocol
+			if split := t.SplitProtocols[model]; split != "" {
+				expected = split
+			}
+			if expected == "" || resolved[upstream] != expected {
+				label := "当前"
+				if t.SplitProtocols[model] != "" {
+					label = "拟接入"
+				}
+				problems = append(problems, fmt.Sprintf("%s · %s：%s %s，检测 %s", t.Provider, model, label, channelProtocolLabel(expected), channelProtocolLabel(resolved[upstream])))
 			}
 		}
 	}
@@ -124,6 +135,129 @@ func (s *Service) validateBatchProtocols(ctx context.Context, in channelBatchInp
 		return fmt.Errorf("渠道协议冲突，未提交任何变更：\n%s\n请取消这些新增项，或在添加到渠道中按协议拆分后重新分析", strings.Join(problems, "\n"))
 	}
 	return nil
+}
+
+func validBatchProtocolSplit(t channelBatchTarget) bool {
+	for model, protocol := range t.SplitProtocols {
+		if _, ok := protocolSpec(protocol); !ok || t.Models[model] == "" || t.Current[model] != "" {
+			return false
+		}
+	}
+	return !t.MigrateLegacyEngine
+}
+
+func (s *Service) validateBatchProtocolSplits(ctx context.Context, src controlSource, snapshot retainedSnapshot, state map[string]any, owner string, in channelBatchInput, catalogs map[string][]batchCatalogRow, documents map[string]map[string]any) error {
+	var overrides map[string]bool
+	bases := map[string]string{}
+	for _, t := range in.Targets {
+		if len(t.SplitProtocols) == 0 {
+			continue
+		}
+		if state["automatic_engine"] != true {
+			return errors.New("来源尚不支持检测协议自动接入，请更新 uni-api")
+		}
+		if overrides == nil {
+			var err error
+			overrides, err = s.engineOverrideHistory(ctx, src.ID)
+			if err != nil {
+				return errors.New("渠道协议配置读取失败")
+			}
+		}
+		doc := documents[t.Key+"\n"+t.Provider]
+		base, _ := doc["base_url"].(string)
+		engine, _ := doc["engine"].(string)
+		spec, hasProtocol := protocolSpec(catalogChannelProtocol(catalogs[t.Key], t.Provider))
+		if _, ok := bases[t.Account]; !ok {
+			var site string
+			if err := s.control.db.QueryRowContext(ctx, `SELECT base FROM console_sub_accounts WHERE id=$1 AND owner=$2`, t.Account, owner).Scan(&site); err != nil {
+				return errors.New("渠道所属站点已变化")
+			}
+			bases[t.Account] = subBindingSite(site)
+		}
+		if !hasProtocol || bases[t.Account] == "" || strings.TrimRight(base, "/") != bases[t.Account]+spec.Endpoint ||
+			(engine != "" && engine != "auto") || overrides[t.Provider] || protocolRepairCustomized(snapshot, t.Provider) {
+			return fmt.Errorf("%s：无法确认原渠道的自动协议及上游地址，未提交修改", t.Provider)
+		}
+		for _, protocol := range t.SplitProtocols {
+			if protocol == spec.Protocol {
+				return errors.New("渠道协议已变化，请重新预览")
+			}
+		}
+	}
+	return nil
+}
+
+// Only newly selected models go to the new protocol. Existing names, rules
+// and settings stay attached to their original provider unless separately edited.
+func addBatchProtocolSiblings(snapshot *retainedSnapshot, t channelBatchTarget, doc map[string]any, catalogs map[string][]batchCatalogRow, moves map[string][]routeMove) (channelBatchTarget, error) {
+	if doc == nil {
+		return t, errors.New("原渠道定义不完整")
+	}
+	var old retainedChannel
+	for _, p := range snapshot.Channels {
+		if p.Provider == t.Provider && p.KeyID == t.Key {
+			old = p
+			break
+		}
+	}
+	if old.Provider == "" {
+		return t, errors.New("原渠道已变化，请重新预览")
+	}
+	root := subProviderName(t.Account, t.Group, t.Key)
+	parts := map[string]map[string]string{}
+	models, positions := map[string]string{}, map[string]int{}
+	for model, upstream := range t.Models {
+		if split := t.SplitProtocols[model]; split != "" {
+			if parts[split] == nil {
+				parts[split] = map[string]string{}
+			}
+			parts[split][model] = upstream
+		} else {
+			models[model], positions[model] = upstream, t.Positions[model]
+		}
+	}
+	// Do not carry receipts to a different provider/endpoint/credential scope.
+	siblingDoc := map[string]any{}
+	for key, value := range doc {
+		siblingDoc[key] = value
+	}
+	if prefs, ok := doc["preferences"].(map[string]any); ok {
+		copy := map[string]any{}
+		for key, value := range prefs {
+			if key != "service_tier_evidence" && key != "__model_upstream_protocols" {
+				copy[key] = value
+			}
+		}
+		siblingDoc["preferences"] = copy
+	}
+	for _, spec := range channelProtocols {
+		models := parts[spec.Protocol]
+		if len(models) == 0 {
+			continue
+		}
+		provider := protocolProvider(root, spec.Protocol)
+		for _, existing := range snapshot.Channels {
+			if existing.Provider == provider {
+				return t, errors.New("目标协议接入已存在，请重新预览")
+			}
+		}
+		for _, existing := range catalogs[t.Key] {
+			if existing.Provider == provider {
+				return t, errors.New("目标协议接入已存在，请重新预览")
+			}
+		}
+		channel, err := protocolChannel(old, siblingDoc, provider, protocolPartition{spec, models})
+		if err != nil {
+			return t, err
+		}
+		snapshot.Channels = append(snapshot.Channels, channel)
+		for model, up := range models {
+			catalogs[t.Key] = append(catalogs[t.Key], batchCatalogRow{Provider: provider, Model: model, Upstream: up, Engine: spec.Engine})
+			moves[t.Key] = append(moves[t.Key], routeMove{Provider: provider, Model: model, Position: t.Positions[model]})
+		}
+	}
+	t.Models, t.Positions = models, positions
+	return t, nil
 }
 
 func protocolPositions(models []string, positions map[string]int) map[string]int {

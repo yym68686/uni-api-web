@@ -4,7 +4,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Sparkles, X } from "lucide-react";
 import { Spinner } from "./ui";
 import { channelEngineLabel, channelProtocolLabel } from "./channelProtocol";
-import { OptimizationTiers } from "./OptimizationTiers";
 import {
   applyOptimization,
   buildOptimizationPlan,
@@ -32,11 +31,9 @@ export function ChannelOptimization({
   const [busy, setBusy] = useState(false),
     [finished, setFinished] = useState(false),
     [error, setError] = useState("");
-  const [reading,setReading]=useState(false);
-  const [tierSaving,setTierSaving]=useState(false);
-  const [tierSaved,setTierSaved]=useState(false);
-  const [readError,setReadError]=useState("");
-  const readingRef=useRef(false);
+  const [reading, setReading] = useState(false);
+  const [readError, setReadError] = useState("");
+  const readingRef = useRef(false);
   const [progress, setProgress] = useState<
     Record<string, { state: string; message?: string }>
   >({});
@@ -75,19 +72,26 @@ export function ChannelOptimization({
     });
   }
   async function open() {
-    if(readingRef.current)return;
-    readingRef.current=true;setReading(true);
-    try { setInput(structuredClone(await snapshot())); setReadError(""); }
-    catch(error){setReadError(error instanceof Error ? error.message : "优化数据读取失败");return;}
-    finally{readingRef.current=false;setReading(false);}
+    if (readingRef.current) return;
+    readingRef.current = true;
+    setReading(true);
+    try {
+      setInput(structuredClone(await snapshot()));
+      setReadError("");
+    } catch (error) {
+      setReadError(error instanceof Error ? error.message : "优化数据读取失败");
+      return;
+    } finally {
+      readingRef.current = false;
+      setReading(false);
+    }
     setSelected(new Set());
     setFinished(false);
-    setTierSaved(false);
     setError("");
     setProgress({});
   }
   async function apply() {
-    if (!input || locked.current || tierSaving || tierSaved || finished || !selected.size) return;
+    if (!input || locked.current || finished || !selected.size) return;
     locked.current = true;
     setBusy(true);
     setError("");
@@ -115,6 +119,8 @@ export function ChannelOptimization({
           "channel-controls",
           "sub-import-options",
           "configured-import-options",
+          "management-query",
+          "service-tier-members",
         ].map((name) => client.invalidateQueries({ queryKey: [name] })),
       );
     }
@@ -123,9 +129,12 @@ export function ChannelOptimization({
     <Dialog.Root
       open={!!input || !!readError}
       onOpenChange={(next) => {
-        if (busy || tierSaving || reading) return;
+        if (busy || reading) return;
         if (next) open();
-        else { setInput(null); setReadError(""); }
+        else {
+          setInput(null);
+          setReadError("");
+        }
       }}
     >
       <Dialog.Trigger asChild>
@@ -135,7 +144,7 @@ export function ChannelOptimization({
           aria-label="优化渠道模型"
           aria-busy={reading}
         >
-          {reading?<Spinner small/>:<Sparkles size={15} />}
+          {reading ? <Spinner small /> : <Sparkles size={15} />}
           优化
         </button>
       </Dialog.Trigger>
@@ -145,13 +154,32 @@ export function ChannelOptimization({
           <Dialog.Content className="guide-dialog channel-optimization-dialog optimization-read-error">
             <header>
               <Dialog.Title>优化预览读取失败</Dialog.Title>
-              <Dialog.Description>渠道配置未修改。可以重新读取当前筛选范围。</Dialog.Description>
-              <Dialog.Close className="icon-button detail-close" disabled={reading} aria-label="关闭优化错误"><X size={18} /></Dialog.Close>
+              <Dialog.Description>
+                渠道配置未修改。可以重新读取当前筛选范围。
+              </Dialog.Description>
+              <Dialog.Close
+                className="icon-button detail-close"
+                disabled={reading}
+                aria-label="关闭优化错误"
+              >
+                <X size={18} />
+              </Dialog.Close>
             </header>
-            <div className="channel-optimization-body negative" role="alert">{readError}</div>
+            <div className="channel-optimization-body negative" role="alert">
+              {readError}
+            </div>
             <footer>
-              <Dialog.Close className="button small" disabled={reading}>关闭</Dialog.Close>
-              <button className="button primary small" disabled={disabled || reading} aria-busy={reading} onClick={() => void open()}>{reading && <Spinner small />}重新读取</button>
+              <Dialog.Close className="button small" disabled={reading}>
+                关闭
+              </Dialog.Close>
+              <button
+                className="button primary small"
+                disabled={disabled || reading}
+                aria-busy={reading}
+                onClick={() => void open()}
+              >
+                {reading && <Spinner small />}重新读取
+              </button>
             </footer>
           </Dialog.Content>
         </Dialog.Portal>
@@ -163,7 +191,7 @@ export function ChannelOptimization({
             className="guide-dialog channel-optimization-dialog"
             onPointerDownOutside={(e) => e.preventDefault()}
             onEscapeKeyDown={(e) => {
-              if (busy || tierSaving) e.preventDefault();
+              if (busy) e.preventDefault();
             }}
           >
             <header>
@@ -174,19 +202,16 @@ export function ChannelOptimization({
               </Dialog.Description>
               <Dialog.Close
                 className="icon-button detail-close"
-                disabled={busy || tierSaving}
+                disabled={busy}
                 aria-label="关闭优化预览"
               >
                 <X size={18} />
               </Dialog.Close>
             </header>
             <div className="channel-optimization-body">
-              <OptimizationTiers snapshot={input} disabled={busy || tierSaving || finished} onBusy={setTierSaving}
-                onSaved={() => setTierSaved(true)} />
-              {tierSaved && <p className="muted">重新打开优化以读取最新配置。</p>}
               <fieldset
                 className="optimization-events"
-                disabled={busy || tierSaving || tierSaved || finished}
+                disabled={busy || finished}
               >
                 <legend>优化事件</legend>
                 {optimizationEvents.map((event) => (
@@ -210,12 +235,20 @@ export function ChannelOptimization({
               <details className="optimization-help">
                 <summary>优化规则</summary>
                 <p>
-                新增模型须已检测可用，且没有已确认的单价、模型匹配、Tool
-                use、降智或压缩异常；Tool use
-                检测失败时也不新增。未确认不当作正常，未检测和检测中的模型不会因缺少结果被移除。降智仅作用于
-                Astra，压缩仅作用于实际检测的模型。取消勾选后，原模型及指向它的别名路由也会列入预览。
+                  新增模型须已检测可用，且没有已确认的单价、模型匹配、指纹、Tool
+                  use、降智或压缩异常；Tool use
+                  检测失败时也不新增。未确认不当作正常，未检测和检测中的模型不会因缺少结果被移除。降智仅作用于
+                  Astra，压缩仅作用于实际检测的模型。取消勾选后，原模型及指向它的别名路由也会列入预览。
                 </p>
-                <p>预览使用点击时读取的最新检测结果。仅优化已接入的渠道；新增模型放在路由末尾。</p>
+                <p>
+                  预览使用点击时读取的最新检测结果。仅优化已接入的渠道；新增模型放在路由末尾。
+                </p>
+                <p>
+                  协议冲突时按检测协议建立独立接入，不改动原协议上仍选用的模型。指纹只依据本轮完整结果，不使用样本不足时展示的上次结果。
+                </p>
+                <p>
+                  档位变更作用于整个接入。新增只依据业务凭据的有效验证；取消要求相关模型都明确不支持或未命中。
+                </p>
                 <p>现有路由的相对顺序和自定义设置不变。</p>
               </details>
               {plan.notes.map((note) => (
@@ -244,7 +277,7 @@ export function ChannelOptimization({
                   <input
                     type="checkbox"
                     aria-label="选择全部优化变更"
-                    disabled={busy || tierSaving || tierSaved || finished || !eligible.length}
+                    disabled={busy || finished || !eligible.length}
                     checked={
                       !!eligible.length &&
                       eligible.every((c) => selected.has(c.id))
@@ -265,23 +298,27 @@ export function ChannelOptimization({
                   {eligible.filter((c) => c.action === "remove").length} 项取消
                   {!!eligible.filter((c) => c.action === "migrate").length &&
                     ` · ${eligible.filter((c) => c.action === "migrate").length} 项协议升级`}
+                  {!!eligible.filter((c) => c.tier).length &&
+                    ` · ${eligible.filter((c) => c.tier).length} 项档位变更`}
                   {plan.changes.length > eligible.length &&
                     ` · ${plan.changes.length - eligible.length} 项需处理`}
                 </span>
               </div>
               {!plan.changes.length && (
-                <p className="optimization-empty">
-                  没有可优化的已接入模型。
-                </p>
+                <p className="optimization-empty">没有可优化的已接入模型。</p>
               )}
               {groups.map((changes) => {
                 const b = changes[0].binding,
                   state = progress[b.source];
+                const keyLabel = b.keyPosition
+                  ? `Key ${b.keyPosition}`
+                  : "全部 Key";
                 const selectable = changes.filter((c) => !c.blockedReason);
                 const kept = new Set(Object.keys(b.current));
                 for (const c of changes)
                   if (selected.has(c.id)) {
-                    if (c.action === "add") kept.add(c.model);
+                    if (c.action === "add" && !c.splitProtocol)
+                      kept.add(c.model);
                     else if (c.action === "remove") kept.delete(c.model);
                   }
                 return (
@@ -290,8 +327,8 @@ export function ChannelOptimization({
                       <label>
                         <input
                           type="checkbox"
-                          aria-label={`选择 ${b.sourceName} Key ${b.keyPosition} ${b.name} 的优化变更`}
-                          disabled={busy || tierSaving || tierSaved || finished || !selectable.length}
+                          aria-label={`选择 ${b.sourceName} ${keyLabel} ${b.name} 的优化变更`}
+                          disabled={busy || finished || !selectable.length}
                           checked={
                             !!selectable.length &&
                             selectable.every((c) => selected.has(c.id))
@@ -310,7 +347,7 @@ export function ChannelOptimization({
                         <strong>{b.name}</strong>
                       </label>
                       <span>
-                        {b.sourceName} · Key {b.keyPosition}
+                        {b.sourceName} · {keyLabel}
                       </span>
                     </header>
                     <div className="optimization-protocol">
@@ -333,21 +370,29 @@ export function ChannelOptimization({
                       >
                         <input
                           type="checkbox"
-                          aria-label={`${c.action === "migrate" ? "升级旧版默认协议" : `${c.action === "add" ? "新增" : "取消"} ${c.model}`} · ${b.sourceName} Key ${b.keyPosition} ${b.name}`}
+                          aria-label={`${c.action === "migrate" ? "升级旧版默认协议" : `${c.action === "add" || c.action === "tier-add" ? "新增" : "取消"} ${c.model}`} · ${b.sourceName} ${keyLabel} ${b.name}`}
                           checked={selected.has(c.id)}
-                          disabled={busy || tierSaving || tierSaved || finished || !!c.blockedReason}
+                          disabled={busy || finished || !!c.blockedReason}
                           onChange={(e) => toggleChange(c.id, e.target.checked)}
                         />
                         <span
                           className={
-                            c.action !== "remove" ? "positive" : "negative"
+                            c.action !== "remove" && c.action !== "tier-remove"
+                              ? "positive"
+                              : "negative"
                           }
                         >
                           {c.action === "migrate"
                             ? "协议升级"
-                            : c.action === "add"
-                              ? "新增勾选"
-                              : "取消勾选"}
+                            : c.splitProtocol
+                              ? "按协议接入"
+                              : c.tier
+                                ? c.action === "tier-add"
+                                  ? "新增档位"
+                                  : "取消档位"
+                                : c.action === "add"
+                                  ? "新增勾选"
+                                  : "取消勾选"}
                         </span>
                         <span>
                           <strong>
@@ -358,21 +403,31 @@ export function ChannelOptimization({
                           {c.model !== c.upstream && (
                             <small>原模型：{c.upstream}</small>
                           )}
-                          {c.action !== "migrate" && (
+                          {c.splitProtocol ? (
                             <small>
-                              检测协议：
-                              {c.detectedProtocols?.length
-                                ? c.detectedProtocols
-                                    .map(channelProtocolLabel)
-                                    .join(" / ")
-                                : "未记录"}
+                              新接入协议：
+                              {channelProtocolLabel(c.splitProtocol)}
                             </small>
+                          ) : (
+                            c.action !== "migrate" &&
+                            !c.tier && (
+                              <small>
+                                检测协议：
+                                {c.detectedProtocols?.length
+                                  ? c.detectedProtocols
+                                      .map(channelProtocolLabel)
+                                      .join(" / ")
+                                  : "未记录"}
+                              </small>
+                            )
                           )}
                         </span>
                         <span>
                           {c.reasons.join("；")}
                           {!!c.returnedModels?.length && (
-                            <small>返回模型：{c.returnedModels.join("、")}</small>
+                            <small>
+                              返回模型：{c.returnedModels.join("、")}
+                            </small>
                           )}
                           {c.blockedReason && (
                             <strong className="optimization-blocked-reason">
@@ -422,13 +477,13 @@ export function ChannelOptimization({
             <footer>
               <span>已选 {selected.size} 项变更</span>
               <Dialog.Close asChild>
-                <button className="button" disabled={busy || tierSaving}>
-                  {finished || tierSaved ? "完成" : "取消"}
+                <button className="button" disabled={busy}>
+                  {finished ? "完成" : "取消"}
                 </button>
               </Dialog.Close>
               <button
                 className="button primary"
-                disabled={busy || tierSaving || tierSaved || finished || !selected.size}
+                disabled={busy || finished || !selected.size}
                 onClick={() => void apply()}
               >
                 {busy ? (

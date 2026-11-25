@@ -30,6 +30,7 @@
 .optimization-events {
   display: flex;
   flex-wrap: wrap;
+  min-inline-size: 0;
   gap: 14px 20px;
   padding: 14px;
   border: 1px solid var(--line);

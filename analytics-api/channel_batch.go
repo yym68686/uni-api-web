@@ -13,6 +13,7 @@ import (
 
 type channelBatchTarget struct {
 	MigrateLegacyEngine bool              `json:"migrate_legacy_engine,omitempty"`
+	SplitProtocols      map[string]string `json:"split_protocols,omitempty"`
 	Key                 string            `json:"api_key_id"`
 	Provider            string            `json:"provider"`
 	Origin              string            `json:"origin_provider"`
@@ -23,11 +24,12 @@ type channelBatchTarget struct {
 	Positions           map[string]int    `json:"positions"`
 }
 type channelBatchInput struct {
-	Revision        string               `json:"revision"`
-	Part            string               `json:"part"`
-	AllowUnverified bool                 `json:"allow_unverified_models"`
-	EvidenceSource  string               `json:"evidence_source_id"`
-	Targets         []channelBatchTarget `json:"targets"`
+	Revision        string                   `json:"revision"`
+	Part            string                   `json:"part"`
+	AllowUnverified bool                     `json:"allow_unverified_models"`
+	EvidenceSource  string                   `json:"evidence_source_id"`
+	Targets         []channelBatchTarget     `json:"targets"`
+	TierChoices     []optimizationTierChoice `json:"tier_choices,omitempty"`
 }
 
 func (in channelBatchInput) removes(t channelBatchTarget) bool {
@@ -51,7 +53,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 	if !decodeConfiguration(w, r, &in) {
 		return
 	}
-	if in.Revision == "" || len(in.Targets) == 0 {
+	if in.Revision == "" || (len(in.Targets) == 0 && len(in.TierChoices) == 0) {
 		http.Error(w, "请选择接入和有效配置版本", 400)
 		return
 	}
@@ -59,6 +61,10 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 	case "all", "models", "aliases", "positions", "delete", "optimize":
 	default:
 		http.Error(w, "无效的批量操作", 400)
+		return
+	}
+	if (len(in.TierChoices) > 0 && in.Part != "optimize") || !validOptimizationTierChoices(in.TierChoices) {
+		http.Error(w, "无效档位优化选项", 400)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 110*time.Second)
@@ -80,6 +86,12 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[t.Key+"\n"+t.Provider] = true
 		keys[t.Key] = true
+		if len(t.SplitProtocols) > 0 {
+			if in.Part != "optimize" || t.Account == "" || !validBatchProtocolSplit(*t) {
+				http.Error(w, "无效的协议变更", 400)
+				return
+			}
+		}
 		if t.Account != "" {
 			var owned bool
 			err = s.control.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.id=$1 AND t.group_id=$2 AND a.owner=$3)`, t.Account, t.Group, owner).Scan(&owned)
@@ -227,6 +239,10 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := s.validateBatchProtocolSplits(ctx, src, snapshot, state, owner, in, catalogs, documents); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	if err := s.validateBatchProtocols(ctx, in, catalogs, documents); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -245,11 +261,21 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	tierSettings, err := s.prepareOptimizationTierSettings(ctx, src, in)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	changed, err := buildBatchSnapshot(&snapshot, in, catalogs, documents)
 	if err != nil {
 		http.Error(w, err.Error(), 409)
 		return
 	}
+	if err = applyOptimizationTierSettings(&snapshot, tierSettings); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	changed = changed || len(tierSettings) > 0
 	applied := state
 	if changed {
 		admin := src
@@ -261,12 +287,15 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), code)
 			return
 		}
+		if len(tierSettings) > 0 {
+			_, _ = s.control.db.ExecContext(ctx, `DELETE FROM console_channel_management_snapshots WHERE source_id=$1`, src.ID)
+		}
 	}
 	if err = s.saveLiveControls(ctx, src, applied); err != nil {
 		retentionFailure(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"revision": applied["revision"], "changed": changed})
+	writeJSON(w, 200, map[string]any{"revision": applied["revision"], "changed": changed, "tier_changes": len(in.TierChoices)})
 }
 
 // Models are canonical upstream names, not names to resolve through another
@@ -301,7 +330,7 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 		if in.Part == "positions" && !reflect.DeepEqual(actual, t.Models) {
 			return false, errors.New("调整位置不能修改模型")
 		}
-		same := !t.MigrateLegacyEngine && !in.removes(t) && reflect.DeepEqual(actual, t.Models)
+		same := !t.MigrateLegacyEngine && len(t.SplitProtocols) == 0 && !in.removes(t) && reflect.DeepEqual(actual, t.Models)
 		for m, pos := range t.Positions {
 			same = same && positions[m] == pos
 		}
@@ -323,6 +352,18 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 		changed = true
 		changedKeys[t.Key] = true
 		provider := t.Provider
+		if len(t.SplitProtocols) > 0 {
+			var err error
+			t, err = addBatchProtocolSiblings(snapshot, t, documents[id], catalogs, moves)
+			if err != nil {
+				return false, err
+			}
+			if reflect.DeepEqual(t.Models, t.Current) {
+				// A protocol sibling is an addition, not a rewrite of the old
+				// channel. Keep its definition, settings and rules intact.
+				continue
+			}
+		}
 		if in.removes(t) {
 			if err := removeConfiguredFromSnapshot(snapshot, t.Key, provider, t.Account == ""); err != nil {
 				return false, err

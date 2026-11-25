@@ -108,6 +108,7 @@ export interface ManagementOptimizationPreview extends Omit<ManagementSelection,
   format: "management-optimization-preview-v1";
   owner: string;
   filters: SubFilters;
+  fingerprint_reference?: string;
 }
 
 export interface ManagementTierSelection extends Pick<ManagementSelection, "revision" | "read_at_ms" | "total" | "eligible_count" | "eligible"> {
@@ -567,7 +568,7 @@ export async function readManagementOptimizationPreview(
 }
 
 export function managementOptimizationSnapshot(
-  selection: Pick<ManagementSelection, "rows" | "input" | "prices">,
+  selection: Pick<ManagementSelection, "rows" | "input" | "prices"> & { fingerprint_reference?: string },
   filters: SubFilters,
 ): OptimizationSnapshot {
   return {
@@ -581,6 +582,8 @@ export function managementOptimizationSnapshot(
     },
     routes: selection.input.routes,
     checks: selection.input.checks,
+    fingerprints: selection.input.fingerprints || [],
+    fingerprintReference: selection.fingerprint_reference,
     prices: selection.prices,
     filters: { ...filters },
   };

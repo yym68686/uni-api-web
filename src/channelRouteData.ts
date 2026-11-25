@@ -26,6 +26,7 @@ export interface Routes {
   batch_revisions?: boolean;
   atomic_batch?: boolean;
   optimize_batch?: boolean;
+  optimize_extended?: boolean;
   legacy_engine_migration?: boolean;
   checked_at?: number;
 }

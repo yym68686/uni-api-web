@@ -11,8 +11,9 @@ import (
 
 type managementOptimizationResponse struct {
 	managementSelectionResponse
-	Owner   string                 `json:"owner"`
-	Filters managementQueryFilters `json:"filters"`
+	Owner                string                 `json:"owner"`
+	Filters              managementQueryFilters `json:"filters"`
+	FingerprintReference string                 `json:"fingerprint_reference"`
 }
 
 type managementOptimizationPreviewKey struct{}
@@ -82,7 +83,7 @@ func (s *Service) managementOptimizationPreview(w http.ResponseWriter, r *http.R
 				Format: "management-optimization-preview-v1", Revision: page.Revision, ReadAtMS: page.ReadAtMS,
 				Total: len(rows), EligibleCount: len(eligible), Rows: rows,
 				Eligible: eligible, Input: view.Input, Prices: view.Prices,
-			}, Owner: owner, Filters: filters,
+			}, Owner: owner, Filters: filters, FingerprintReference: currentFingerprintCatalog().commit,
 		})
 		if err != nil {
 			class = "management_response_write_failed"

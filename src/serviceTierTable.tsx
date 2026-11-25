@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { Check } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
 import { channelMembers, type ConfiguredCheck, type ManagementRow } from "./channelManagement";
 import type { InstalledChannel } from "./sub2apiImports";
@@ -80,8 +81,10 @@ export function ServiceTierCell({tier, targets, index, loading, failed, siteStat
   const status = statuses.length && statuses.every(s => s === statuses[0]) ? statuses[0] :
     statuses.includes("pending") ? "pending" : "unknown";
   const label = status === "pending" ? "检测中" : serviceTierFilterLabels[status];
-  return <span className={status === "supported" ? "positive" : status === "unsupported" ? "negative" : "muted"}
-    title={`${serviceTierName[tier]} · ${label}${detail}`}>{label}</span>;
+  return <span className={status === "supported" ? "check-status pass" : status === "unsupported" ? "negative" : "muted"}
+    title={`${serviceTierName[tier]} · ${label}${detail}`}>
+    {status === "supported" && <Check size={15} aria-hidden="true" />}{label}
+  </span>;
 }
 
 export function useTierChecks(owner: string, enabled: boolean) {

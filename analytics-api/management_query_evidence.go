@@ -20,6 +20,7 @@ type managementQueryRoutes struct {
 	BatchRevisions     bool           `json:"batch_revisions,omitempty"`
 	AtomicBatch        bool           `json:"atomic_batch,omitempty"`
 	OptimizeBatch      bool           `json:"optimize_batch,omitempty"`
+	OptimizeExtended   bool           `json:"optimize_extended,omitempty"`
 	LegacyMigration    bool           `json:"legacy_engine_migration,omitempty"`
 }
 

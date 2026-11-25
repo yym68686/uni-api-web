@@ -1,5 +1,16 @@
 import { controlRequest } from "./api";
-import { channelProtocolLabel, protocolForEngine } from "./channelProtocol";
+import {
+  channelProtocolLabel,
+  channelProtocols,
+  protocolForEngine,
+} from "./channelProtocol";
+import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
+import type { FingerprintRecord } from "./ModelFingerprints";
+import {
+  optimizationTierChanges,
+  tierOptimizationEvents,
+} from "./channelOptimizationTiers";
+import type { ServiceTier } from "./serviceTierStatus";
 import { billingRate, matchesBillingRateFilter } from "./billingRates";
 import { boundGroups } from "./sub2apiImports";
 import { isCapabilityCheckModel } from "./sub2apiModels";
@@ -33,12 +44,15 @@ import type { ModelPrice } from "./types";
 export const optimizationEvents = [
   { id: "add", label: "新增可用模型" },
   { id: "legacy", label: "升级旧版默认协议" },
+  { id: "protocol", label: "按检测协议接入模型" },
   { id: "availability", label: "取消检测失败的模型" },
   { id: "tool", label: "取消不支持 Tool use 的模型" },
   { id: "price", label: "取消单价异常的模型" },
   { id: "match", label: "取消模型不匹配的模型" },
+  { id: "fingerprint", label: "取消指纹不匹配的模型" },
   { id: "quality", label: "取消降智的 Astra 模型" },
   { id: "compaction", label: "取消不支持压缩的已检测模型" },
+  ...tierOptimizationEvents,
 ] as const;
 export type OptimizationEvent = (typeof optimizationEvents)[number]["id"];
 export interface OptimizationSnapshot {
@@ -48,6 +62,8 @@ export interface OptimizationSnapshot {
   imports: SubImports;
   routes: Record<string, Routes>;
   checks: ConfiguredCheck[];
+  fingerprints?: FingerprintRecord[];
+  fingerprintReference?: string;
   prices: ModelPrice[];
   filters: SubFilters;
 }
@@ -74,7 +90,7 @@ export interface OptimizationChange {
   binding: OptimizationBinding;
   model: string;
   upstream: string;
-  action: "add" | "remove" | "migrate";
+  action: "add" | "remove" | "migrate" | "tier-add" | "tier-remove";
   reasons: string[];
   returnedModels?: string[];
   priceDetails?: string[];
@@ -82,6 +98,10 @@ export interface OptimizationChange {
   detectedProtocols?: string[];
   blockedReason?: string;
   requiresLegacyMigration?: boolean;
+  splitProtocol?: string;
+  tier?: ServiceTier;
+  tierScope?: string;
+  tierEvidenceModels?: string[];
 }
 export interface OptimizationPlan {
   changes: OptimizationChange[];
@@ -145,6 +165,7 @@ interface Evidence {
   accountId?: string;
   canAdd: boolean;
   qualityVerdict?: string;
+  fingerprint?: FingerprintRecord;
 }
 const running = (state?: string) => state === "queued" || state === "running";
 function siteTool(
@@ -160,6 +181,7 @@ function evidenceFor(
   binding: OptimizationBinding,
   upstream: string,
   snapshot: OptimizationSnapshot,
+  fingerprints: Map<string, FingerprintRecord>,
 ): Evidence[] {
   const siteGroups = boundGroups(binding.installed || binding.native);
   const targets = siteGroups.map((group) =>
@@ -187,6 +209,13 @@ function evidenceFor(
             result: null,
           }
         : { model: upstream, state: "idle", message: "", result: null },
+      fingerprint: fingerprints.get(
+        fingerprintKey({
+          account_id: siteGroups[i].account_id,
+          group_id: siteGroups[i].group_id,
+          model: upstream,
+        }),
+      ),
       tool: siteTool(target, upstream),
       compaction: target?.compaction,
       compactionState: target?.compaction_state,
@@ -196,6 +225,17 @@ function evidenceFor(
         groupQualityResult(target)?.verdict === "fail",
     }));
   const member = binding.native;
+  const fingerprintTarget = fingerprintKey({
+    source_id: member.source_id,
+    provider: member.provider,
+    model: upstream,
+  });
+  // A different caller-key copy or credential must not inherit a removal.
+  const fingerprint =
+    binding.provider === member.provider &&
+    (member.model_mappings?.[upstream] || upstream) === upstream
+      ? fingerprints.get(fingerprintTarget)
+      : undefined;
   const native = snapshot.checks.filter(
     (c) =>
       c.source_id === member.source_id &&
@@ -278,6 +318,13 @@ function evidenceFor(
       qualityVerdict: configuredQualityResult(scoped, snapshot.accounts, native)
         ?.verdict,
       check: { ...check, model: upstream },
+      fingerprint:
+        fingerprint &&
+        (fingerprintKey(fingerprint) !== fingerprintTarget ||
+          (!!member.probe_fingerprint &&
+            fingerprint.revision === member.probe_fingerprint))
+          ? fingerprint
+          : undefined,
       tool,
       compaction,
       compactionState:
@@ -332,11 +379,17 @@ function faults(
   if (!running(e.check.state)) {
     if (e.check.result?.availability.status === "error")
       result.push(["availability", "可用性检测失败"]);
-    if (hasModelMismatch(e.check))
-      result.push(["match", "返回模型不匹配"]);
+    if (hasModelMismatch(e.check)) result.push(["match", "返回模型不匹配"]);
     if (assessPrice(e.check, prices).status === "abnormal")
       result.push(["price", "单价异常"]);
   }
+  if (
+    e.fingerprint?.state === "done" &&
+    e.fingerprint.result?.status === "mismatch" &&
+    e.fingerprint.result.decision !== "not_model" &&
+    e.fingerprint.result.used_outputs >= 3
+  )
+    result.push(["fingerprint", "模型指纹不匹配"]);
   if (
     isCapabilityCheckModel(model) &&
     !running(e.tool?.state) &&
@@ -366,6 +419,18 @@ export function buildOptimizationPlan(
 ): OptimizationPlan {
   const notes = new Set<string>(),
     changes: OptimizationChange[] = [];
+  const fingerprints = sharedFingerprintIndex(
+    (snapshot.fingerprints || []).map((record) =>
+      snapshot.fingerprintReference &&
+      record.result?.reference_commit !== snapshot.fingerprintReference
+        ? { ...record, result: null }
+        : record,
+    ),
+    snapshot.inventory,
+    [],
+    snapshot.imports.data,
+    snapshot.imports.unavailable_sources,
+  );
   const allowedNative = new Map<string, ManagedChannel>();
   const allowedSite = new Map<string, InstalledChannel>();
   for (const row of snapshot.rows) {
@@ -428,6 +493,15 @@ export function buildOptimizationPlan(
       continue;
     }
     const bindings = new Map<string, OptimizationBinding>();
+    const splitClaims = new Map<string, string>();
+    const siteBindings = new Map(
+      [...allowedSite.values()]
+        .filter((item) => item.source_id === source)
+        .map((item) => [
+          bindingID(source, item.api_key_id, item.provider),
+          item,
+        ]),
+    );
     for (const route of routes.data) {
       const id = bindingID(source, route.api_key_id, route.provider);
       const installed = allowedSite.get(id);
@@ -539,7 +613,7 @@ export function buildOptimizationPlan(
           (binding.native?.model_mappings?.[scope] || scope) !== upstream
         )
           continue;
-        const evidence = evidenceFor(binding, upstream, snapshot);
+        const evidence = evidenceFor(binding, upstream, snapshot, fingerprints);
         if (
           !evidence.length ||
           !evidence.some((e) =>
@@ -562,11 +636,17 @@ export function buildOptimizationPlan(
           ),
         ];
         const returnedModels = events.includes("match")
-          ? [...new Set(filteredEvidence.flatMap(({ check }) => {
-              if (running(check.state) || !hasModelMismatch(check)) return [];
-              const model = check.result?.availability.response_model?.trim();
-              return model ? [model] : [];
-            }))]
+          ? [
+              ...new Set(
+                filteredEvidence.flatMap(({ check }) => {
+                  if (running(check.state) || !hasModelMismatch(check))
+                    return [];
+                  const model =
+                    check.result?.availability.response_model?.trim();
+                  return model ? [model] : [];
+                }),
+              ),
+            ]
           : [];
         const priceDetails = events.includes("price")
           ? [
@@ -586,6 +666,7 @@ export function buildOptimizationPlan(
           0,
           ...evidence.map((e) => e.check.result?.checked_at || 0),
           ...evidence.map((e) => e.tool?.result?.checked_at || 0),
+          ...evidence.map((e) => e.fingerprint?.result?.checked_at || 0),
         );
         const detectedProtocols = [
           ...new Set(
@@ -629,25 +710,77 @@ export function buildOptimizationPlan(
                   e.tool?.result?.status !== "error")),
           )
         ) {
+          const effectiveProtocol = migrate ? "responses" : binding.protocol;
+          const conflicting =
+            !!binding.installed &&
+            !!effectiveProtocol &&
+            detectedProtocols.some(
+              (protocol) => protocol !== effectiveProtocol,
+            );
+          const detected =
+            detectedProtocols.length === 1 &&
+            channelProtocols.find((p) => p.protocol === detectedProtocols[0]);
+          let splitProtocol: string | undefined;
+          let conflictDetail = "请在添加到渠道中按协议拆分";
+          if (
+            conflicting &&
+            detected &&
+            events.includes("protocol") &&
+            routes.optimize_extended &&
+            routes.legacy_engine_migration &&
+            binding.engineMode === "auto" &&
+            binding.engineOrigin !== "user_override"
+          ) {
+            const root = binding.provider.replace(
+              /--(?:responses|messages|gemini|chat)$/,
+              "",
+            );
+            const sibling = `${root}--${detected.protocol}`;
+            const existingRoot = siteBindings.get(
+              bindingID(source, binding.key, root),
+            );
+            const rootEngine = routes.data.find(
+              (r) => r.api_key_id === binding.key && r.provider === root,
+            )?.engine;
+            const existing =
+              siteBindings.has(bindingID(source, binding.key, sibling)) ||
+              (rootEngine
+                ? protocolForEngine(rootEngine)
+                : existingRoot?.protocol) === detected.protocol;
+            if (existing) {
+              conflictDetail = "已有该协议接入，请在对应接入中优化";
+            } else if (
+              splitClaims.has(sibling) &&
+              splitClaims.get(sibling) !== binding.id
+            ) {
+              conflictDetail = "已在同一 Key 的另一接入中列出该协议变更";
+            } else {
+              splitClaims.set(sibling, binding.id);
+              splitProtocol = detected.protocol;
+            }
+          }
           changes.push({
             id: JSON.stringify([binding.id, upstream]),
             binding,
             model: upstream,
             upstream,
             action: "add",
-            reasons: ["检测可用，未发现单价、模型匹配或能力异常"],
+            reasons: [
+              splitProtocol
+                ? "按检测协议自动创建接入；保留原协议和现有模型"
+                : "检测可用，未发现单价、模型匹配、指纹或能力异常",
+            ],
             checkedAt,
             detectedProtocols,
-            requiresLegacyMigration: !!migrate,
+            requiresLegacyMigration: !!migrate && !splitProtocol,
+            splitProtocol,
             blockedReason: binding.installed
               ? !binding.protocol
                 ? "当前渠道协议未确认，请刷新或检查渠道配置"
                 : !detectedProtocols.length
                   ? "检测未记录上游协议，请先重新检测该模型"
-                  : detectedProtocols.some(
-                        (p) => p !== (migrate ? "responses" : binding.protocol),
-                      )
-                    ? `协议冲突：当前 ${channelProtocolLabel(binding.protocol)}，检测 ${detectedProtocols.map(channelProtocolLabel).join(" / ")}；请在添加到渠道中按协议拆分`
+                  : conflicting && !splitProtocol
+                    ? `协议冲突：当前 ${channelProtocolLabel(binding.protocol)}，检测 ${detectedProtocols.map(channelProtocolLabel).join(" / ")}；${conflictDetail}`
                     : undefined
               : undefined,
           });
@@ -655,7 +788,10 @@ export function buildOptimizationPlan(
       }
     }
   }
-  return { changes, notes: [...notes] };
+  return {
+    changes: [...changes, ...optimizationTierChanges(snapshot, events)],
+    notes: [...notes],
+  };
 }
 
 // Derive final memberships first, preserve surviving order, append additions.
@@ -675,6 +811,7 @@ export function optimizationRequests(
       binding: OptimizationBinding;
       models: Record<string, string>;
       migrate: boolean;
+      splitProtocols: Record<string, string>;
     }
   >();
   const migrations = new Set(
@@ -684,13 +821,17 @@ export function optimizationRequests(
     if (c.requiresLegacyMigration && !migrations.has(c.binding.id))
       throw Error(`${c.binding.name}：请同时勾选旧版默认协议升级`);
   for (const c of changes) {
+    if (c.tier) continue;
     const item = bindings.get(c.binding.id) || {
       binding: c.binding,
       models: { ...c.binding.current },
       migrate: migrations.has(c.binding.id),
+      splitProtocols: {},
     };
-    if (c.action === "add") item.models[c.model] = c.upstream;
-    else if (c.action === "remove") delete item.models[c.model];
+    if (c.action === "add") {
+      item.models[c.model] = c.upstream;
+      if (c.splitProtocol) item.splitProtocols[c.model] = c.splitProtocol;
+    } else if (c.action === "remove") delete item.models[c.model];
     bindings.set(c.binding.id, item);
   }
   const orders = new Map<string, string[]>();
@@ -724,6 +865,13 @@ export function optimizationRequests(
     {
       revision: string;
       part: "optimize";
+      tier_choices?: {
+        provider: string;
+        scope: string;
+        tier: ServiceTier;
+        enabled: boolean;
+        evidence_models: string[];
+      }[];
       targets: {
         api_key_id: string;
         provider: string;
@@ -734,10 +882,16 @@ export function optimizationRequests(
         models: Record<string, string>;
         positions: Record<string, number>;
         migrate_legacy_engine?: boolean;
+        split_protocols?: Record<string, string>;
       }[];
     }
   >();
-  for (const { binding: b, models, migrate } of bindings.values()) {
+  for (const {
+    binding: b,
+    models,
+    migrate,
+    splitProtocols,
+  } of bindings.values()) {
     const request = requests.get(b.source) || {
       revision: b.revision,
       part: "optimize" as const,
@@ -752,8 +906,11 @@ export function optimizationRequests(
         ? { account_id: b.installed.account_id, group_id: b.installed.group_id }
         : { origin_provider: b.native!.provider }),
       current: b.current,
-      ...(migrate && Object.keys(models).length
+      ...(migrate && Object.keys(models).some((model) => !splitProtocols[model])
         ? { migrate_legacy_engine: true }
+        : {}),
+      ...(Object.keys(splitProtocols).length
+        ? { split_protocols: splitProtocols }
         : {}),
       models,
       positions: Object.fromEntries(
@@ -764,6 +921,36 @@ export function optimizationRequests(
           ) + 1,
         ]),
       ),
+    });
+    requests.set(b.source, request);
+  }
+  for (const change of changes) {
+    if (!change.tier || !change.tierScope || !change.tierEvidenceModels?.length)
+      continue;
+    const b = change.binding;
+    const membership = bindings.get(b.id);
+    if (
+      membership &&
+      !Object.keys(membership.models).some(
+        (model) => !membership.splitProtocols[model],
+      )
+    )
+      throw Error(
+        `${b.name}：所选变更会移除原接入，请取消该接入的档位变更后继续`,
+      );
+    const request = requests.get(b.source) || {
+      revision: b.revision,
+      part: "optimize" as const,
+      targets: [],
+    };
+    if (request.revision !== b.revision)
+      throw Error("来源配置版本不一致，请重新分析");
+    (request.tier_choices ??= []).push({
+      provider: b.provider,
+      scope: change.tierScope,
+      tier: change.tier,
+      enabled: change.action === "tier-add",
+      evidence_models: change.tierEvidenceModels,
     });
     requests.set(b.source, request);
   }
@@ -782,15 +969,20 @@ export async function applyOptimization(
     [...optimizationRequests(changes, routes)].map(async ([source, body]) => {
       progress(source, "running");
       try {
-        const result = await controlRequest<{ revision: string }>(
-          `/v1/sources/${encodeURIComponent(source)}/channel-batch`,
-          {
-            method: "POST",
-            signal: AbortSignal.timeout(120000),
-            body: JSON.stringify(body),
-          },
-        );
+        const result = await controlRequest<{
+          revision: string;
+          tier_changes?: number;
+        }>(`/v1/sources/${encodeURIComponent(source)}/channel-batch`, {
+          method: "POST",
+          signal: AbortSignal.timeout(120000),
+          body: JSON.stringify(body),
+        });
         if (!result.revision) throw Error("未取得应用版本，请刷新核对实际结果");
+        if (
+          body.tier_choices?.length &&
+          result.tier_changes !== body.tier_choices.length
+        )
+          throw Error("档位变更未收到完整回执，请刷新核对实际结果");
         progress(source, "done");
       } catch (e) {
         progress(
