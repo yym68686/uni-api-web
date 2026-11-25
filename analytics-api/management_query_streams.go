@@ -18,7 +18,7 @@ const managementModelSourceStreamSQL = `SELECT m.account_id,m.group_id,m.model,m
 
 const managementModelStreamSelectSQL = `SELECT p.account_id,p.group_id,p.model,p.valid,p.present,p.evidence_digest,
  p.checked_at,p.verdict,p.availability,p.terminal,p.model_match,p.probe_id,p.quality_probe_id,p.has_usage,p.usage_status,
- p.input_price,p.output_price,p.input_tokens,p.output_tokens`
+ p.input_price,p.output_price,p.input_tokens,p.output_tokens,p.service_tiers`
 
 const managementModelStreamSQL = managementModelStreamSelectSQL + `
  FROM console_management_model_signal p JOIN console_sub_accounts a ON a.id=p.account_id WHERE a.owner=$1`
@@ -294,7 +294,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		model := &out[i]
 		model.evidence, model.probe, model.quality = value.Evidence, value.Probe, value.Quality
 		if value.Present && !scope.CatalogOnly && (scope.Model == "" || wanted[key.model] || fallback[qualityGroupID(key.account, key.group)]) {
-			result := &subResult{CheckedAt: value.CheckedAt, Verdict: value.Verdict, Availability: subProbe{Status: value.Availability, TerminalStatus: value.Terminal, ModelMatch: value.Match}}
+			result := &subResult{CheckedAt: value.CheckedAt, Verdict: value.Verdict, Availability: subProbe{Status: value.Availability, TerminalStatus: value.Terminal, ModelMatch: value.Match}, ServiceTiers: value.ServiceTiers}
 			model.item.Model.Result = result
 			if value.HasUsage {
 				result.Availability.Usage = value.Usage.expanded()
@@ -329,8 +329,14 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		defer func() { readTrace.finish() }()
 		for readTrace.next(rows) {
 			var value managementPredicateValue
-			if err := rows.Scan(&value.Account, &value.Group, &value.Model, &value.Valid, &value.Present, &value.Evidence, &value.CheckedAt, &value.Verdict, &value.Availability, &value.Terminal, &value.Match, &value.Probe, &value.Quality, &value.HasUsage, &value.Usage.Status, &value.Usage.InputPrice, &value.Usage.OutputPrice, &value.Usage.InputTokens, &value.Usage.OutputTokens); err != nil {
+			var tiers []byte
+			if err := rows.Scan(&value.Account, &value.Group, &value.Model, &value.Valid, &value.Present, &value.Evidence, &value.CheckedAt, &value.Verdict, &value.Availability, &value.Terminal, &value.Match, &value.Probe, &value.Quality, &value.HasUsage, &value.Usage.Status, &value.Usage.InputPrice, &value.Usage.OutputPrice, &value.Usage.InputTokens, &value.Usage.OutputTokens, &tiers); err != nil {
 				return nil, nil, err
+			}
+			if !scope.CatalogOnly && len(tiers) > 0 {
+				if err := json.Unmarshal(tiers, &value.ServiceTiers); err != nil {
+					return nil, nil, errManagementPredicateFallback
+				}
 			}
 			if err := apply(value); err != nil {
 				return nil, nil, err
@@ -339,7 +345,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 			if store != nil {
 				values = append(values, value)
 			}
-			readTrace.counted(len(value.Evidence))
+			readTrace.counted(len(value.Evidence) + len(tiers))
 		}
 		if err := rows.Err(); err != nil {
 			return nil, nil, err

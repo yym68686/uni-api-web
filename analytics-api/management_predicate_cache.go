@@ -22,6 +22,7 @@ type managementPredicateValue struct {
 	CheckedAt                              int64
 	Verdict, Availability, Terminal, Match string
 	Usage                                  managementStreamUsage
+	ServiceTiers                           map[string]subTierProbe `json:",omitempty"`
 }
 
 type managementPredicateVersion struct {

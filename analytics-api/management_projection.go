@@ -29,7 +29,7 @@ type managementProjectionIdentity struct {
 	Receipt string `json:"id"`
 }
 
-const managementModelSignalColumns = "account_id,group_id,model,valid,present,evidence_digest,checked_at,verdict,availability,terminal,model_match,probe_id,quality_probe_id,has_usage,usage_status,input_price,output_price,input_tokens,output_tokens"
+const managementModelSignalColumns = "account_id,group_id,model,valid,present,evidence_digest,checked_at,verdict,availability,terminal,model_match,probe_id,quality_probe_id,has_usage,usage_status,input_price,output_price,input_tokens,output_tokens,service_tiers"
 const managementReceiptSignalColumns = "id,account_id,valid,evidence_digest,status,input_price,output_price,input_tokens,output_tokens,rate_result"
 
 // Preparation is explicit, restartable and bounded. Installing writer triggers
@@ -125,7 +125,7 @@ func prepareManagementProjectionBatch(ctx context.Context, db *sql.DB, budgetSch
 	if models {
 		columns, relation, keys = managementModelSignalColumns, "console_management_model_signal", "account_id,group_id,model"
 		cte = `WITH wanted AS (SELECT * FROM jsonb_to_recordset($1::jsonb) AS k(account_id text,group_id bigint,model text)), expected AS MATERIALIZED (
- SELECT r.account_id,r.group_id,r.model,v.valid,v.present,v.evidence_digest,v.checked_at,v.verdict,v.availability,v.terminal,v.model_match,v.probe_id,v.quality_probe_id,v.has_usage,v.usage_status,v.input_price,v.output_price,v.input_tokens,v.output_tokens
+ SELECT r.account_id,r.group_id,r.model,v.valid,v.present,v.evidence_digest,v.checked_at,v.verdict,v.availability,v.terminal,v.model_match,v.probe_id,v.quality_probe_id,v.has_usage,v.usage_status,v.input_price,v.output_price,v.input_tokens,v.output_tokens,CASE WHEN v.valid THEN NULLIF(r.result->'service_tiers','null'::jsonb) END AS service_tiers
  FROM wanted k JOIN console_sub_models r USING(account_id,group_id,model) CROSS JOIN LATERAL console_management_model_signal_value(r.result) v) `
 	}
 	if !verify {

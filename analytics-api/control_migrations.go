@@ -160,6 +160,9 @@ var configuredCheckSuiteSQL string
 //go:embed migrations/0040_site_check_tier_projection.sql
 var siteCheckTierProjectionSQL string
 
+//go:embed migrations/0041_management_tier_signals.sql
+var managementTierSignalsSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -211,6 +214,7 @@ func controlMigrations() []controlMigration {
 		{"0038_service_tier_request_scope", serviceTierRequestScopeSQL, []string{"console_configured_checks"}},
 		{"0039_configured_check_suite", configuredCheckSuiteSQL, []string{"console_configured_checks"}},
 		{"0040_site_check_tier_projection", siteCheckTierProjectionSQL, []string{"console_sub_models", "console_sub_targets"}},
+		{"0041_management_tier_signals", managementTierSignalsSQL, []string{"console_management_model_signal", "console_sub_models"}},
 	}
 }
 
@@ -219,6 +223,10 @@ func (m controlMigration) checksum() string {
 }
 
 func (m controlMigration) lockMode(table string) string {
+	if m.Version == "0041_management_tier_signals" && table == "console_sub_models" {
+		// Let source readers continue while fencing the old trigger writers.
+		return "SHARE ROW EXCLUSIVE"
+	}
 	if m.Version == "0035_channel_spend_receipt_invalidation" {
 		return "SHARE ROW EXCLUSIVE" // CREATE TRIGGER; let live receipt reads continue.
 	}

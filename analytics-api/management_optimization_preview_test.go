@@ -19,9 +19,8 @@ func TestManagementOptimizationPreviewReadsTierEvidenceOnConsecutiveRequests(t *
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)
 	ctx := context.Background()
-	// A new model summary contains service_tiers, which v1 predicate
-	// projections intentionally reject. A legacy/missing selected receipt
-	// must also read its current typed source, without loading other models.
+	// A missing legacy projection and an unsupported receipt must read the
+	// current typed source without loading other models.
 	now := time.Now().Unix()
 	if _, err := s.control.db.Exec(`UPDATE console_sub_models
  SET result=jsonb_set(result,'{service_tiers}',jsonb_build_object(
@@ -158,7 +157,8 @@ func TestManagementOptimizationPreviewKeepsSelectedProjectionAcrossLargeDirector
 		t.Fatal("large preview lost bounded selected-model reads", output.String())
 	}
 	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET result=jsonb_set(result,'{service_tiers}',
- '{"fast":{"status":"supported","checked_at":1}}') WHERE group_id<=204 AND model='gpt-6.2-sol'`); err != nil {
+ '{"fast":{"status":"supported","checked_at":1}}') WHERE group_id<=204 AND model='gpt-6.2-sol';
+ UPDATE console_management_model_signal SET valid=false, service_tiers=NULL WHERE group_id<=204 AND model='gpt-6.2-sol'`); err != nil {
 		t.Fatal(err)
 	}
 	preview := call()
@@ -171,6 +171,29 @@ func TestManagementOptimizationPreviewKeepsSelectedProjectionAcrossLargeDirector
 	if preview.Rows[0].Selected.Result.ServiceTiers["fast"].Status != "supported" {
 		t.Fatal("large preview lost service-tier evidence")
 	}
+	repairAt := time.Now()
+	if n, err := repairManagementTierSignals(context.Background(), s.control.db); err != nil || n != 204 {
+		t.Fatal("could not recover legacy tier rows at production cardinality", n, err)
+	}
+	t.Logf("large directory tier projection repair: rows=204 elapsed=%s", time.Since(repairAt))
+	filtered := managementQueryFilters{GroupStatus: "all", Availability: "success"}
+	refresh := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?"+url.Values{"filters": {mustJSON(filtered)}}.Encode(), nil)
+	refresh.Header.Set("Accept", managementPageV3MediaType)
+	refresh.Header.Set(managementListViewHeader, managementListViewV1)
+	refresh.Header.Set("X-Console-Read-Trigger", "mount")
+	refresh.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+	output.Reset()
+	w := httptest.NewRecorder()
+	refreshAt := time.Now()
+	handler.ServeHTTP(w, refresh)
+	if logs := output.String(); w.Code != http.StatusOK ||
+		!strings.Contains(logs, "compact_revision=true catalog_only=true ") ||
+		!strings.Contains(logs, "stage=database_availability_groups ") ||
+		!strings.Contains(logs, "rows=25 total=842 ") ||
+		strings.Contains(logs, "stage=account_receipts query_ready") || strings.Contains(logs, "stage=receipt_signal_rows query_ready") {
+		t.Fatalf("large cold list did not match the filtered groups via the fast path: %d\n%s", w.Code, logs)
+	}
+	t.Logf("large cold availability page: groups=842 models>=%d elapsed=%s", 842*242, time.Since(refreshAt))
 }
 
 func TestManagementOptimizationPreviewDoesNotFallBackForUnrelatedLegacyEvidence(t *testing.T) {

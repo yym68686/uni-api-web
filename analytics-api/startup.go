@@ -27,6 +27,7 @@ func (s *Service) startBackground(ctx context.Context) <-chan struct{} {
 	var workers sync.WaitGroup
 	start := func(fn func(context.Context)) { workers.Add(1); go func() { defer workers.Done(); fn(ctx) }() }
 	if s.control != nil {
+		start(s.repairManagementTierSignalsLoop)
 		start(s.managementDisplayLoop)
 		start(s.managementOverviewLoop)
 		start(s.subModelSummaryBackfillLoop)

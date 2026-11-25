@@ -152,8 +152,8 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 		}
 		stateOnly := !selection && !preview && managementListView(ctx) && out.Proof != nil && out.Proof.Stamp != "" &&
 			filters.Model == "" && (filters.Availability == "success" || filters.Availability == "error") &&
-			filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""
-		catalogOnly := filters.Model == "" && (filters.Availability == "" || stateOnly) && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""
+			filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == "" && !filters.hasServiceTiers()
+		catalogOnly := filters.Model == "" && (filters.Availability == "" || stateOnly) && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == "" && !filters.hasServiceTiers()
 		// withManagementSnapshot owns this repeatable-read transaction. Only
 		// this path can retain predicate receipts until same-snapshot hydration.
 		var reuse *managementReceiptReuse
