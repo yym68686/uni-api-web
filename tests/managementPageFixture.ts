@@ -44,6 +44,27 @@ export function installManagementPageFixture(owner = "account") {
           ? body.data.flatMap((row:{value:{account?:SubAccount}})=>row.value.account?[row.value.account]:[]) : body.data;
         return Response.json({data:accounts.map(account=>({...account,progress:account.progress||{total:0,completed:0,queued:0,running:0,interrupted:0,running_models:[],groups:[]}})),read_at_ms:Date.now()});
       }
+      const groupDetails = /\/sub2api\/accounts\/([^/]+)\/groups\/(\d+)\/details$/.exec(url.pathname);
+      if (groupDetails && url.searchParams.get("include_rates") === "0") {
+        const direct = await fixtureFetch(input, init);
+        if (!direct.ok) return direct;
+        const body = await direct.clone().json();
+        if (body.format === "summary-v1") return direct;
+        let accounts: SubAccount[] = body.data || [];
+        if (!accounts.length) {
+          const directory = new URL(url);
+          directory.pathname = directory.pathname.slice(0, groupDetails.index) + "/sub2api/accounts";
+          directory.search = "";
+          const response = await fixtureFetch(directory.href, {signal: init?.signal});
+          if (!response.ok) return response;
+          accounts = (await response.json()).data || [];
+        }
+        const account = accounts.find(account => account.id === decodeURIComponent(groupDetails[1]));
+        if (!account) return direct;
+        const targets = account.targets.filter(target => target.group_id === Number(groupDetails[2]))
+          .map(target => ({...target, models: target.models || []}));
+        return Response.json({data: [{...account, targets}]});
+      }
       const preview = url.pathname.endsWith("/channel-management/optimization-preview");
       if (!url.pathname.endsWith("/channel-management/query") && !preview)
         return fixtureFetch(input, init);

@@ -22,6 +22,18 @@ const managementPageSelectedModelsSQL = `WITH wanted AS MATERIALIZED (
  LEFT JOIN LATERAL (SELECT result FROM console_sub_models source
  WHERE ms.result IS NULL AND source.account_id=w.account_id AND source.group_id=w.group_id AND source.model=w.model OFFSET 0) raw ON true`
 
+// If the global proof is unavailable, read metadata directly from the
+// requested group ranges in this same transaction. Join and decode summaries
+// only for the selected model and Astra; no off-scope result is needed here.
+const managementPreviewSelectedModelsSQL = `WITH wanted AS MATERIALIZED (
+ SELECT w.* FROM jsonb_to_recordset($2::jsonb) AS w(account_id text,group_id bigint)
+ JOIN console_sub_accounts a ON a.id=w.account_id WHERE a.owner=$1)
+ SELECT w.account_id,w.group_id,m.model,m.state,m.message,
+ CASE WHEN m.model IN ($3,$4) THEN COALESCE(ms.result,console_sub_model_summary_v1(m.result)) END
+ FROM wanted w CROSS JOIN LATERAL (SELECT model,state,message,result FROM console_sub_models
+ WHERE account_id=w.account_id AND group_id=w.group_id OFFSET 0) m
+ LEFT JOIN console_sub_model_summaries ms ON ms.account_id=w.account_id AND ms.group_id=w.group_id AND ms.model=m.model AND m.model IN ($3,$4)`
+
 func readManagementDisplayModelStream(ctx context.Context, db controlQueryDB, owner string, wanted []subBoundKey, fullGroups map[string]bool, model string, consume managementPageModelConsumer) (map[string]bool, error) {
 	fullRead := func() (map[string]bool, error) {
 		return nil, readManagementPageModelStream(ctx, db, owner, wanted, consume)
@@ -31,20 +43,35 @@ func readManagementDisplayModelStream(ctx context.Context, db controlQueryDB, ow
 	}
 	metadata, ok := managementPageDirectoryModels(ctx, db, owner, wanted)
 	if !ok {
-		return fullRead()
+		if preview, _ := ctx.Value(managementOptimizationPreviewKey{}).(bool); !preview {
+			return fullRead()
+		}
 	}
 	projected := map[string]bool{}
 	full := []subBoundKey{}
+	scoped := []subBoundKey{}
 	for _, group := range wanted {
 		id := qualityGroupID(group.AccountID, group.GroupID)
 		if fullGroups[id] {
 			full = append(full, group)
 		} else {
 			projected[id] = true
+			scoped = append(scoped, group)
 		}
 	}
 	if len(projected) == 0 {
 		return fullRead()
+	}
+	if !ok {
+		if err := readManagementPreviewModelStream(ctx, db, owner, model, scoped, consume); err != nil {
+			return nil, err
+		}
+		if len(full) > 0 {
+			if err := readManagementPageModelStream(ctx, db, owner, full, consume); err != nil {
+				return nil, err
+			}
+		}
+		return projected, ctx.Err()
 	}
 	selected := []managementPageDirectoryModel{}
 	metadataTrace := newManagementRowsTrace(ctx, "page_model_metadata")
@@ -103,4 +130,29 @@ func readManagementDisplayModelStream(ctx context.Context, db controlQueryDB, ow
 		log.Printf("management_selected_models groups=%d full_groups=%d summary_rows=%d directory_rows=%d request_id=%s", len(projected), len(full), len(selected), len(metadata), consoleRequestID(ctx))
 	}
 	return projected, ctx.Err()
+}
+
+func readManagementPreviewModelStream(ctx context.Context, db controlQueryDB, owner, model string, groups []subBoundKey, consume managementPageModelConsumer) error {
+	encoded, err := json.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	trace := newManagementRowsTrace(ctx, "preview_selected_models")
+	defer trace.finish()
+	rows, err := db.QueryContext(ctx, managementPreviewSelectedModelsSQL, owner, string(encoded), model, checkModel)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	trace.queryReady()
+	for trace.next(rows) {
+		var row managementPageModelRecord
+		if err := rows.Scan(&row.account, &row.group, &row.model, &row.state, &row.message, &row.result); err != nil {
+			return err
+		}
+		if err := consume(row, trace); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }

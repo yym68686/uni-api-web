@@ -76,8 +76,8 @@ export function ChannelOptimization({
   }
   async function open() {
     if(readingRef.current)return;
-    readingRef.current=true;setReading(true);setReadError("");
-    try { setInput(structuredClone(await snapshot())); }
+    readingRef.current=true;setReading(true);
+    try { setInput(structuredClone(await snapshot())); setReadError(""); }
     catch(error){setReadError(error instanceof Error ? error.message : "优化数据读取失败");return;}
     finally{readingRef.current=false;setReading(false);}
     setSelected(new Set());
@@ -121,11 +121,11 @@ export function ChannelOptimization({
   }
   return (
     <Dialog.Root
-      open={!!input}
+      open={!!input || !!readError}
       onOpenChange={(next) => {
-        if (busy || tierSaving) return;
+        if (busy || tierSaving || reading) return;
         if (next) open();
-        else setInput(null);
+        else { setInput(null); setReadError(""); }
       }}
     >
       <Dialog.Trigger asChild>
@@ -133,12 +133,29 @@ export function ChannelOptimization({
           className="button small"
           disabled={disabled || reading}
           aria-label="优化渠道模型"
+          aria-busy={reading}
         >
           {reading?<Spinner small/>:<Sparkles size={15} />}
-          {reading?"读取完整结果…":"优化"}
+          优化
         </button>
       </Dialog.Trigger>
-      {readError && <span role="alert" className="negative">{readError}</span>}
+      {readError && (
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="guide-dialog channel-optimization-dialog optimization-read-error">
+            <header>
+              <Dialog.Title>优化预览读取失败</Dialog.Title>
+              <Dialog.Description>渠道配置未修改。可以重新读取当前筛选范围。</Dialog.Description>
+              <Dialog.Close className="icon-button detail-close" disabled={reading} aria-label="关闭优化错误"><X size={18} /></Dialog.Close>
+            </header>
+            <div className="channel-optimization-body negative" role="alert">{readError}</div>
+            <footer>
+              <Dialog.Close className="button small" disabled={reading}>关闭</Dialog.Close>
+              <button className="button primary small" disabled={disabled || reading} aria-busy={reading} onClick={() => void open()}>{reading && <Spinner small />}重新读取</button>
+            </footer>
+          </Dialog.Content>
+        </Dialog.Portal>
+      )}
       {input && (
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />

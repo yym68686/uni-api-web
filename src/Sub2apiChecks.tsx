@@ -1,7 +1,7 @@
 import { modelProgressDetails, useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
 import type { SyncProgress } from "./subSyncProgress";
 import { useConfiguredCheckResultRefresh } from "./configuredCheckProgress";
-import { useSiteCheckProgress } from "./siteCheckProgress";
+import { useSiteCheckProgress, type SiteCheckSubmission } from "./siteCheckProgress";
 import { useVisibleFingerprints } from "./visibleFingerprints";
 import { fingerprintTargets, fingerprintLabels, fingerprintBusy, useModelFingerprints, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintColumnHeader, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
@@ -930,13 +930,17 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const accountActionsRef = useRef(new Set<string>());
   const actionKey = (id: string) => JSON.stringify([user, id]);
   const syncGeneration = syncProgressSubmission.owner === user ? syncProgressSubmission.generation : 0;
-  const progressQuery=useSubSyncProgress(user,accounts,metadata?.readAt,syncGeneration);
-  const justSubmittedSiteRows = useRef(new Map<string, number>());
+  const visibleProgressAccounts = section === "channels" ? [...new Set(displayedPage?.rows.flatMap(row => row.account.id ? [row.account.id] : []))] : undefined;
+  const justSubmittedSiteRows = useRef(new Map<string, SiteCheckSubmission>());
+  const verifyingSiteRows = !!pageData?.rows.some(row => justSubmittedSiteRows.current.has(JSON.stringify([user, row.account.id, row.target.group_id])));
+  const progressQuery=useSubSyncProgress(user,accounts,metadata?.readAt,syncGeneration,visibleProgressAccounts,verifyingSiteRows);
   useSubSyncResultRefresh(user,pageData,progressQuery.data);
   const liveSiteRow=useSiteCheckProgress(user,filters,section === "channels" ? pageData : undefined,progressQuery.data,justSubmittedSiteRows.current);
   const liveFingerprints=useVisibleFingerprints(user,section === "channels" && activeColumns.includes("fingerprint") ? pageData : undefined);
   const lastProgress = useRef<{owner: string; generation: number; accounts: SubAccount[]} | undefined>(undefined);
   if (progressQuery.data) lastProgress.current = { owner: user, generation: syncGeneration, accounts: progressQuery.data.data };
+  const lastProgressReadAt = useRef(0);
+  if (progressQuery.data) lastProgressReadAt.current = progressQuery.data.read_at_ms;
   const knownProgress = lastProgress.current?.owner === user ? lastProgress.current : undefined;
   const knownById = new Map(knownProgress?.accounts.map(account => [account.id, account]));
   const statusAccounts = progressQuery.data?.data || accounts.map(account => knownById.get(account.id) || account);
@@ -1214,6 +1218,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     if (pending(current.state) && current.job_kind === "sync") return true;
     if (checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key))) return true;
     if (configuredResults.awaiting(configured)) return true;
+    if (account.id && justSubmittedSiteRows.current.get(JSON.stringify([user, account.id, target.group_id]))?.kinds.has(kind)) return true;
     if (kind === "compaction") return pending(target.compaction_state || "");
     if (kind === "tool-use") return pending(target.tool_use_state || "");
     const models = kind === "quality" ? ["gpt-6-astra"] : requestedModels();
@@ -1239,13 +1244,16 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       return;
     }
     keys.forEach(key => checksInFlight.current.add(key));
+    const unreleased = new Set(keys);
+    const release = (finished: string[]) => {
+      for (const key of finished) if (unreleased.delete(key)) checksInFlight.current.delete(key);
+      setSubmittingChecks(new Set(checksInFlight.current));
+    };
     setSubmittingChecks(new Set(checksInFlight.current));
     setError("");
-    const scope = selectionScope.current;
     try {
       const site = targets.filter(t => !!t.account.id);
       const nativeChannels = targets.flatMap(t => !t.account.id && t.configured ? [t.configured] : []);
-      const localConfiguredCheck = nativeChannels.length > 0 && !site.length;
       const native = nativeChannels.flatMap<NativeCheckTarget>(configured => {
         const members = channelMembers(configured);
         // Probe every selected model once. Prefer an existing mapping; use the
@@ -1267,10 +1275,36 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         return [...grouped.values()];
       });
       const requests: {label:string;request:Promise<{queued?:number}>}[] = [];
+      const definitelyRejected = (error: unknown) => error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408;
+      const observe = (request: Promise<{queued?:number}>, owned: CheckSelection, refresh: () => void) => request.then(receipt => {
+        refresh();
+        return receipt;
+      }, error => {
+        // A lost receipt may have committed. Verify state without resubmitting.
+        if (!definitelyRejected(error)) refresh();
+        throw error;
+      }).finally(() => release(owned.flatMap(({account,target,configured}) => checkKeys(account,target,kind,configured))));
       if (site.length) requests.push({label:`站点渠道（${site.length} 个分组）`,request:controlRequest(`/v1/sub2api/${kind === "check" ? "checks" : `${kind}-checks`}`, {
         method:"POST", body:JSON.stringify({...(manual?{manual:true}:{}),targets:site.map(({account,target}) => ({account_id:account.id,group_id:target.group_id,...(kind === "check" ? {models:modelsToCheck} : {})}))}),
+      }, {localCheckRefresh: true})});
+      if (site.length) requests[0].request = observe(requests[0].request, site, () => {
+        void client.invalidateQueries({queryKey:["management-query",user],refetchType:"none"});
+        const submittedAt = Math.max(pageData?.read_at_ms || 0, lastProgressReadAt.current);
+        for (const [key, submission] of justSubmittedSiteRows.current) if (submission.after + 900_000 < submittedAt) justSubmittedSiteRows.current.delete(key);
+        for (const {account, target} of site) {
+          const key = JSON.stringify([user, account.id, target.group_id]);
+          const kinds = new Set(justSubmittedSiteRows.current.get(key)?.kinds);
+          kinds.add(kind);
+          justSubmittedSiteRows.current.set(key, {after: submittedAt, kinds});
+        }
+        markProgress([]);
+        void client.invalidateQueries({queryKey:["sub2api"]});
+      });
+      if (native.length) requests.push({label:`原生渠道（${native.length} 个来源成员）`,request:observe(controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,...(kind==="check"?{full_model_check:true}:{}),...(manual?{manual:true}:{}),targets:native})}, {localCheckRefresh: true}), targets.filter(t => !t.account.id), () => {
+        configuredResults.afterSubmission(native);
+        void client.invalidateQueries({queryKey:["configured-checks"],refetchType:"none"});
+        if (kind === "check") void refreshTierViews(client, user);
       })});
-      if (native.length) requests.push({label:`原生渠道（${native.length} 个来源成员）`,request:controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,...(kind==="check"?{full_model_check:true}:{}),...(manual?{manual:true}:{}),targets:native})}, { localConfiguredCheck })});
       const results = await Promise.allSettled(requests.map(item => item.request));
       const receipts = results.map((result,index) => ({
         label:requests[index].label,
@@ -1279,36 +1313,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           ? `已收到提交回执${typeof result.value?.queued === "number" ? `，排队 ${result.value.queued} 项` : ""}`
           : `未确认提交 · ${batchFailure(result.reason,"未收到检测回执")}`,
       }));
-      if (native.length) {
-        const result = results[site.length ? 1 : 0];
-        const rejected = result?.status === "rejected" && result.reason instanceof ApiError &&
-          result.reason.status >= 400 && result.reason.status < 500 && result.reason.status !== 408;
-        // A lost response may have committed. Verify scoped state without
-        // repeating the paid operation or reloading the list.
-        if (!rejected) configuredResults.afterSubmission(scope === selectionScope.current ? native : []);
-      }
-      if (site.length && (results[0].status === "fulfilled" ||
-          !(results[0].reason instanceof ApiError) || results[0].reason.status >= 500 || results[0].reason.status === 408)) {
-        if (scope === selectionScope.current) {
-          const selected = new Set(site.map(t => JSON.stringify([user, t.account.id, t.target.group_id])));
-          justSubmittedSiteRows.current.clear();
-          for (const row of usablePage?.rows || []) {
-            const key = JSON.stringify([user, row.account.id, row.target.group_id]);
-            if (selected.has(key)) justSubmittedSiteRows.current.set(key, progressQuery.data?.read_at_ms || 0);
-          }
-        }
-        markProgress(site.map(t => t.account.id));
-      }
-      if (native.length && kind === "check") void refreshTierViews(client, user);
       if (kind === "check") void client.invalidateQueries({queryKey:["model-fingerprints","management",user]});
-      await Promise.all([
-        ...(site.length ? [client.invalidateQueries({queryKey:["sub2api"]})] : []),
-        ...(native.length ? [client.invalidateQueries({queryKey:["configured-checks"], ...(localConfiguredCheck ? { refetchType: "none" as const } : {})})] : []),
-        // Hold only these targets until the queued state is read. The server
-        // still deduplicates repeats if that read fails or navigation wins.
-        ...(!localConfiguredCheck && scope === selectionScope.current && receipts.some(receipt => receipt.accepted)
-          ? [pageQuery.waitForRefresh()] : []),
-      ]);
       const failed = results.find(r => r.status === "rejected");
       if (manual && failed?.status === "rejected") throw failed.reason;
       if (manual) setBatchNotice("检测已提交");
@@ -1317,8 +1322,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       if (!manual) throw e;
       setCheckError(batchFailure(e,"检测提交未确认，请先核对任务状态。"));
     } finally {
-      keys.forEach(key => checksInFlight.current.delete(key));
-      setSubmittingChecks(new Set(checksInFlight.current));
+      release([...unreleased]);
     }
   }
   function batchFingerprintTargets(row: ManagementRow) {
@@ -1417,6 +1421,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         void refreshTierViews(client, user);
       } else {
         await completeSelection(readManagementCheckSelection, plan.revision);
+        setBatchPreview(null);
         const receipts = await queueChecks(plan.kind,plan.targets,false);
         if (receipts?.some(receipt => !receipt.accepted)) setUnconfirmedReceipts(receipts);
         else setBatchNotice("批量检测已提交");
@@ -2115,6 +2120,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                       const overviewChecks = scopedModels?.length ? [...new Set(scopedModels)].map(model => checkByModel.get(model) || {model,state:"idle",message:"",result:null}) : checks;
                       const scopeNote = scopedModels?.length && checks.length ? `本次已选 ${overviewChecks.length} 个模型 · 全部 ${checks.length} 个模型记录可在详情查看` : undefined;
                       const liveGroup = progressByAccount.get(account.id)?.progress?.groups.find(g=>g.group_id===t.group_id);
+                      const sendingModelCheck = checkKeys(account, t, "check", configured).some(key => submittingChecks.has(key));
+                      const verifyingModelCheck = !!account.id && justSubmittedSiteRows.current.get(JSON.stringify([user, account.id, t.group_id]))?.kinds.has("check") || configuredResults.awaiting(configured);
                       const openDrawer = () => { if (usablePage) setManagementDetail(managementRow); };
                       return (
                       <tr
@@ -2163,7 +2170,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                               </>;
                               case "protocol": return <ChannelProtocolSummary row={managementRow} imports={imports.data} routes={optimizationRoutes}/>;
                               case "rate": return <BillingRate target={t} model={tableModel} configured={configured} compact />;
-                              case "availability": return t.state === "error" ? (
+                              case "availability": return !(selected && pending(selected.state)) && (sendingModelCheck || verifyingModelCheck) ? (
+                            <span className="check-status" role="status"><Spinner small />{sendingModelCheck ? "提交中" : "核对检测状态"}</span>
+                          ) : t.state === "error" ? (
                             <span className="check-status error">同步失败</span>
                           ) : selected ? (
                             <AvailabilityStatus check={selected} />

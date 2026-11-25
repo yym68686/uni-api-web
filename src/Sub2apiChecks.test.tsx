@@ -1455,7 +1455,7 @@ it("preselects successful models and imports into the selected source key at the
   await user.click(screen.getByRole("button", { name: "添加到渠道" }));
   const dialog = screen.getByRole("dialog");
   expect(
-    within(dialog).getByRole("checkbox", { name: "gpt-6-astra" }),
+    await within(dialog).findByRole("checkbox", { name: "gpt-6-astra" }, {timeout:4000}),
   ).toBeChecked();
   expect(
     within(dialog).getByRole("checkbox", { name: "gpt-5.6-sol" }),
@@ -1486,7 +1486,9 @@ it("preselects successful models and imports into the selected source key at the
   await user.selectOptions(within(dialog).getByLabelText("渠道添加位置"), "2");
   expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toHaveValue("2");
   expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toBeDisabled();
-  await user.click(within(dialog).getByRole("button", { name: "添加到渠道" }));
+  const add = within(dialog).getByRole("button", { name: "添加到渠道" });
+  await waitFor(() => expect(add).toBeEnabled());
+  await user.click(add);
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
     account_id: "one",
@@ -1637,7 +1639,9 @@ it("all-models groups channels and probes all supported models despite available
   expect(writes[0]).toEqual({
     targets: [{ account_id: "one", group_id: 1, models: [...SUB_MODELS] }],
   });
-  await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
+  const rowCheck = screen.getByRole("button", { name: "检测 one same-group" });
+  await waitFor(() => expect(rowCheck).toBeEnabled());
+  await user.click(rowCheck);
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1]).toEqual({...writes[0],manual:true});
   await user.click(
@@ -1727,7 +1731,7 @@ it("specific model uses Astra group quality and only tests the selected model", 
     { account_id: "one", group_id: 1, models: ["gpt-5.6-sol"] },
   ]);
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "");
-  expect(screen.getByRole("table")).toHaveTextContent(`2/${SUB_MODELS.length} 可用`);
+  await waitFor(() => expect(screen.getByRole("table")).toHaveTextContent(`2/${SUB_MODELS.length} 可用`));
   await user.click(
     screen.getByRole("button", { name: "检测全部模型 · 1 个渠道" }),
   );
@@ -2575,7 +2579,9 @@ it("remembers model settings per user and uses them for batch and row probes", a
   await user.click(await screen.findByRole("button",{name:"确认提交检测"}));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({ targets: [{ account_id: "one", group_id: 1, models }] });
-  await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
+  const rowCheck = screen.getByRole("button", { name: "检测 one same-group" });
+  await waitFor(() => expect(rowCheck).toBeEnabled());
+  await user.click(rowCheck);
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1]).toEqual({...writes[0],manual:true});
   view.unmount();

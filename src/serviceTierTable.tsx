@@ -121,5 +121,5 @@ export function submitTierChecks(tier: ServiceTier, targets: TierTarget[], manua
       kind: tier, manual, confirmed: true, targets: targets.map(({model, scope, ...target}) =>
         ({...target, models: [model], expected_scope: scope})),
     }),
-  }, {localConfiguredCheck: true});
+  }, {localCheckRefresh: true});
 }

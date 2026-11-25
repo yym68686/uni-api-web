@@ -21,6 +21,12 @@
   padding: 20px 28px;
   overflow: auto;
 }
+.guide-dialog.optimization-read-error {
+  width: min(520px, calc(100vw - 32px));
+}
+.optimization-read-error .channel-optimization-body {
+  overflow-wrap: anywhere;
+}
 .optimization-events {
   display: flex;
   flex-wrap: wrap;

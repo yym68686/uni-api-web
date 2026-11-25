@@ -69,6 +69,48 @@ func TestManagementOptimizationPreviewKeepsSelectedProjectionAcrossLargeDirector
 	t.Logf("large preview: groups=%d models>=%d bytes=%d elapsed=%s", len(preview.Rows), 842*242, w.Body.Len(), time.Since(started))
 }
 
+func TestManagementOptimizationPreviewDoesNotFallBackForUnrelatedLegacyEvidence(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	// Model metadata and state remain in the directory, but this invalid
+	// off-scope projection must not cause a global scan of full results.
+	if _, err := s.control.db.Exec(`UPDATE console_management_model_signal SET valid=false WHERE model='extra-model'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, compact, err := readManagementCompactRevision(ctx, s.control.db, "owner"); err != nil || compact {
+		t.Fatal("fixture did not disable the global compact proof", compact, err)
+	}
+	filters := managementQueryFilters{GroupStatus: "available", Model: "gpt-5.5", Availability: "success"}
+	token, err := s.control.newSession(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/optimization-preview?"+url.Values{"filters": {mustJSON(filters)}}.Encode(), nil)
+	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	var preview managementOptimizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil || w.Code != 200 || len(preview.Rows) != 61 {
+		t.Fatal("scoped preview failed", w.Code, err, len(preview.Rows), output.String())
+	}
+	logs := output.String()
+	if !strings.Contains(logs, "compact_revision=false catalog_only=false model_scoped=true models=183 receipt_ids=244") || strings.Contains(logs, "model_scoped=false") {
+		t.Fatal("preview fell back to an owner-wide evidence scan", logs)
+	}
+	for _, row := range preview.Rows {
+		if row.Target.SummaryModel != filters.Model || row.Selected == nil || row.Selected.Result == nil ||
+			row.Selected.Result.Availability.Usage == nil || row.Selected.Result.Availability.Usage.InputPrice == nil ||
+			*row.Selected.Result.Availability.Usage.InputPrice != 2 {
+			t.Fatal("preview lost selected receipt or full model metadata", row.ID)
+		}
+	}
+}
+
 func TestManagementOptimizationPreviewReadsFreshCompleteFilteredSnapshotWithoutExecuting(t *testing.T) {
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)

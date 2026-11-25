@@ -15,6 +15,8 @@ type managementOptimizationResponse struct {
 	Filters managementQueryFilters `json:"filters"`
 }
 
+type managementOptimizationPreviewKey struct{}
+
 // This endpoint can only read a new preview. It issues no selection token and
 // cannot submit a check or change a route. Applying the user's chosen changes
 // still uses channel-batch's original configuration revision and validation.
@@ -39,6 +41,7 @@ func (s *Service) managementOptimizationPreview(w http.ResponseWriter, r *http.R
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	if filters.Model != "" {
+		ctx = context.WithValue(ctx, managementOptimizationPreviewKey{}, true)
 		ctx = context.WithValue(ctx, managementSelectedReceiptsKey{}, true)
 		ctx = context.WithValue(ctx, managementSelectedModelsKey{}, true)
 	}
@@ -58,7 +61,15 @@ func (s *Service) managementOptimizationPreview(w http.ResponseWriter, r *http.R
 	} else {
 		page, view, rows := snapshot.Page, snapshot.View, snapshot.Rows
 		eligible := managementEligibleRows(rows)
-		err = writeManagementJSON(w, r, managementOptimizationResponse{
+		response := r.WithContext(ctx)
+		// Preview bodies can contain hundreds of rows. Use the fast gzip
+		// encoder when negotiated instead of spending the remaining read
+		// budget compressing the large, one-use response at Brotli level 5.
+		if managementAcceptsGzip(r.Header.Get("Accept-Encoding")) {
+			response.Header = r.Header.Clone()
+			response.Header.Set("Accept-Encoding", "gzip")
+		}
+		err = writeManagementJSON(w, response, managementOptimizationResponse{
 			managementSelectionResponse: managementSelectionResponse{
 				Format: "management-optimization-preview-v1", Revision: page.Revision, ReadAtMS: page.ReadAtMS,
 				Total: len(rows), EligibleCount: len(eligible), Rows: rows,
@@ -67,6 +78,9 @@ func (s *Service) managementOptimizationPreview(w http.ResponseWriter, r *http.R
 		})
 		if err != nil {
 			class = "management_response_write_failed"
+			if errors.Is(err, context.DeadlineExceeded) && w.Header().Get("Content-Length") == "" {
+				http.Error(w, "优化预览读取超时，请重新读取", http.StatusServiceUnavailable)
+			}
 		}
 	}
 	log.Printf("management_optimization_preview elapsed_ms=%d rows=%d class=%s canceled=%t request_id=%s", time.Since(start).Milliseconds(), len(snapshot.Rows), class, ctx.Err() != nil, consoleRequestID(r.Context()))

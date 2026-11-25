@@ -56,7 +56,12 @@ type managementStreamScope struct {
 	Model           string
 	Names           []string
 	CompactRevision bool
+	PreviewScope    bool
 	ReceiptReuse    *managementReceiptReuse
+}
+
+func (s managementStreamScope) scopedPredicates() bool {
+	return s.Model != "" && (s.CompactRevision || s.PreviewScope)
 }
 
 type managementStreamIdentity struct {
@@ -104,6 +109,12 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 		return nil, "", err
 	}
 	scope.CompactRevision = compact
+	// A fresh preview cannot execute a selection. It only needs an identity
+	// for its own evidence; the legacy global action/cursor revision is not
+	// required. Still validate every requested model, alias, fallback group
+	// and referenced receipt in the same fenced snapshot.
+	scope.PreviewScope, _ = ctx.Value(managementOptimizationPreviewKey{}).(bool)
+	scope.PreviewScope = scope.PreviewScope && scope.Model != "" && !compact
 	endModels := managementReadSpan(ctx, "database_signal_models")
 	models, ids, err := readManagementStreamModels(ctx, db, owner, strict, scope)
 	endModels()
@@ -138,6 +149,9 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 	out := make([]managementModelSignals, 0, len(models))
 	hash := sha256.New()
 	writer := newManagementRevisionWriter(hash)
+	if scope.PreviewScope {
+		_, _ = hash.Write([]byte("management-model-preview-v1\x00"))
+	}
 	for i := range models {
 		model := &models[i]
 		if order != nil {
@@ -198,7 +212,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		// Built-in selections have no missing-model fallback groups. Their
 		// compact predicate SQL returns only Names, including every public alias.
 		// Retain the complete index for legacy revisions and non-built-in models.
-		if scope.CompactRevision && scope.Model != "" && slices.Contains(subModels, scope.Model) {
+		if scope.scopedPredicates() && slices.Contains(subModels, scope.Model) {
 			positions.only = wanted
 		}
 	}
@@ -233,7 +247,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 	if scope.CompactRevision && scope.CatalogOnly {
 		return out, []string{}, ctx.Err()
 	}
-	if scope.CompactRevision && scope.Model != "" {
+	if scope.scopedPredicates() {
 		if len(fallbackGroups) == 0 {
 			// EXISTS over an empty fallback is false. Omit that subplan so
 			// PostgreSQL need not estimate an opaque JSON recordset or JIT it.
@@ -339,7 +353,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 	}
 	stages.next("signal_model_verify")
 	for _, model := range out {
-		if len(model.evidence) != sha256.Size && (!scope.CompactRevision || scope.Model == "" || wanted[model.item.Model.Model] || fallback[qualityGroupID(model.item.Account, model.item.Group)]) {
+		if len(model.evidence) != sha256.Size && (!scope.scopedPredicates() || wanted[model.item.Model.Model] || fallback[qualityGroupID(model.item.Account, model.item.Group)]) {
 			return nil, nil, errManagementPredicateFallback
 		}
 	}

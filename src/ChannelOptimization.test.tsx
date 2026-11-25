@@ -8,6 +8,26 @@ import {
   modelCheck,
 } from "./channelOptimization.test-data";
 
+it("keeps the toolbar unchanged on a long read error and retries from a dialog", async () => {
+  const error = "数据读取超时。（请求编号：" + "x".repeat(200) + "）";
+  const snapshot = vi.fn().mockRejectedValueOnce(new Error(error)).mockResolvedValueOnce(optimizationFixture());
+  render(<QueryClientProvider client={new QueryClient()}>
+    <div data-testid="toolbar"><ChannelOptimization snapshot={snapshot} /></div>
+  </QueryClientProvider>);
+  const user = userEvent.setup();
+  const toolbar = screen.getByTestId("toolbar");
+  const button = screen.getByRole("button", { name: "优化渠道模型" });
+  await user.click(button);
+  const failure = await screen.findByRole("dialog", { name: "优化预览读取失败" });
+  expect(within(failure).getByRole("alert")).toHaveTextContent(error);
+  expect(toolbar.children).toHaveLength(1);
+  expect(toolbar.firstElementChild).toBe(button);
+  expect(toolbar).toHaveTextContent(/^优化$/);
+  await user.click(within(failure).getByRole("button", { name: "重新读取" }));
+  expect(await screen.findByRole("dialog", { name: "优化渠道模型" })).toBeVisible();
+  expect(snapshot).toHaveBeenCalledTimes(2);
+});
+
 it("saves only the changed speed tier without running model optimization", async () => {
   const snapshot = optimizationFixture();
   const scope = "a".repeat(64);

@@ -13,11 +13,13 @@ export interface GroupProgress {
   interrupted: number;
   rejected?: number;
   skipped?: number;
+  waiting?: number;
   state?: string;
   compaction_state?: string;
   tool_use_state?: string;
   tier_version?: number;
   tool_version?: number;
+  model_version?: number;
 }
 export interface SyncProgress extends Omit<GroupProgress, "group_id"> {
   keys_ready?: number;
@@ -27,12 +29,14 @@ export interface SyncProgress extends Omit<GroupProgress, "group_id"> {
   groups: GroupProgress[];
 }
 const active = (accounts: SubAccount[]) => accounts.some(a => a.state === "queued" || a.state === "running");
+const isRowCheck = (account: SubAccount) => ["check", "quality", "compaction", "tool_use"].includes(account.job_kind || "") ||
+  !account.job_kind && !!account.progress?.groups.some(g => g.waiting);
 export interface ProgressResponse { data: SubAccount[]; read_at_ms: number }
 
 export function modelProgressDetails(progress: Omit<GroupProgress, "group_id">) {
   return [
     `${progress.running} 检测中`,
-    `${progress.queued} 排队`,
+    `${progress.queued + (progress.waiting || 0)} 排队`,
     progress.rejected ? `${progress.rejected} 上游拒绝` : "",
     progress.skipped ? `${progress.skipped} 已跳过` : "",
     progress.interrupted ? `${progress.interrupted} 已中断` : "",
@@ -52,14 +56,14 @@ export function useSubSyncResultRefresh(user: string, page: ManagementPage | und
     if (!progress) return;
     const previous = new Map(state.response?.data.map(a => [a.id, a]));
     const current = new Map(progress.data.map(a => [a.id, a]));
-    const settled = progress.data.some(a => !active([a]) && previous.has(a.id) && active([previous.get(a.id)!]));
+    const settled = progress.data.some(a => !active([a]) && previous.has(a.id) && active([previous.get(a.id)!]) && !isRowCheck(previous.get(a.id)!));
     // Also recover a page opened while the job was ending, before the first
     // poll observed its active state (or a retained pre-completion page).
-    const stalePage = page && (page.accounts.some(a => active([a]) && current.has(a.id) && !active([current.get(a.id)!]))
+    const stalePage = page && (page.accounts.some(a => !isRowCheck(a) && active([a]) && current.has(a.id) && !active([current.get(a.id)!]))
       || page.rows.some(row => {
         const account = current.get(row.account.id);
         const group = account?.progress?.groups?.find(g => g.group_id === row.target.group_id);
-        return account && !active([account]) && group && group.total > 0 && group.queued === 0 && group.running === 0
+        return account && !isRowCheck(account) && !active([account]) && group && group.total > 0 && group.queued === 0 && group.running === 0 && !group.waiting
           && ([row.target.state, row.target.compaction_state, row.target.tool_use_state].some(s => s === "queued" || s === "running")
             || row.checks.some(c => c.state === "queued" || c.state === "running"));
       }));
@@ -75,28 +79,43 @@ export function useSubSyncResultRefresh(user: string, page: ManagementPage | und
 
 // An active job needs live progress, not repeated replacement of the channel
 // table. Scope each poll stream to its freshly read page and stop on completion.
-export function useSubSyncProgress(user: string, accounts: SubAccount[], readAt: number | undefined, submission = 0) {
+export function useSubSyncProgress(user: string, accounts: SubAccount[], readAt: number | undefined, submission = 0, visibleAccounts?: string[], verifying = false) {
   const client=useQueryClient();
-  const queryKey=["sub-sync-progress", user, JSON.stringify(accounts.map(a=>a.id).sort()), submission];
+  const scope = new Set(visibleAccounts ?? accounts.map(a => a.id));
+  const queryKey=["sub-sync-progress", user, JSON.stringify([...scope].sort()), submission];
   type Response = ProgressResponse;
   return useQuery({
     queryKey,
     enabled: !!readAt && accounts.length>0,
     queryFn: async ({ signal }) => {
       const previous=client.getQueryData<Response>(queryKey);
-      // First read includes completed accounts too. Subsequent reads only
-      // aggregate active jobs, missing summaries or changed job identities.
-      const watched=(previous?.data || accounts).filter(a=>!previous || !a.progress || active([a])).map(a=>a.id);
-      const response = await controlRequest<Response>("/v1/sub2api/accounts/progress?accounts="+encodeURIComponent(JSON.stringify(watched)), { signal, cache: "no-store" });
-      if (!Array.isArray(response.data) || !(response.read_at_ms > 0)) throw Error("任务进度不完整");
+      // Keep polling each visible group, including a job that ended before
+      // the first poll. The accounts view can reuse unchanged idle summaries.
+      const watched=visibleAccounts ? [...scope] : (previous?.data || accounts)
+        .filter(a=>scope.has(a.id) && (!previous || !a.progress || active([a]))).map(a=>a.id);
+      // The API caps the watch list and the proxy also bounds URL length.
+      // Channel rows watch only the displayed accounts, not the full catalog.
+      const batches: string[][] = [[]];
+      for (const id of watched) {
+        const batch = batches[batches.length - 1];
+        if (batch.length && (batch.length >= 128 || encodeURIComponent(JSON.stringify([...batch, id])).length > 5500)) batches.push([id]);
+        else batch.push(id);
+      }
+      let response: Response = {data: [], read_at_ms: 0};
+      const summaries = new Map<string, SubAccount>();
+      for (const batch of batches) {
+        response = await controlRequest<Response>("/v1/sub2api/accounts/progress?accounts="+encodeURIComponent(JSON.stringify(batch)), { signal, cache: "no-store" });
+        if (!Array.isArray(response.data) || !(response.read_at_ms > 0)) throw Error("任务进度不完整");
+        for (const a of response.data) if (a.progress) summaries.set(a.id, a);
+      }
       const old=new Map(previous?.data.map(a=>[a.id,a]));
       return {...response,data:response.data.map(a=>{
-        const before=old.get(a.id);
+        const before=summaries.get(a.id) ?? old.get(a.id);
         if(a.progress || !before?.progress || active([a]) || a.state!==before.state || a.synced_at!==before.synced_at || a.job_kind!==before.job_kind || a.sync_only!==before.sync_only || JSON.stringify(a.sync_models)!==JSON.stringify(before.sync_models))return a;
         return {...a,progress:before.progress,active_groups:before.active_groups,completed_groups:before.completed_groups};
       })};
     },
-    refetchInterval: query => query.state.data && !active(query.state.data.data) && !query.state.data.data.some(a=>!a.progress) ? false : 3000,
+    refetchInterval: query => !verifying && query.state.data && !active(query.state.data.data) && !query.state.data.data.some(a=>scope.has(a.id) && !a.progress) ? false : 3000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

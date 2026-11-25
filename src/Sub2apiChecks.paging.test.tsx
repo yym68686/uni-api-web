@@ -13,6 +13,7 @@ import { controlRequest } from "./api";
 import { useState } from "react";
 import type { ManagementPagePosition } from "./managementQuery";
 import { useConfiguredCheckResultRefresh } from "./configuredCheckProgress";
+import { managementColumnsStorageKey } from "./managementOverview";
 
 afterEach(() => vi.unstubAllGlobals());
 const target = (n: number): SubTarget => ({
@@ -1208,12 +1209,13 @@ it.each([
  expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
 });
 
-it("keeps other rows actionable after a four-model check is accepted and its page refresh is still waiting", async () => {
+it("keeps other rows actionable after a four-model check while its row details are still loading", async () => {
  const owner = "concurrent-four-model-checks";
  const models = SUB_MODELS.slice(0, 4);
  saveSubModels(owner, models);
  const checks: { targets: { group_id: number; models: string[] }[] }[] = [];
- const refreshes: ((response: Response) => void)[] = [];
+ const details = new Map<number, (response: Response) => void>();
+ let pageReads = 0;
  let switches = 0;
  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
   const path = new URL(input).pathname;
@@ -1222,9 +1224,11 @@ it("keeps other rows actionable after a four-model check is accepted and its pag
    return Response.json({queued: 4}, {status: 202});
   }
   if (path.endsWith("/channel-management/query")) {
-   if (checks.length) return new Promise<Response>(resolve => { refreshes.push(resolve); });
+   pageReads++;
    return Response.json(page());
   }
+  const group = /\/groups\/(\d+)\/details$/.exec(path);
+  if (group) return new Promise<Response>(resolve => { details.set(Number(group[1]), resolve); });
   if (path.endsWith("/accounts/progress")) return idleProgress();
   if (path.endsWith("/detection-settings")) {
    if (init?.method === "PATCH") switches++;
@@ -1239,7 +1243,7 @@ it("keeps other rows actionable after a four-model check is accepted and its pag
  const third = screen.getByRole("row", {name: "查看 Owned site Channel 3 渠道详情"});
  expect(first).toHaveTextContent("检测已选 4 个模型");
  await user.click(first);
- await waitFor(() => expect(refreshes).toHaveLength(1));
+ await waitFor(() => expect(details.has(1)).toBe(true));
  expect(checks[0].targets[0]).toMatchObject({group_id: 1, models});
  expect(screen.getByRole("table").parentElement).not.toHaveAttribute("inert");
  expect(first).toBeDisabled();
@@ -1252,15 +1256,95 @@ it("keeps other rows actionable after a four-model check is accepted and its pag
  await user.click(second);
  expect(switches).toBe(1);
  expect(checks.map(check => check.targets[0].group_id)).toEqual([1, 2]);
- await waitFor(() => expect(refreshes).toHaveLength(2));
- await act(async () => refreshes[0](Response.json(page())));
- expect(first).toBeDisabled();
+ await waitFor(() => expect(details.has(2)).toBe(true));
+ const finish = (id: number) => details.get(id)!(Response.json({data: [{...account, targets: [target(id)]}]}));
+ await act(async () => finish(1));
+ await waitFor(() => expect(first).toBeEnabled());
  expect(second).toBeDisabled();
  expect(within(third).getByRole("button", {name: "检测 Owned site Channel 3"})).toBeEnabled();
- await act(async () => refreshes[1](new Response("fixture delayed refresh failure", {status: 503})));
+ await act(async () => finish(2));
  expect(screen.getByRole("table").parentElement).not.toHaveAttribute("inert");
  await waitFor(() => expect(second).toBeEnabled());
+ expect(pageReads).toBe(1);
  view.unmount();
+});
+
+it("updates selected-model rows independently during a mixed batch larger than the progress watch limit", async () => {
+  const owner = "large-live-mixed-batch", model = "gpt-6.2-sol", user = userEvent.setup();
+  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+  saveSubFilters(owner, {...subFilterDefaults, model});
+  const native: ManagedChannel = {
+    source_id:"src", source_name:"Native", provider:"native", name:"Native", models:[model], engine:"gpt",
+    account_id:"", account_ids:[], group_id:0, api_key_id:"key", key_position:0, key_prefix:"", positions:{}, revision:"current", manageable:true,
+  };
+  const all = Array.from({length: 300}, (_, i) => {
+    const a = {...account, id: `account-${i}`, name:`Site ${i}`};
+    return {...rows[0], id: `large-${i}`, account: a, accountIds:[a.id], target: target(1)};
+  });
+  const siteRows = [all[0], {...all[0], id:"large-sibling", target:target(2)}, ...all.slice(1)];
+  const nativeRow = {...rows[0], id:"native-mixed", account:{...account,id:"",name:"Native"}, accountIds:[], configured:native};
+  const eligible = [...siteRows, nativeRow];
+  let pageReads = 0, tick = 1;
+  let phase: "idle" | "queued" | "running" | "done" = "idle";
+  let finishSite!: (value:Response)=>void, finishNative!: (value:Response)=>void;
+  vi.stubGlobal("fetch", vi.fn(async (input:string, init?:RequestInit) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/detection-settings")) return Response.json({disabled:[]});
+    if (url.pathname.endsWith("/channel-management/query")) {
+      if (url.searchParams.has("selection")) return Response.json({format:"management-check-selection-v1",revision:"current",read_at_ms:2,total:eligible.length,eligible_count:eligible.length,eligible});
+      pageReads++;
+      const shown = [...siteRows.slice(0,24),nativeRow];
+      return Response.json({...page(),accounts:all.map(row=>row.account),total:eligible.length,eligible_count:eligible.length,rows:shown,
+        context:{...page().context,fingerprints:Object.fromEntries(shown.map(row=>[row.id,[]]))}});
+    }
+    if (init?.method === "POST" && url.pathname.endsWith("/sub2api/checks")) {
+      expect(JSON.parse(String(init.body)).targets).toHaveLength(301);
+      return new Promise<Response>(resolve => {finishSite=resolve;});
+    }
+    if (init?.method === "POST" && url.pathname.endsWith("/channel-management/checks")) return new Promise<Response>(resolve => {finishNative=resolve;});
+    if (url.pathname.endsWith("/accounts/progress")) {
+      const watched: string[] = JSON.parse(url.searchParams.get("accounts")!);
+      expect(watched).toHaveLength(23);
+      return Response.json({data:all.map(({account:a},i)=>({...a,state:phase === "idle" || phase === "done" ? "idle" : "running",job_kind:"check",progress:watched.includes(a.id) ? {
+        total:2,completed:Number(phase==="done"),queued:0,running:0,interrupted:0,running_models:[],groups:[1,2].map(group_id => ({group_id,state: i===0&&group_id===1&&phase!=="queued"?phase:"idle",waiting:phase!=="idle"&&(group_id===2||phase==="queued")?1:0,model_version:tick})),
+      } : undefined})),read_at_ms:++tick});
+    }
+    const match = /\/accounts\/(.*?)\/groups\/(\d+)\/details$/.exec(url.pathname);
+    if (match) {
+      const a = all.find(row=>row.account.id===match[1])!.account, group = Number(match[2]);
+      const state = a.id===all[0].account.id && group===1 ? phase : "queued";
+      const result = state === "done" ? {model,checked_at:20,verdict:"not_applicable",
+        availability:{status:"success",text:"",ttft_ms:1,duration_ms:1},quality:{status:"skipped",text:"",ttft_ms:null,duration_ms:0},
+        service_tiers:{fast:{status:"supported",checked_at:Math.floor(Date.now()/1000)}}} : null;
+      return Response.json({data:[{...a,targets:[{...target(group),state,models:[{model,state,message:"",result}]}]}]});
+    }
+    return Response.json({data:[]});
+  }));
+  localStorage.setItem(managementColumnsStorageKey, JSON.stringify(["model", "availability", "fast", "ultrafast"]));
+  try { mount(owner,client); }
+  finally { localStorage.removeItem(managementColumnsStorageKey); }
+  const button = await screen.findByRole("button", {name:`检测所选模型 · ${eligible.length} 个渠道`});
+  await waitFor(()=>expect(button).toBeEnabled());
+  const row = screen.getByRole("row", {name:"查看 Site 0 Channel 1 渠道详情"});
+  const sibling = screen.getByRole("row", {name:"查看 Site 0 Channel 2 渠道详情"});
+  await user.click(button);
+  await user.click(within(await screen.findByRole("dialog", {name:"核对批量检测范围"})).getByRole("button", {name:"确认提交检测"}));
+  expect(await within(row).findByText("提交中")).toBeVisible();
+  phase="queued";
+  await act(async()=>finishSite(Response.json({queued:301}, {status:202})));
+  expect(await within(sibling).findByText("排队中")).toBeVisible();
+  phase="running";
+  await act(async()=>{await client.refetchQueries({queryKey:["sub-sync-progress"],type:"active"});});
+  expect(await within(row).findByText("检测中", {selector:".check-status"})).toBeVisible();
+  phase="done";
+  await act(async()=>{await client.refetchQueries({queryKey:["sub-sync-progress"],type:"active"});});
+  expect(await within(row).findByText("可用", {selector:".check-status"})).toBeVisible();
+  expect(within(row).getByText("已验证支持")).toBeVisible();
+  expect(within(sibling).getByText("排队中")).toBeVisible();
+  expect(screen.queryByText("批量检测已提交")).not.toBeInTheDocument();
+  expect(pageReads).toBe(1);
+  await act(async()=>finishNative(Response.json({queued:1}, {status:202})));
+  expect(await screen.findByText("批量检测已提交")).toBeVisible();
 });
 
 it.each(["success","conflict","unknown"])("closes the page-two import immediately and preserves other actions (%s)",async outcome=>{
