@@ -172,6 +172,14 @@ func managementCompaction(target subTarget, model string) string {
 	if target.Compaction == nil || target.Compaction.Model != "" && !subCapabilityModel(target.Compaction.Model) || target.Compaction.Status == "" {
 		return "untested"
 	}
+	if model != "" && len(target.Compaction.Models) > 0 {
+		for _, entry := range target.Compaction.Models {
+			if entry.Model == model && entry.Result != nil {
+				return entry.Result.Status
+			}
+		}
+		return "untested"
+	}
 	return target.Compaction.Status
 }
 

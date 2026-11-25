@@ -86,7 +86,10 @@ func (t fingerprintTarget) valid() bool {
 	return fingerprintModel(t.Model) && t.validScope()
 }
 func (t fingerprintTarget) validScope() bool {
-	return t.Model != "" && len(t.Model) <= 128 && ((t.Source != "" && t.Provider != "" && len(t.Provider) <= 256 && !strings.ContainsAny(t.Provider, "\r\n/") && t.Account == "" && t.Group == 0) || (t.Source == "" && t.Provider == "" && t.Account != "" && t.Group > 0))
+	return t.Model != "" && len(t.Model) <= 128 && t.validChannel()
+}
+func (t fingerprintTarget) validChannel() bool {
+	return (t.Source != "" && t.Provider != "" && len(t.Provider) <= 256 && !strings.ContainsAny(t.Provider, "\r\n/") && t.Account == "" && t.Group == 0) || (t.Source == "" && t.Provider == "" && t.Account != "" && t.Group > 0)
 }
 
 type fingerprintDB interface {
@@ -124,7 +127,24 @@ func enqueueFingerprintForOwner(ctx context.Context, db fingerprintDB, t fingerp
 func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
 	account, group := r.URL.Query().Get("account_id"), r.URL.Query().Get("group_id")
+	scoped := r.URL.Query().Has("scopes")
 	var target fingerprintTarget
+	var scopes []string
+	if scoped {
+		var channels []fingerprintTarget
+		raw := r.URL.Query().Get("scopes")
+		if account != "" || group != "" || len(raw) > 8192 || json.Unmarshal([]byte(raw), &channels) != nil || len(channels) == 0 || len(channels) > 16 {
+			http.Error(w, "指纹检测范围无效", 400)
+			return
+		}
+		for _, channel := range channels {
+			if !channel.validChannel() {
+				http.Error(w, "指纹检测范围无效", 400)
+				return
+			}
+			scopes = append(scopes, channel.scope())
+		}
+	}
 	if account != "" || group != "" {
 		id, err := strconv.ParseInt(group, 10, 64)
 		if err != nil || id <= 0 || account == "" {
@@ -133,12 +153,17 @@ func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 		}
 		target.Account, target.Group = account, id
 	}
-	data, err := readScopedManagementFingerprintsFrom(r.Context(), s.control.db, owner, target)
+	readAt := time.Now().UnixMilli()
+	data, err := readScopedManagementFingerprintsFrom(r.Context(), s.control.db, owner, target, scopes...)
 	if err != nil {
 		http.Error(w, "模型指纹记录读取失败", 503)
 		return
 	}
 	s.annotateLegacyFingerprintRejections(r.Context(), data)
+	if scoped {
+		writeJSON(w, 200, map[string]any{"scoped": true, "read_at_ms": readAt, "data": data})
+		return
+	}
 	catalog := currentFingerprintCatalog()
 	writeJSON(w, 200, map[string]any{"data": data, "supported_models": catalog.names, "reference_commit": catalog.commit})
 }

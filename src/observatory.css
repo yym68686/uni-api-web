@@ -173,8 +173,17 @@
 .management-query:has(.management-availability-filter) .search-field {flex-basis:9rem}
 .management-query .management-availability-filter {flex:none;background:var(--selection);color:var(--accent)}
 .management-actions {flex:0 1 auto;flex-wrap:wrap}
-.management-batch-feedback {margin:0 0 8px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;overflow-wrap:anywhere}
-.management-batch-feedback p {margin:0}
+.management-status-slot {display:flex;align-items:center;inline-size:15px;block-size:15px;flex:none}
+.management-batch-notice {
+  position:fixed;inset-inline-end:16px;inset-block-end:max(16px, env(safe-area-inset-bottom));
+  z-index:60;max-inline-size:calc(100% - 32px);pointer-events:none;
+}
+.management-batch-notice > span {
+  display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);
+  border-radius:8px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow);
+  font-size:13px;overflow-wrap:anywhere;
+}
+.management-batch-notice svg {flex:none;color:var(--green)}
 .channel-add-receipts {display:grid;gap:6px;margin-block:0 12px}
 .channel-add-receipt {display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px}
 .channel-add-receipt > span {flex:1;min-width:min(180px,100%);overflow-wrap:anywhere}

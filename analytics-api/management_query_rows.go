@@ -294,6 +294,9 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 			if c.Kind != "compaction" {
 				continue
 			}
+			if model != "" && c.Model != "" && c.Model != model {
+				continue
+			}
 			var result *subCapabilityResult
 			if len(c.Result) != 0 {
 				if err := json.Unmarshal(c.Result, &result); err != nil {
@@ -323,7 +326,7 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 			if preferred == nil || at >= prior {
 				target.Compaction, target.CompactionState = latestCompactionResult, latestCompaction.State
 				if target.Compaction == nil && latestCompaction.Message != "" {
-					target.Compaction = &subCapabilityResult{Status: "error", Message: latestCompaction.Message, Attempts: []subProbe{}}
+					target.Compaction = &subCapabilityResult{Status: "error", Model: latestCompaction.Model, Message: latestCompaction.Message, Attempts: []subProbe{}}
 				}
 			}
 		}

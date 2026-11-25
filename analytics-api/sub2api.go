@@ -858,6 +858,9 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	}
 	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "quality") {
 		err = s.subPrepareNewAPIManualKeys(ctx, id, base, job, kind)
+		if err == nil && kind == "check" {
+			ctx, err = s.scopeSiteModelCheck(ctx, id)
+		}
 		if err == nil {
 			err = s.subTestTargets(ctx, id, base, job, kind == "quality")
 		}
@@ -1373,7 +1376,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 		workers = client.Transport.(siteProbeTransport).budget.concurrency
 	}
 	jobs := make(chan target)
-	errs := make(chan error, len(targets)*3)
+	errs := make(chan error, len(targets)*4)
 	pauseSending := make(chan struct{})
 	var once sync.Once
 	var wg sync.WaitGroup
@@ -1451,7 +1454,9 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					return
 				}
 				raw, _ := json.Marshal(result)
-				n, e = s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, id, t.id, t.model, string(raw), job)
+				n, e = s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='done',
+ result=$4::jsonb || CASE WHEN jsonb_typeof(result->'service_tiers')='object' THEN jsonb_build_object('service_tiers',result->'service_tiers') ELSE '{}'::jsonb END,
+ message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, id, t.id, t.model, string(raw), job)
 				if e != nil {
 					log.Printf("sub_sync_write_failed stage=save_result class=%s", databaseErrorClass(e))
 					errs <- errors.New("检测结果保存失败")
@@ -1459,6 +1464,9 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 				}
 				if p := subPlan(ctx); p != nil && n == 1 {
 					p.modelAdvanced.Store(true)
+				}
+				if n != 1 {
+					continue
 				}
 				if !qualityOnly && fingerprintModel(t.model) && result.Availability.Status == "success" {
 					// Enqueue only while this account job is still current. Stop
@@ -1469,7 +1477,12 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 						var owner string
 						e = tx.QueryRowContext(ctx, `SELECT job_id=$2,owner FROM console_sub_accounts WHERE id=$1 FOR UPDATE`, id, job).Scan(&current, &owner)
 						if e == nil && current {
-							e = enqueueAutomaticFingerprint(ctx, tx, fingerprintTarget{Account: id, Group: t.id, Model: t.model}, owner)
+							fp := fingerprintTarget{Account: id, Group: t.id, Model: t.model}
+							if _, selected := siteModelCheckScope(ctx, t.id); selected {
+								e = enqueueFingerprint(ctx, tx, fp)
+							} else {
+								e = enqueueAutomaticFingerprint(ctx, tx, fp, owner)
+							}
 						}
 						if e == nil {
 							e = tx.Commit()
@@ -1479,6 +1492,30 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					}
 					if e != nil {
 						errs <- errors.New("模型指纹入队失败，请单独重新检测")
+					}
+				}
+				if _, selected := siteModelCheckScope(ctx, t.id); selected && subTierModel(t.model) &&
+					result.Availability.Status == "success" && result.Availability.Protocol == "responses" && ctx.Err() == nil {
+					for _, tier := range []string{"fast", "ultrafast"} {
+						if ctx.Err() != nil {
+							break
+						}
+						probe := probeSiteTier(ctx, clients[t.id], base, key, t.model, tier)
+						_, e = s.subProbeWrite(ctx, `UPDATE console_sub_models
+ SET result=jsonb_set(result,'{service_tiers}',COALESCE(result->'service_tiers','{}'::jsonb) || jsonb_build_object($6::text,$4::jsonb)),
+ tier_read_version=tier_read_version+1
+ WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='done' AND EXISTS
+ (SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND state='running'
+ AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()) FOR SHARE)
+ AND ($4::jsonb->>'status'<>'inconclusive' OR COALESCE(result->'service_tiers'->$6::text->>'status','') NOT IN ('supported','unsupported','not_honored'))`,
+							id, t.id, t.model, mustJSON(probe), job, tier)
+						if e != nil {
+							log.Printf("site tier result save failed class=%s", databaseErrorClass(e))
+							if ctx.Err() != nil {
+								break
+							}
+							errs <- errors.New("档位检测结果保存失败")
+						}
 					}
 				}
 				// Preserve the legacy Astra projection for older clients during rollout.

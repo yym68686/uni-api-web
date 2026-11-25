@@ -320,7 +320,7 @@ func readManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owne
 	return readScopedManagementFingerprintsFrom(ctx, db, owner, fingerprintTarget{})
 }
 
-func readScopedManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owner string, scope fingerprintTarget) ([]fingerprintRecord, error) {
+func readScopedManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owner string, scope fingerprintTarget, scopes ...string) ([]fingerprintRecord, error) {
 	query := `SELECT COALESCE(f.source_id,''),f.provider,COALESCE(f.account_id,''),f.group_id,f.model,
  CASE WHEN f.state='running' AND f.deadline<now() THEN 'interrupted' ELSE f.state END,f.message,f.revision,f.result,
  CASE WHEN f.state='done' AND f.result->>'status' IN ('match','mismatch') THEN NULL ELSE f.previous_verdict->'result' END,
@@ -334,6 +334,9 @@ func readScopedManagementFingerprintsFrom(ctx context.Context, db controlQueryDB
 	if scope.Account != "" {
 		query += ` AND f.account_id=$3 AND f.group_id=$4 AND a.owner=$1`
 		args = append(args, scope.Account, scope.Group)
+	} else if len(scopes) > 0 {
+		query += ` AND f.scope=ANY($3::text[])`
+		args = append(args, scopes)
 	}
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {

@@ -593,22 +593,36 @@ it("renders just the current 25 rows and fetches all 61 before a batch, without 
   ).toEqual([]);
 });
 
-it.each([202, 502])("shows a failed selected-model preview, then confirms only that model and handles submit status %s", async submitStatus => {
-  const owner = `selected-model-batch-feedback-${submitStatus}`;
+it.each([
+  { siteStatus: 202, nativeStatus: 0 },
+  { siteStatus: 502, nativeStatus: 0 },
+  { siteStatus: 202, nativeStatus: 202 },
+  { siteStatus: 502, nativeStatus: 202 },
+])("keeps the table in place for site HTTP $siteStatus and native HTTP $nativeStatus (0 = no native)", async ({ siteStatus, nativeStatus }) => {
+  const owner = `selected-model-batch-feedback-${siteStatus}-${nativeStatus}`;
   const model = "gpt-6.2-sol";
   saveSubFilters(owner, { ...subFilterDefaults, model });
   saveSubModels(owner, [model], SUB_MODELS);
+  const configured: ManagedChannel = {
+    kind: "configured", source_id: "gateway", source_name: "Gateway", provider: "native", name: "Native",
+    models: [model], engine: "gpt", service_tier_scope: "a".repeat(64), account_ids: [], account_id: "", group_id: 0, api_key_id: "", key_position: 0,
+    key_prefix: "", positions: {}, revision: "native", manageable: false,
+  };
   let previewReads = 0;
-  const writes: unknown[] = [];
+  const writes: Record<string, unknown> = {};
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input);
     if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
     if (url.pathname.endsWith("/detection-settings")) return Response.json({ disabled: [] });
-    if (url.pathname.endsWith("/sub2api/checks") && init?.method === "POST") {
-      writes.push(JSON.parse(String(init.body)));
-      return submitStatus === 202
-        ? Response.json({ queued: true }, { status: 202 })
-        : new Response("<html>Bad Gateway</html>", { status: 502 });
+    if (init?.method === "POST") {
+      const native = url.pathname.endsWith("/channel-management/checks");
+      expect(url.pathname).toBe(native ? "/analytics/v1/channel-management/checks" : "/analytics/v1/sub2api/checks");
+      const branch = native ? "native" : "site";
+      expect(writes).not.toHaveProperty(branch);
+      writes[branch] = JSON.parse(String(init.body));
+      const status = native ? nativeStatus : siteStatus;
+      return status === 202 ? Response.json({ queued: native ? 1 : true }, { status })
+        : new Response("<html>Bad Gateway</html>", { status });
     }
     if (url.pathname.endsWith("/channel-management/query")) {
       if (!url.searchParams.has("selection")) return Response.json(page());
@@ -617,7 +631,8 @@ it.each([202, 502])("shows a failed selected-model preview, then confirms only t
       if (++previewReads === 1) return new Response("<html>Bad Gateway</html>", { status: 502 });
       return Response.json({
         format: "management-check-selection-v1", revision: "current", read_at_ms: 2, total: 61, eligible_count: 61,
-        eligible: rows.map((row, i) => i === 60 ? { ...row, target: { ...row.target, models: [{ model, state: "queued" }] } } : row),
+        eligible: rows.map((row, i) => i === 60 ? { ...row, target: { ...row.target, models: [{ model, state: "queued" }] } }
+          : i === 59 && nativeStatus ? { ...row, account: { ...account, id: "" }, accountIds: [], configured } : row),
       });
     }
     return Response.json({ data: [] });
@@ -626,26 +641,96 @@ it.each([202, 502])("shows a failed selected-model preview, then confirms only t
   const user = userEvent.setup();
   const detect = await screen.findByRole("button", { name: "检测所选模型 · 61 个渠道" });
   await waitFor(() => expect(detect).toBeEnabled());
+  const table = screen.getByRole("region", { name: "渠道管理表，可横向滚动" });
+  const toolbar = table.previousElementSibling;
+  expect(toolbar).toHaveClass("management-toolbar");
   await user.click(detect);
   const failure = await screen.findByRole("dialog", { name: "批量检测失败" });
   expect(within(failure).getByRole("alert")).toHaveTextContent("检测范围读取失败，请重试。（HTTP 502）");
   expect(screen.queryByRole("dialog", { name: "核对批量检测范围" })).not.toBeInTheDocument();
-  expect(writes).toHaveLength(0);
+  expect(writes).toEqual({});
+  expect(table.previousElementSibling).toBe(toolbar);
   await user.click(within(failure).getByRole("button", { name: "知道了" }));
   await user.click(detect);
   const preview = await screen.findByRole("dialog", { name: "核对批量检测范围" });
   expect(within(preview).getByText(/本次计划 60 \/ 61 个渠道/)).toBeVisible();
-  expect(writes).toHaveLength(0);
+  expect(writes).toEqual({});
   await user.click(within(preview).getByRole("button", { name: "确认提交检测" }));
-  if (submitStatus === 202) {
-    expect(await screen.findByText(/站点渠道.*已收到提交回执/)).toBeVisible();
+  if (siteStatus === 202) {
+    const notice = await screen.findByText("批量检测已提交");
+    expect(notice).toBeVisible();
+    const status = notice.closest('[role="status"]');
+    expect(status?.parentElement).toBe(document.body);
+    expect(status).toHaveTextContent(/^批量检测已提交$/);
+    expect(screen.queryByText(/已收到提交回执/)).not.toBeInTheDocument();
   } else {
     const unconfirmed = await screen.findByRole("dialog", { name: "批量检测提交结果未确认" });
     expect(within(unconfirmed).getByText(/未收到检测回执（HTTP 502）/)).toBeVisible();
     expect(within(unconfirmed).getByText(/避免重复提交/)).toBeVisible();
+    if (nativeStatus) expect(within(unconfirmed).getByText(/原生渠道.*已收到提交回执，排队 1 项/)).toBeVisible();
+    expect(screen.queryByText("批量检测已提交")).not.toBeInTheDocument();
+    await user.click(within(unconfirmed).getByRole("button", { name: "知道了" }));
   }
+  expect(screen.getByRole("region", { name: "渠道管理表，可横向滚动" })).toBe(table);
+  expect(table.previousElementSibling).toBe(toolbar);
   expect(previewReads).toBe(3);
-  expect(writes).toEqual([{ targets: rows.slice(0, 60).map(row => ({ account_id: account.id, group_id: row.target.group_id, models: [model] })) }]);
+  expect(writes).toEqual({
+    site: { targets: rows.slice(0, nativeStatus ? 59 : 60).map(row => ({ account_id: account.id, group_id: row.target.group_id, models: [model] })) },
+    ...(nativeStatus ? { native: { kind: "check", full_model_check: true, targets: [{
+      source_id: configured.source_id, provider: configured.provider, models: [model], tier_models: [model], expected_scope: "a".repeat(64),
+    }] } } : {}),
+  });
+});
+
+it("updates a completed site row while another group is still running without rereading the management page", async () => {
+  const owner = "incremental-site-suite";
+  const model = "gpt-6.2-sol";
+  saveSubFilters(owner, { ...subFilterDefaults, model });
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  let pageReads = 0, progressReads = 0, finished = false;
+  const detailReads: number[] = [];
+  const done = { model, state:"done", message:"", result:{
+    model, checked_at:3, verdict:"not_applicable",
+    availability:{status:"success",text:"",ttft_ms:1,duration_ms:1},
+    quality:{status:"not_applicable",text:"",ttft_ms:null,duration_ms:0},
+    service_tiers:{fast:{status:"supported",checked_at:Math.floor(Date.now()/1000)}},
+  }};
+  const queued = {model,state:"queued",message:"",result:null};
+  const list = {...page(),total:2,eligible_count:2,next_cursor:undefined, rows:page().rows.slice(0,2).map(row=>({
+    ...row, target:{...row.target,state:"queued",models:[queued]},checks:[queued],selected:queued,
+  })),accounts:[{...account,state:"running"}]};
+  vi.stubGlobal("fetch", vi.fn(async(input:string) => {
+    const path = new URL(input).pathname;
+    if (path.endsWith("/channel-management/query")) { pageReads++; return Response.json(list); }
+    if (path.endsWith("/accounts/progress")) {
+      progressReads++;
+      return Response.json({data:[{...account,state:"running",progress:{total:2,completed:Number(finished),queued:2-Number(finished),running:0,interrupted:0,running_models:[],groups:[1,2].map(group_id=>{
+        const completed = group_id === 1 && finished;
+        return {group_id,state:completed?"done":"queued",total:1,completed:Number(completed),queued:Number(!completed),running:0,interrupted:0,tier_version:Number(completed)};
+      })}}],read_at_ms:finished?3:2});
+    }
+    const details = /\/groups\/(\d+)\/details$/.exec(path);
+    if (details) {
+      const id = Number(details[1]); detailReads.push(id);
+      const check = id === 1 && finished ? done : queued;
+      return Response.json({data:[{...account,targets:[{...target(id),state:check.state,models:[check]}]}]});
+    }
+    return Response.json({data:[]});
+  }));
+  mount(owner,client);
+  const row1 = await screen.findByRole("row",{name:"查看 Owned site Channel 1 渠道详情"});
+  const row2 = screen.getByRole("row",{name:"查看 Owned site Channel 2 渠道详情"});
+  await waitFor(()=>expect(progressReads).toBeGreaterThan(0));
+  await waitFor(()=>expect(detailReads.sort()).toEqual([1,2]));
+  expect(within(row1).getByText("排队中")).toBeVisible();
+  finished = true;
+  detailReads.length = 0;
+  await act(async()=>{ await client.refetchQueries({queryKey:["sub-sync-progress"]}); });
+  expect(await within(row1).findByText("可用",{selector:".check-status"})).toBeVisible();
+  expect(within(row2).getByText("排队中")).toBeVisible();
+  expect(screen.getByRole("row",{name:"查看 Owned site Channel 1 渠道详情"})).toBe(row1);
+  expect(detailReads).toEqual([1]);
+  expect(pageReads).toBe(1);
 });
 
 it("opens optimization from a fresh full snapshot after results changed, while batches still reject the old page selection", async () => {

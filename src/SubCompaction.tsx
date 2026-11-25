@@ -10,19 +10,22 @@ export interface CompactionResult {
   message?: string;
   checked_at: number;
   attempts: Probe[];
+  models?: {model: string; result?: CompactionResult | null}[];
 }
 export function compactionStatus(target: SubTarget, model?: string) {
   if (model && !isCapabilityCheckModel(model)) return "not_applicable";
   if (target.compaction?.model && !isCapabilityCheckModel(target.compaction.model)) return "untested";
-  return target.compaction?.status || "untested";
+  return compactionResult(target, model)?.status || "untested";
 }
+const compactionResult = (target: SubTarget, model?: string) =>
+  model && target.compaction?.models?.length ? target.compaction.models.find(entry => entry.model === model)?.result : target.compaction;
 export const compactionLabels = {
   supported: "支持压缩", unsupported: "不支持压缩", error: "检测失败", untested: "未检测", not_applicable: "不适用",
 };
 export function CompactionStatus({ target, model }: { target: SubTarget; model?: string }) {
   if (model && !isCapabilityCheckModel(model)) return <Tip text={capabilityCheckScope}><span className="check-status inconclusive">不适用</span></Tip>;
   const status = compactionStatus(target, model);
-  const result = target.compaction;
+  const result = compactionResult(target, model);
   const running = ["queued", "running"].includes(target.compaction_state || "");
   return <Tip text={[
     result?.model && `已验证模型：${result.model}`,

@@ -18,7 +18,7 @@ func compactAccountTarget(target subTarget) any {
 		projected[i] = subModelSummary{Model: model.Model, State: model.State, Message: summaryMessage(model.Message)}
 		if r := model.Result; r != nil {
 			projected[i].Result = &subResultSummary{Model: r.Model, CheckedAt: r.CheckedAt, Verdict: r.Verdict,
-				Availability: summarizeSubProbe(r.Availability), Quality: summarizeSubProbe(r.Quality)}
+				Availability: summarizeSubProbe(r.Availability), Quality: summarizeSubProbe(r.Quality), ServiceTiers: r.ServiceTiers}
 		}
 	}
 	out["models"] = projected
@@ -54,11 +54,12 @@ type subModelSummary struct {
 }
 
 type subResultSummary struct {
-	Model        string          `json:"model"`
-	CheckedAt    int64           `json:"checked_at"`
-	Availability subProbeSummary `json:"availability"`
-	Quality      subProbeSummary `json:"quality"`
-	Verdict      string          `json:"verdict"`
+	Model        string                  `json:"model"`
+	CheckedAt    int64                   `json:"checked_at"`
+	Availability subProbeSummary         `json:"availability"`
+	Quality      subProbeSummary         `json:"quality"`
+	Verdict      string                  `json:"verdict"`
+	ServiceTiers map[string]subTierProbe `json:"service_tiers,omitempty"`
 }
 
 type subProbeSummary struct {

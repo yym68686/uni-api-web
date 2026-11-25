@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,11 +16,7 @@ import (
 func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 	for _, stop := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stop=%v", stop), func(t *testing.T) {
-			dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
-			if dsn == "" {
-				t.Skip("PostgreSQL required")
-			}
-			store, err := newControlStore(dsn, strings.Repeat("q", 32))
+			store, err := newControlStore(isolatedControlTestDSN(t), strings.Repeat("q", 32))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -31,7 +26,7 @@ func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 			started, release := make(chan struct{}), make(chan struct{})
 			var releaseOnce sync.Once
 			unblock := func() { releaseOnce.Do(func() { close(release) }) }
-			var calls atomic.Int32
+			var calls, fastCalls, ultrafastCalls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				call := calls.Add(1)
 				var body map[string]any
@@ -42,7 +37,22 @@ func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 				}
 				model, _ := body["model"].(string)
 				raw := mustJSON(body)
-				if strings.Contains(raw, "compaction_trigger") {
+				if tier, ok := body["service_tier"].(string); ok {
+					if model != "gpt-6.2-sol" || r.URL.Path != "/v1/responses" {
+						t.Errorf("unexpected speed probe: %s %s", r.URL.Path, model)
+					}
+					switch tier {
+					case "fast":
+						fastCalls.Add(1)
+						tier = "" // The upstream completes without confirming the requested tier.
+					case "ultrafast":
+						ultrafastCalls.Add(1)
+					default:
+						t.Errorf("unexpected speed tier: %s", tier)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, mustJSON(map[string]any{"id": "resp-fixture", "model": model, "status": "completed", "service_tier": tier, "output": []any{}}))
+				} else if strings.Contains(raw, "compaction_trigger") {
 					compactSSE(w, model, `[{"type":"compaction","encrypted_content":"opaque"}]`)
 				} else if strings.Contains(raw, "additional_tools") {
 					w.Header().Set("Content-Type", "text/event-stream")
@@ -71,6 +81,12 @@ func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			// Only the new selection may drive capabilities on group 3; leave its
+			// previously successful gpt-5.6-sol in the DB as a regression fixture.
+			if _, err = store.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,3,'gpt-6.2-sol','done',$2)`,
+				id, mustJSON(subResult{Model: "gpt-6.2-sol", ServiceTiers: map[string]subTierProbe{"fast": {Status: "supported", CheckedAt: 1}}})); err != nil {
+				t.Fatal(err)
+			}
 			s := &Service{control: store}
 			token, _ := store.newSession(context.Background(), id)
 			request := func(path, body string) *httptest.ResponseRecorder {
@@ -87,7 +103,11 @@ func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 				if kind == "check" {
 					path = "/v1/sub2api/checks"
 				}
-				body := fmt.Sprintf(`{"targets":[{"account_id":%q,"group_id":%d,"models":["gpt-5.6-sol"]}]}`, account, group)
+				model := "gpt-5.6-sol"
+				if kind == "check" {
+					model = "gpt-6.2-sol"
+				}
+				body := fmt.Sprintf(`{"targets":[{"account_id":%q,"group_id":%d,"models":[%q]}]}`, account, group, model)
 				if w := request(path, body); w.Code != code {
 					t.Fatalf("%s: %d %s", kind, w.Code, w.Body.String())
 				}
@@ -139,7 +159,11 @@ func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 			}
 			for _, a := range payload.Data {
 				if a.ID == id {
-					if a.Targets[0].ToolUseState != "queued" || a.Targets[1].CompactionState != "queued" || a.Targets[2].Models[0].State != "queued" {
+					selectedQueued := false
+					for _, model := range a.Targets[2].Models {
+						selectedQueued = selectedQueued || model.Model == "gpt-6.2-sol" && model.State == "queued"
+					}
+					if a.Targets[0].ToolUseState != "queued" || a.Targets[1].CompactionState != "queued" || !selectedQueued {
 						t.Fatal("waiting tasks absent from page", a.Targets)
 					}
 				}
@@ -171,12 +195,67 @@ func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 			if waiting != 0 {
 				t.Fatal("queue never drained", waiting)
 			}
-			want := int32(7) // initial + other account + tool + compact + say/compact/tool
+			want, wantTiers := int32(9), int32(1) // initial + other account + tool + compact + availability/fast/ultrafast/compact/tool
 			if stop {
-				want = 2
+				want, wantTiers = 2, 0
 			}
 			if calls.Load() != want {
 				t.Fatal("duplicate, lost, or stopped work executed", calls.Load(), want)
+			}
+			if fastCalls.Load() != wantTiers || ultrafastCalls.Load() != wantTiers {
+				t.Fatal("expected independent speed probes for just the selected model", fastCalls.Load(), ultrafastCalls.Load())
+			}
+			if !stop {
+				var fast, ultrafast string
+				var at int64
+				if err := store.db.QueryRow(`SELECT result#>>'{service_tiers,fast,status}',result#>>'{service_tiers,ultrafast,status}',(result#>>'{service_tiers,fast,checked_at}')::bigint FROM console_sub_models WHERE account_id=$1 AND group_id=3 AND model='gpt-6.2-sol'`, id).Scan(&fast, &ultrafast, &at); err != nil || fast != "supported" || ultrafast != "supported" || at != 1 {
+					t.Fatal("did not preserve Fast evidence and save the new Ultrafast result", fast, ultrafast, at, err)
+				}
+				r := httptest.NewRequest("GET", "/v1/sub2api/accounts/"+id+"/groups/3/details?include_rates=0", nil)
+				r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+				r.Header.Set("X-Console-View", "summary")
+				w := httptest.NewRecorder()
+				replacement.Handler().ServeHTTP(w, r)
+				var detail struct {
+					Data []struct {
+						Value struct {
+							AccountID string `json:"account_id"`
+							Target    *subTarget
+						}
+					}
+				}
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &detail) != nil {
+					t.Fatal(w.Code, w.Body.String())
+				}
+				var group *subTarget
+				for _, row := range detail.Data {
+					if row.Value.AccountID == id && row.Value.Target != nil && row.Value.Target.GroupID == 3 {
+						group = row.Value.Target
+					}
+				}
+				if group == nil {
+					t.Fatal("per-row read omitted the selected group")
+				}
+				var result *subResult
+				for _, model := range group.Models {
+					if model.Model == "gpt-6.2-sol" {
+						result = model.Result
+					}
+				}
+				if result == nil || result.ServiceTiers["fast"].Status != "supported" || result.ServiceTiers["ultrafast"].Status != "supported" {
+					t.Fatal("per-row read dropped tier results", w.Body.String())
+				}
+				if group.Compaction == nil || len(group.Compaction.Models) != 1 || group.Compaction.Models[0].Model != "gpt-6.2-sol" ||
+					group.ToolUse == nil || len(group.ToolUse.Models) != 1 || group.ToolUse.Models[0].Model != "gpt-6.2-sol" {
+					t.Fatal("compaction and Tool use must both target only the selected model", w.Body.String())
+				}
+				if _, err := store.db.Exec(`UPDATE console_sub_targets SET remote_key_id=43 WHERE account_id=$1 AND group_id=3`, id); err != nil {
+					t.Fatal(err)
+				}
+				var hasStaleTier bool
+				if err := store.db.QueryRow(`SELECT result ? 'service_tiers' FROM console_sub_models WHERE account_id=$1 AND group_id=3 AND model='gpt-6.2-sol'`, id).Scan(&hasStaleTier); err != nil || hasStaleTier {
+					t.Fatal("site credential rotation must invalidate its tier evidence", hasStaleTier, err)
+				}
 			}
 			store.db.QueryRow(`SELECT state FROM console_sub_accounts WHERE id=$1`, id).Scan(&state)
 			if (!stop && state != "idle") || (stop && state != "stopped") {

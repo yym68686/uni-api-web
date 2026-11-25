@@ -99,6 +99,7 @@ func (s *Service) subTestAllModelTools(ctx context.Context, id, base, job string
 		return err
 	}
 	run := func(t target) error {
+		ctx := siteCapabilityScope(ctx, t.group)
 		key, e := s.control.decrypt(t.key)
 		if e != nil {
 			return errors.New("Tool use 检测 key 无法解密")
@@ -125,7 +126,7 @@ func (s *Service) subTestAllModelTools(ctx context.Context, id, base, job string
 				}
 			}
 			result := summarizeToolUse(savedModels)
-			n, e := s.subProbeWrite(ctx, `UPDATE console_sub_targets SET tool_use_state=$4,tool_use=$5,
+			n, e := s.subProbeWrite(ctx, `UPDATE console_sub_targets SET tool_use_state=$4,tool_use=$5,tool_read_version=tool_read_version+1,
  state=CASE WHEN $4='done' AND state IN ('queued','running') THEN 'done' ELSE state END
  WHERE account_id=$1 AND group_id=$2 AND tool_use_state=$6 AND EXISTS(SELECT 1 FROM console_sub_accounts
  WHERE id=$1 AND job_id=$3 AND state='running' AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()) FOR SHARE)`, id, t.group, job, state, mustJSON(result), expectedState)

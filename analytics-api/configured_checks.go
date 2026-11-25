@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ type configuredCheck struct {
 	History        qualitySummary  `json:"history"`
 	owner          string
 	requestedScope string
+	fullModelCheck bool
 }
 
 func configuredProbeFingerprint(src controlSource, p configuredProvider) string {
@@ -59,11 +61,13 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 		Kind      string `json:"kind"`
 		Manual    bool   `json:"manual"`
 		Confirmed bool   `json:"confirmed"`
+		Full      bool   `json:"full_model_check"`
 		Targets   []struct {
-			Source   string   `json:"source_id"`
-			Provider string   `json:"provider"`
-			Models   []string `json:"models"`
-			Scope    string   `json:"expected_scope"`
+			Source     string   `json:"source_id"`
+			Provider   string   `json:"provider"`
+			Models     []string `json:"models"`
+			Scope      string   `json:"expected_scope"`
+			TierModels []string `json:"tier_models"`
 		} `json:"targets"`
 	}
 	if !decodeConfiguration(w, r, &in) {
@@ -76,6 +80,16 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 	}
 	tierCount := 0
 	for _, t := range in.Targets {
+		if len(t.TierModels) > 0 && (!in.Full || in.Kind != "check" || !serviceTierDigest(t.Scope)) {
+			http.Error(w, "渠道档位检测范围无效", 400)
+			return
+		}
+		for _, model := range t.TierModels {
+			if !validProbeModel(model) || !slices.Contains(t.Models, model) {
+				http.Error(w, "渠道档位检测模型无效", 400)
+				return
+			}
+		}
 		if tier && (in.Confirmed || t.Scope != "") && !serviceTierDigest(t.Scope) {
 			http.Error(w, "渠道配置未确认，请刷新后重新选择", 400)
 			return
@@ -142,7 +156,7 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 			kind, models = "model", []string{checkModel}
 		} else if kind == "check" {
 			kind = "model"
-		} else if kind == "compaction" || (kind == "tool-use" && len(models) == 0) {
+		} else if (kind == "compaction" || kind == "tool-use") && len(models) == 0 {
 			models = []string{""}
 		}
 		if kind == "tool-use" && len(t.Models) == 0 {
@@ -157,17 +171,37 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 				continue
 			}
 		}
+		queue := func(k, m, scope string, full bool) error {
+			res, e := tx.ExecContext(r.Context(), `INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,quality_only,owner,requested_scope,full_model_check)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET
+ source_target=excluded.source_target,quality_only=excluded.quality_only,owner=excluded.owner,requested_scope=excluded.requested_scope,full_model_check=excluded.full_model_check,state='queued',message='',deadline=NULL,updated_at=now()
+ WHERE console_configured_checks.state NOT IN ('queued','running') OR console_configured_checks.deadline<now()`, t.Source, t.Provider, k, m, controlTarget(sources[t.Source]), in.Kind == "quality", owner, scope, full)
+			if e != nil {
+				return e
+			}
+			n, _ := res.RowsAffected()
+			queued += n
+			return nil
+		}
 		for _, m := range models {
-			res, e := tx.ExecContext(r.Context(), `INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,quality_only,owner,requested_scope)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET
- source_target=excluded.source_target,quality_only=excluded.quality_only,owner=excluded.owner,requested_scope=excluded.requested_scope,state='queued',message='',deadline=NULL,updated_at=now()
- WHERE console_configured_checks.state NOT IN ('queued','running') OR console_configured_checks.deadline<now()`, t.Source, t.Provider, kind, m, controlTarget(sources[t.Source]), in.Kind == "quality", owner, t.Scope)
+			full := in.Kind == "check" && in.Full
+			e := queue(kind, m, t.Scope, full)
+			if e == nil && full && subCapabilityModel(m) {
+				e = queue("tool-use", m, "", false)
+				if e == nil {
+					e = queue("compaction", m, "", false)
+				}
+			}
+			if e == nil && full && slices.Contains(t.TierModels, m) {
+				e = queue("fast", m, t.Scope, false)
+				if e == nil {
+					e = queue("ultrafast", m, t.Scope, false)
+				}
+			}
 			if e != nil {
 				http.Error(w, "检测入队失败", 503)
 				return
 			}
-			n, _ := res.RowsAffected()
-			queued += n
 		}
 	}
 	if tx.Commit() != nil {
@@ -237,7 +271,7 @@ func (s *Service) configuredCheckOne(parent context.Context) bool {
  ORDER BY updated_at,source_id,provider,model FOR UPDATE SKIP LOCKED LIMIT 1)
  UPDATE console_configured_checks c SET state='running',run_id=$1,deadline=now()+interval '210 seconds'
  FROM job j WHERE c.source_id=j.source_id AND c.provider=j.provider AND c.kind=j.kind AND c.model=j.model
- RETURNING c.source_id,c.provider,c.kind,c.model,c.source_target,c.quality_only,c.owner,c.requested_scope`, run).Scan(&c.Source, &c.Provider, &c.Kind, &c.Model, &target, &qualityOnly, &c.owner, &c.requestedScope)
+ RETURNING c.source_id,c.provider,c.kind,c.model,c.source_target,c.quality_only,c.owner,c.requested_scope,c.full_model_check`, run).Scan(&c.Source, &c.Provider, &c.Kind, &c.Model, &target, &qualityOnly, &c.owner, &c.requestedScope, &c.fullModelCheck)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) && parent.Err() == nil {
 			log.Printf("configured_checks claim: %v", err)
@@ -395,7 +429,13 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 			}
 		}
 		if c.Kind == "model" && !qualityOnly && fingerprintModel(c.Model) && out.Availability.Status == "success" {
-			if err := enqueueAutomaticFingerprint(ctx, s.control.db, fingerprintTarget{Source: c.Source, Provider: c.Provider, Model: c.Model}, c.owner); err != nil {
+			fp := fingerprintTarget{Source: c.Source, Provider: c.Provider, Model: c.Model}
+			if c.fullModelCheck {
+				err = enqueueFingerprint(ctx, s.control.db, fp)
+			} else {
+				err = enqueueAutomaticFingerprint(ctx, s.control.db, fp, c.owner)
+			}
+			if err != nil {
 				return errors.New("模型指纹入队失败，请单独重新检测")
 			}
 		}
@@ -441,6 +481,12 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 		redact(&out)
 		*result = out
 		return nil
+	}
+	if c.Model != "" {
+		if !subCapabilityModel(c.Model) || !availableModels[c.Model] && !slices.Contains(candidates, c.Model) {
+			return errors.New("该模型当前无法执行压缩检测")
+		}
+		candidates = []string{c.Model}
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return availableModels[candidates[i]] && !availableModels[candidates[j]] })
 	for _, model := range candidates {

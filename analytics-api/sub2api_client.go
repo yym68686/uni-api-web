@@ -287,11 +287,12 @@ func (p subProbe) qualityResult() subProbe {
 }
 
 type subResult struct {
-	Model        string   `json:"model"`
-	CheckedAt    int64    `json:"checked_at"`
-	Availability subProbe `json:"availability"`
-	Quality      subProbe `json:"quality"`
-	Verdict      string   `json:"verdict"`
+	ServiceTiers map[string]subTierProbe `json:"service_tiers,omitempty"`
+	Model        string                  `json:"model"`
+	CheckedAt    int64                   `json:"checked_at"`
+	Availability subProbe                `json:"availability"`
+	Quality      subProbe                `json:"quality"`
+	Verdict      string                  `json:"verdict"`
 }
 
 // Only output_text deltas are first text. Clean EOF with usable text but no

@@ -6,6 +6,37 @@ import (
 )
 
 type subSyncScopeKey struct{}
+type siteModelCheckScopeKey struct{}
+
+func (s *Service) scopeSiteModelCheck(ctx context.Context, account string) (context.Context, error) {
+	rows, err := s.control.db.QueryContext(ctx, `SELECT group_id,model FROM console_sub_models WHERE account_id=$1 AND state='queued'`, account)
+	if err != nil {
+		return ctx, err
+	}
+	defer rows.Close()
+	groups := map[int64][]string{}
+	for rows.Next() {
+		var group int64
+		var model string
+		if err := rows.Scan(&group, &model); err != nil {
+			return ctx, err
+		}
+		groups[group] = append(groups[group], model)
+	}
+	return context.WithValue(ctx, siteModelCheckScopeKey{}, groups), rows.Err()
+}
+
+func siteModelCheckScope(ctx context.Context, group int64) ([]string, bool) {
+	groups, ok := ctx.Value(siteModelCheckScopeKey{}).(map[int64][]string)
+	return groups[group], ok
+}
+
+func siteCapabilityScope(ctx context.Context, group int64) context.Context {
+	if models, ok := siteModelCheckScope(ctx, group); ok {
+		return withSubSyncModels(ctx, models)
+	}
+	return ctx
+}
 
 func subSyncMetadataOnly(ctx context.Context) bool {
 	models, scoped := ctx.Value(subSyncScopeKey{}).([]string)

@@ -61,19 +61,27 @@ export function tierResultStatus(check: ConfiguredCheck | undefined, target: Tie
   return tierPending(check) ? "pending" : "unknown";
 }
 
-export function ServiceTierCell({tier, targets, index, loading, failed}: {
+export function siteTierStatus(result?: {status: string; checked_at: number}) {
+  if (serviceTierFresh(result?.checked_at) &&
+    (result?.status === "supported" || result?.status === "unsupported" || result?.status === "not_honored"))
+    return result.status;
+}
+
+export function ServiceTierCell({tier, targets, index, loading, failed, siteStatuses = []}: {
   tier: ServiceTier; targets: TierTarget[]; index: ReturnType<typeof tierIndex>; loading?: boolean; failed?: boolean;
+  siteStatuses?: NonNullable<ReturnType<typeof siteTierStatus>>[];
 }) {
-  if (failed || loading) return <span className="muted">{failed ? "读取失败" : "读取中…"}</span>;
-  const statuses = targets.map(target => tierResultStatus(tierRecord(index, tier, target), target));
+  if (!siteStatuses.length && targets.length > 0 && (failed || loading)) return <span className="muted">{failed ? "读取失败" : "读取中…"}</span>;
+  const statuses = siteStatuses.length ? siteStatuses : targets.map(target => tierResultStatus(tierRecord(index, tier, target), target));
+  const detail = siteStatuses.length ? " · 站点检测 Key，不代表已接入渠道的业务凭据" : "";
   const verified = statuses.filter(s => s === "supported").length;
   if (verified && verified !== statuses.length)
-    return <span className="positive" title={`${verified}/${statuses.length} 个渠道模型已验证支持`}>部分支持 · {verified}/{statuses.length}</span>;
+    return <span className="positive" title={`${verified}/${statuses.length} 个渠道模型已验证支持${detail}`}>部分支持 · {verified}/{statuses.length}</span>;
   const status = statuses.length && statuses.every(s => s === statuses[0]) ? statuses[0] :
     statuses.includes("pending") ? "pending" : "unknown";
   const label = status === "pending" ? "检测中" : serviceTierFilterLabels[status];
   return <span className={status === "supported" ? "positive" : status === "unsupported" ? "negative" : "muted"}
-    title={`${serviceTierName[tier]} · ${label}`}>{label}</span>;
+    title={`${serviceTierName[tier]} · ${label}${detail}`}>{label}</span>;
 }
 
 export function useTierChecks(owner: string, enabled: boolean) {

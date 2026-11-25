@@ -277,7 +277,7 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 	if kind != "compaction" {
 		return errors.New("无效能力检测类型")
 	}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT group_id,encrypted_key,remote_key_id,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'result',m.result)) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb) FROM console_sub_targets t WHERE account_id=$1 AND active AND `+column+`_state='queued'`, id)
+	rows, err := s.control.db.QueryContext(ctx, `SELECT group_id,encrypted_key,remote_key_id,compaction,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'result',m.result)) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb) FROM console_sub_targets t WHERE account_id=$1 AND active AND `+column+`_state='queued'`, id)
 	if err != nil {
 		return err
 	}
@@ -285,16 +285,22 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 		group, keyID int64
 		key          string
 		models       []subModelResult
+		previous     *subCompaction
 	}
 	var targets []target
 	for rows.Next() {
 		var t target
-		var raw []byte
-		if err = rows.Scan(&t.group, &t.key, &t.keyID, &raw); err != nil {
+		var raw, previous []byte
+		if err = rows.Scan(&t.group, &t.key, &t.keyID, &previous, &raw); err != nil {
 			break
 		}
 		if err = json.Unmarshal(raw, &t.models); err != nil {
 			break
+		}
+		if len(previous) > 0 {
+			if err = json.Unmarshal(previous, &t.previous); err != nil {
+				break
+			}
 		}
 		targets = append(targets, t)
 	}
@@ -307,6 +313,8 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 	}
 	// Each group tries candidates serially; at most two groups run per account.
 	run := func(t target) error {
+		_, scoped := siteModelCheckScope(ctx, t.group)
+		ctx := siteCapabilityScope(ctx, t.group)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -323,6 +331,13 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 		}
 		result := subCompaction{Status: "unsupported", Attempts: []subProbe{}}
 		models := subCompactionModels(subSyncModelResults(ctx, t.models))
+		if scoped {
+			for _, previous := range managementToolModels(t.previous) {
+				if !subSyncIncludesModel(ctx, previous.Model) {
+					result.Models = append(result.Models, previous)
+				}
+			}
+		}
 		if len(models) == 0 {
 			result.Status = "error"
 			result.Message = "没有已检测可用的 gpt 或 codex 模型，请先运行模型检测"
@@ -344,6 +359,11 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 				probe = usageResult.Availability
 			}
 			result.Attempts = append(result.Attempts, probe)
+			if scoped {
+				result.Models = append(result.Models, subToolUseModel{Model: model, State: "done", Result: &subCapabilityResult{
+					Status: probe.Status, Model: model, Message: probe.Message, CheckedAt: time.Now().Unix(), Attempts: []subProbe{probe},
+				}})
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -351,9 +371,11 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 				result.Status = "supported"
 				result.Model = model
 				result.Message = probe.Message
-				break
+				if !scoped {
+					break
+				}
 			}
-			if probe.Status == "error" {
+			if probe.Status == "error" && result.Status != "supported" {
 				result.Status = "error"
 			}
 		}

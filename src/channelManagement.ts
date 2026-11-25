@@ -300,7 +300,7 @@ export function managementRows(
     const native = members.flatMap(m => (checksByChannel.get(JSON.stringify([m.source_id, m.provider])) || [])
       .filter(c => !c.fingerprint || !m.probe_fingerprint || c.fingerprint === m.probe_fingerprint));
     if(native.some(c=>c.details_omitted))target.details_omitted=true;
-    const latestCapability = (kind: ConfiguredCheck["kind"]) => native.filter(c => c.kind === kind).sort((a,b) =>
+    const latestCapability = (kind: ConfiguredCheck["kind"]) => native.filter(c => c.kind === kind && (!model || !c.model || c.model === model)).sort((a,b) =>
       Number(["queued","running"].includes(b.state)) - Number(["queued","running"].includes(a.state)) ||
       (b.result?.checked_at || 0) - (a.result?.checked_at || 0))[0];
     for (const [kind, field] of [["compaction","compaction"]] as const) {

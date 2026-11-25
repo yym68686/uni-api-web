@@ -59,9 +59,6 @@ func managementServiceTiers(in managementQueryInput, rows []managementQueryRow, 
 			checks[receiptKey{check.Source, check.Provider, check.Model, check.Kind, check.Fingerprint}] = status
 		}
 	}
-	if len(checks) == 0 {
-		return nil
-	}
 	unavailable := map[string]bool{}
 	for _, id := range in.UnavailableSources {
 		unavailable[id] = true
@@ -122,8 +119,31 @@ func managementServiceTiers(in managementQueryInput, rows []managementQueryRow, 
 				}
 			}
 		} else {
-			for _, member := range joined[row.ID] {
-				add(member, f.Model, true)
+			for _, check := range row.Checks {
+				if (f.Model != "" && check.Model != f.Model) || check.Result == nil {
+					continue
+				}
+				pair := unknownTierPair
+				for tier, result := range check.Result.ServiceTiers {
+					if serviceTierFresh(result.CheckedAt, now) &&
+						(result.Status == "supported" || result.Status == "not_honored" || result.Status == "unsupported") {
+						if tier == "fast" {
+							pair.Fast = result.Status
+						} else if tier == "ultrafast" {
+							pair.Ultrafast = result.Status
+						}
+					}
+				}
+				if pair != unknownTierPair && !slices.Contains(pairs, pair) {
+					pairs = append(pairs, pair)
+				}
+			}
+			// Do not blend a site's test credential with a business route
+			// credential. Use route evidence only if there is no site-tier result.
+			if len(pairs) == 0 {
+				for _, member := range joined[row.ID] {
+					add(member, f.Model, true)
+				}
 			}
 		}
 		if len(pairs) > 1 || len(pairs) == 1 && pairs[0] != unknownTierPair {

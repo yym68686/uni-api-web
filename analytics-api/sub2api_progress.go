@@ -23,14 +23,19 @@ type subSyncProgress struct {
 	Groups        []subGroupProgress `json:"groups"`
 }
 type subGroupProgress struct {
-	GroupID     int64 `json:"group_id"`
-	Total       int   `json:"total"`
-	Completed   int   `json:"completed"`
-	Queued      int   `json:"queued"`
-	Running     int   `json:"running"`
-	Interrupted int   `json:"interrupted"`
-	Rejected    int   `json:"rejected,omitempty"`
-	Skipped     int   `json:"skipped,omitempty"`
+	State       string `json:"state"`
+	Compaction  string `json:"compaction_state"`
+	ToolUse     string `json:"tool_use_state"`
+	TierVersion int64  `json:"tier_version,omitempty"`
+	ToolVersion int64  `json:"tool_version,omitempty"`
+	GroupID     int64  `json:"group_id"`
+	Total       int    `json:"total"`
+	Completed   int    `json:"completed"`
+	Queued      int    `json:"queued"`
+	Running     int    `json:"running"`
+	Interrupted int    `json:"interrupted"`
+	Rejected    int    `json:"rejected,omitempty"`
+	Skipped     int    `json:"skipped,omitempty"`
 }
 
 // Poll only task state/identity. No result JSON, receipts, gateway directory or
@@ -66,14 +71,14 @@ func (s *Service) subAccountsProgress(w http.ResponseWriter, r *http.Request) {
 func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []subAccount, watched []string) error {
 	// The durable submitted selection wins over subsequent browser checkbox
 	// changes. Only state and model identity are read, never historical results.
-	rows, err := tx.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.state,
+	rows, err := tx.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.state,t.compaction_state,t.tool_use_state,t.tool_read_version,
  CASE WHEN a.sync_run_id<>'' AND t.sync_run_id=a.sync_run_id THEN t.sync_key_state ELSE '' END,count(m.model),
  count(*) FILTER(WHERE m.state IN ('done','error')),
  count(*) FILTER(WHERE m.state='queued'),count(*) FILTER(WHERE m.state='running'),
  count(*) FILTER(WHERE m.state='interrupted' AND m.message NOT IN `+legacySiteRejectionSQL+`),
  count(*) FILTER(WHERE m.state='rejected' OR (m.state='interrupted' AND m.message IN `+legacySiteRejectionSQL+`)),
  count(*) FILTER(WHERE m.state='skipped'),
- COALESCE(jsonb_agg(m.model ORDER BY m.model) FILTER(WHERE m.state='running'),'[]'::jsonb)
+ COALESCE(jsonb_agg(m.model ORDER BY m.model) FILTER(WHERE m.state='running'),'[]'::jsonb),COALESCE(sum(m.tier_read_version),0)::bigint
  FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id AND t.active
  LEFT JOIN console_sub_models m ON m.account_id=t.account_id AND m.group_id=t.group_id
  AND (a.sync_run_id<>'' AND a.job_kind IN ('','sync') AND m.sync_run_id=a.sync_run_id
@@ -81,7 +86,7 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
  WHERE a.owner=$1 AND (a.state IN ('queued','running') OR a.id=ANY($2::text[]))
  AND NOT (a.state='queued' AND a.job_kind='sync')
  AND (a.sync_run_id='' OR a.job_kind NOT IN ('','sync') OR t.sync_run_id=a.sync_run_id)
- GROUP BY t.account_id,t.group_id,t.state,t.sync_key_state,a.sync_run_id,t.sync_run_id ORDER BY t.account_id,t.group_id`, owner, watched)
+ GROUP BY t.account_id,t.group_id,t.state,t.compaction_state,t.tool_use_state,t.tool_read_version,t.sync_key_state,a.sync_run_id,t.sync_run_id ORDER BY t.account_id,t.group_id`, owner, watched)
 	if err != nil {
 		return err
 	}
@@ -105,17 +110,17 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
 	}
 	for rows.Next() {
 		var id string
-		var targetState, keyState string
+		var keyState string
 		var g subGroupProgress
 		var raw []byte
-		if err = rows.Scan(&id, &g.GroupID, &targetState, &keyState, &g.Total, &g.Completed, &g.Queued, &g.Running, &g.Interrupted, &g.Rejected, &g.Skipped, &raw); err != nil {
+		if err = rows.Scan(&id, &g.GroupID, &g.State, &g.Compaction, &g.ToolUse, &g.ToolVersion, &keyState, &g.Total, &g.Completed, &g.Queued, &g.Running, &g.Interrupted, &g.Rejected, &g.Skipped, &raw, &g.TierVersion); err != nil {
 			return err
 		}
 		a := index[id]
 		if a == nil {
 			continue
 		}
-		if g.Total > 0 && g.Completed+g.Rejected+g.Skipped == g.Total && keyState != "preparing" && keyState != "error" || g.Total == 0 && targetState == "done" {
+		if g.Total > 0 && g.Completed+g.Rejected+g.Skipped == g.Total && keyState != "preparing" && keyState != "error" || g.Total == 0 && g.State == "done" {
 			synced[id]++
 		}
 		if a.Progress == nil {

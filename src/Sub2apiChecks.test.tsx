@@ -1237,6 +1237,9 @@ it("isolates row submissions by account, group and check kind, including out-of-
   expect(requests[0].body.targets).toEqual([{ account_id: "one", group_id: 1 }]);
   expect(requests[1].path).toMatch(/tool-use-checks$/);
   requests[1].finish(new Response("检测提交失败", { status: 503 }));
+  const failure = await screen.findByRole("dialog", { name: "渠道检测提交失败" });
+  expect(within(failure).getByRole("alert")).toHaveTextContent("HTTP 503");
+  await user.click(within(failure).getByRole("button", { name: "知道了" }));
   await waitFor(() => expect(tools).toBeEnabled());
   expect(compact).toBeDisabled();
   expect(other).toBeDisabled();
@@ -2672,11 +2675,11 @@ it("detects unassigned configured channels without site keys and isolates busy s
   expect(writes.at(-1).targets).toHaveLength(2);
   await user.click(screen.getByRole("button",{name:`检测已选 ${SUB_MODELS.length} 个模型 · 2 个渠道`}));
   await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
-  expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:[...SUB_MODELS]},{source_id:"fugue",provider:"native-two",models:[...SUB_MODELS]}]});
+  expect(writes.at(-1)).toEqual({kind:"check",full_model_check:true,targets:[{source_id:"fugue",provider:"native-one",models:[...SUB_MODELS]},{source_id:"fugue",provider:"native-two",models:[...SUB_MODELS]}]});
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
   const updatedFirst=within((await screen.findByText("native-one",{selector:"strong"})).closest("tr")!);
   await user.click(updatedFirst.getByRole("button",{name:"检测 未归属渠道 native-one"}));
-  expect(writes.at(-1)).toEqual({kind:"check",manual:true,targets:[{source_id:"fugue",provider:"native-one",models:["custom-model"]}]});
+  expect(writes.at(-1)).toEqual({kind:"check",full_model_check:true,manual:true,targets:[{source_id:"fugue",provider:"native-one",models:["custom-model"]}]});
   await waitFor(()=>expect(updatedFirst.getByText("可用")).toBeVisible());
   await user.click(updatedFirst.getByRole("button",{name:"查看 未归属渠道 native-one 的回复与诊断"}));
   const dialog=within(screen.getByRole("dialog"));
@@ -2876,7 +2879,7 @@ it("rechecks an explicitly filtered native model despite batch exclusions, witho
   expect(button).toHaveTextContent("检测此模型");
   expect(screen.getByRole("button",{name:"检测所选模型 · 1 个渠道"})).toBeEnabled();
   await user.dblClick(button);
-  expect(writes).toEqual([{kind:"check",manual:true,targets:[{source_id:"do",provider:"fugue-codex",models:["gpt-6-luna"]}]}]);
+  expect(writes).toEqual([{kind:"check",full_model_check:true,manual:true,targets:[{source_id:"do",provider:"fugue-codex",models:["gpt-6-luna"]}]}]);
   expect(button).toBeDisabled();
   expect(button).toHaveAttribute("aria-busy","true");
   expect(screen.getByRole("button",{name:"检测所选模型 · 1 个渠道"})).toBeDisabled();

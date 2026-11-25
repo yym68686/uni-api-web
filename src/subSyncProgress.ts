@@ -13,6 +13,11 @@ export interface GroupProgress {
   interrupted: number;
   rejected?: number;
   skipped?: number;
+  state?: string;
+  compaction_state?: string;
+  tool_use_state?: string;
+  tier_version?: number;
+  tool_version?: number;
 }
 export interface SyncProgress extends Omit<GroupProgress, "group_id"> {
   keys_ready?: number;
@@ -22,7 +27,7 @@ export interface SyncProgress extends Omit<GroupProgress, "group_id"> {
   groups: GroupProgress[];
 }
 const active = (accounts: SubAccount[]) => accounts.some(a => a.state === "queued" || a.state === "running");
-interface ProgressResponse { data: SubAccount[]; read_at_ms: number }
+export interface ProgressResponse { data: SubAccount[]; read_at_ms: number }
 
 export function modelProgressDetails(progress: Omit<GroupProgress, "group_id">) {
   return [

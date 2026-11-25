@@ -1,6 +1,8 @@
 import { modelProgressDetails, useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
 import type { SyncProgress } from "./subSyncProgress";
 import { useConfiguredCheckResultRefresh } from "./configuredCheckProgress";
+import { useSiteCheckProgress } from "./siteCheckProgress";
+import { useVisibleFingerprints } from "./visibleFingerprints";
 import { fingerprintTargets, fingerprintLabels, fingerprintBusy, useModelFingerprints, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintColumnHeader, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
@@ -9,6 +11,7 @@ import { TableLoading, DetailLoading } from "./PageLoading";
 import { LoadingIndicator } from "./LoadingIndicator";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -44,7 +47,7 @@ import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { ServiceTierChecks } from "./ServiceTierChecks";
 import { isServiceTier, serviceTierBatchLimit, serviceTierFilterLabels, serviceTierName, serviceTiers, type ServiceTier } from "./serviceTierStatus";
-import { managementTierTargets, refreshTierViews, ServiceTierCell, submitTierChecks, tierIndex, tierPending,
+import { managementTierTargets, refreshTierViews, ServiceTierCell, siteTierStatus, submitTierChecks, tierIndex, tierPending, tierTarget,
   tierRecord, tierTargetKey, useTierChecks, type TierTarget } from "./serviceTierTable";
 import type { InstalledChannel } from "./sub2apiImports";
 import { useManagementPage, readManagementCheckSelection, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation } from "./managementQuery";
@@ -90,6 +93,7 @@ import type { ChannelAddDraft, ChannelAddRequest, ConfiguredChannelAddDraft, Sit
 
 const SiteAccountSettings = lazy(() => import("./SiteAccountSettings").then(m => ({default: m.SiteAccountSettings})));
 const Sub2apiImport = lazy(() => import("./Sub2apiImport").then(m => ({default: m.Sub2apiImport})));
+const modelCheckScope = "检测可用性，以及适用的降智、指纹、压缩、Tool use、Fast 和 Ultrafast；可能产生多次上游费用。";
 
 const managementColumnChoices = [
   {id: "model", label: "模型"},
@@ -148,6 +152,7 @@ export interface Probe {
   http_status?: number;
 }
 export interface Result {
+  service_tiers?: Partial<Record<ServiceTier, { status: string; observed?: string; checked_at: number }>>;
   model: string;
   checked_at: number;
   availability: Probe;
@@ -926,7 +931,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const actionKey = (id: string) => JSON.stringify([user, id]);
   const syncGeneration = syncProgressSubmission.owner === user ? syncProgressSubmission.generation : 0;
   const progressQuery=useSubSyncProgress(user,accounts,metadata?.readAt,syncGeneration);
+  const justSubmittedSiteRows = useRef(new Map<string, number>());
   useSubSyncResultRefresh(user,pageData,progressQuery.data);
+  const liveSiteRow=useSiteCheckProgress(user,filters,section === "channels" ? pageData : undefined,progressQuery.data,justSubmittedSiteRows.current);
+  const liveFingerprints=useVisibleFingerprints(user,section === "channels" && activeColumns.includes("fingerprint") ? pageData : undefined);
   const lastProgress = useRef<{owner: string; generation: number; accounts: SubAccount[]} | undefined>(undefined);
   if (progressQuery.data) lastProgress.current = { owner: user, generation: syncGeneration, accounts: progressQuery.data.data };
   const knownProgress = lastProgress.current?.owner === user ? lastProgress.current : undefined;
@@ -1072,14 +1080,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [removeError, setRemoveError] = useState("");
   const checksInFlight = useRef(new Set<string>());
   const [submittingChecks, setSubmittingChecks] = useState(new Set<string>());
-  const [fingerprintsSubmitted, setFingerprintsSubmitted] = useState(0);
   const [syncSubmitted, setSyncSubmitted] = useState<{count:number;detect:boolean} | null>(null);
   const syncableAccounts = statusAccounts.filter(
     (account) => !pending(account.state),
   );
   const syncBatchBlocked = !!batchAccountAction || syncableAccounts.some(account => accountBusy(account.id));
   const [removing, setRemoving] = useState<SubAccount | null>(null);
-  const rows=configuredResults.displayRows(displayedPage), rates=metadata?.rates || [], platforms=metadata?.platforms || [];
+  const rows=configuredResults.displayRows(displayedPage).map(row=>liveSiteRow(row,displayedPage)), rates=metadata?.rates || [], platforms=metadata?.platforms || [];
   const total=displayedPage?.total || 0, eligibleCount=displayedPage?.eligible_count || 0;
   const effectiveMaxRate=maxRate;
   const availableModels=metadata?.detectionModels || SUB_MODELS;
@@ -1185,10 +1192,17 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   type BatchKind = CheckKind | "fingerprint" | ServiceTier;
   type BatchPreview = { kind: BatchKind; scope: string; revision: string; total: number; items: {id:string; label:string; models:string[]}[]; targets: CheckSelection; fingerprintTargets: ReturnType<typeof fingerprintTargets>; tierTargets: TierTarget[] };
   const [batchPreview,setBatchPreview] = useState<BatchPreview|null>(null);
-  const [batchReceipts,setBatchReceipts] = useState<{label:string;accepted:boolean;message:string}[]>([]);
+  const [unconfirmedReceipts,setUnconfirmedReceipts] = useState<{label:string;accepted:boolean;message:string}[]>([]);
+  const [batchNotice,setBatchNotice] = useState("");
   const [batchError,setBatchError] = useState("");
+  const [checkError,setCheckError] = useState("");
   const submittingBatch = useRef(false);
   const [batchSubmitting,setBatchSubmitting] = useState(false);
+  useEffect(() => {
+    if (!batchNotice) return;
+    const timer = window.setTimeout(() => setBatchNotice(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [batchNotice]);
   const batchScope = JSON.stringify([selectionScope.current, modelsToCheck, fingerprintModelsToCheck, [...detection.disabled].sort()]);
   const requestedModels = () => modelsToCheck;
   const checkKeys = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) =>
@@ -1215,6 +1229,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     return !(kind === "check" && !requestedModels().length) && !checkBusy(account, target, kind, configured);
   };
   type CheckSelection = { account: SubAccount; target: SubTarget; configured?: ManagedChannel }[];
+  type NativeCheckTarget = {source_id:string;provider:string;models:string[];expected_scope?:string;tier_models?:string[]};
   async function queueChecks(kind: CheckKind, selection: CheckSelection, manual = true) {
     const targets = selection.filter(row => (manual || (detection.isEnabled(row) && !detection.isSaving(row))) && canCheck(row.account, row.target, kind, row.configured));
     if (!manual && targets.length !== selection.length) throw Error("部分检测对象已不可提交，请重新预览。");
@@ -1231,18 +1246,23 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       const site = targets.filter(t => !!t.account.id);
       const nativeChannels = targets.flatMap(t => !t.account.id && t.configured ? [t.configured] : []);
       const localConfiguredCheck = nativeChannels.length > 0 && !site.length;
-      const native = nativeChannels.flatMap(configured => {
+      const native = nativeChannels.flatMap<NativeCheckTarget>(configured => {
         const members = channelMembers(configured);
         // Probe every selected model once. Prefer an existing mapping; use the
         // first source for models not yet configured on any member.
         const models = kind === "check" ? requestedModels() : kind === "quality" ? ["gpt-6-astra"] : [];
         if (!models.length) return (kind === "tool-use" ? members : [members[0]]).map(m=>({source_id:m.source_id,provider:m.provider,models:[]}));
-        const grouped = new Map<string, {source_id:string;provider:string;models:string[]}>();
+        const grouped = new Map<string, NativeCheckTarget>();
         for (const model of models) {
           const member = members.find(m => m.models.includes(model)) || members[0];
           const key = `${member.source_id}:${member.provider}`;
           const target = grouped.get(key) || {source_id:member.source_id,provider:member.provider,models:[]};
           target.models.push(model);grouped.set(key,target);
+          const tier = kind === "check" ? tierTarget(member, model) : undefined;
+          if (tier) {
+            target.expected_scope = tier.scope;
+            (target.tier_models ??= []).push(model);
+          }
         }
         return [...grouped.values()];
       });
@@ -1250,7 +1270,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       if (site.length) requests.push({label:`站点渠道（${site.length} 个分组）`,request:controlRequest(`/v1/sub2api/${kind === "check" ? "checks" : `${kind}-checks`}`, {
         method:"POST", body:JSON.stringify({...(manual?{manual:true}:{}),targets:site.map(({account,target}) => ({account_id:account.id,group_id:target.group_id,...(kind === "check" ? {models:modelsToCheck} : {})}))}),
       })});
-      if (native.length) requests.push({label:`原生渠道（${native.length} 个来源成员）`,request:controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,...(manual?{manual:true}:{}),targets:native})}, { localConfiguredCheck })});
+      if (native.length) requests.push({label:`原生渠道（${native.length} 个来源成员）`,request:controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,...(kind==="check"?{full_model_check:true}:{}),...(manual?{manual:true}:{}),targets:native})}, { localConfiguredCheck })});
       const results = await Promise.allSettled(requests.map(item => item.request));
       const receipts = results.map((result,index) => ({
         label:requests[index].label,
@@ -1259,15 +1279,28 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           ? `已收到提交回执${typeof result.value?.queued === "number" ? `，排队 ${result.value.queued} 项` : ""}`
           : `未确认提交 · ${batchFailure(result.reason,"未收到检测回执")}`,
       }));
-      if (!manual) setBatchReceipts(receipts);
-      if (localConfiguredCheck) {
-        const result = results[0];
+      if (native.length) {
+        const result = results[site.length ? 1 : 0];
         const rejected = result?.status === "rejected" && result.reason instanceof ApiError &&
           result.reason.status >= 400 && result.reason.status < 500 && result.reason.status !== 408;
         // A lost response may have committed. Verify scoped state without
         // repeating the paid operation or reloading the list.
         if (!rejected) configuredResults.afterSubmission(scope === selectionScope.current ? native : []);
       }
+      if (site.length && (results[0].status === "fulfilled" ||
+          !(results[0].reason instanceof ApiError) || results[0].reason.status >= 500 || results[0].reason.status === 408)) {
+        if (scope === selectionScope.current) {
+          const selected = new Set(site.map(t => JSON.stringify([user, t.account.id, t.target.group_id])));
+          justSubmittedSiteRows.current.clear();
+          for (const row of usablePage?.rows || []) {
+            const key = JSON.stringify([user, row.account.id, row.target.group_id]);
+            if (selected.has(key)) justSubmittedSiteRows.current.set(key, progressQuery.data?.read_at_ms || 0);
+          }
+        }
+        markProgress(site.map(t => t.account.id));
+      }
+      if (native.length && kind === "check") void refreshTierViews(client, user);
+      if (kind === "check") void client.invalidateQueries({queryKey:["model-fingerprints","management",user]});
       await Promise.all([
         ...(site.length ? [client.invalidateQueries({queryKey:["sub2api"]})] : []),
         ...(native.length ? [client.invalidateQueries({queryKey:["configured-checks"], ...(localConfiguredCheck ? { refetchType: "none" as const } : {})})] : []),
@@ -1278,9 +1311,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       ]);
       const failed = results.find(r => r.status === "rejected");
       if (manual && failed?.status === "rejected") throw failed.reason;
+      if (manual) setBatchNotice("检测已提交");
+      return receipts;
     } catch (e) {
       if (!manual) throw e;
-      setError(e instanceof Error ? e.message : "检测提交失败");
+      setCheckError(batchFailure(e,"检测提交未确认，请先核对任务状态。"));
     } finally {
       keys.forEach(key => checksInFlight.current.delete(key));
       setSubmittingChecks(new Set(checksInFlight.current));
@@ -1329,7 +1364,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   }
   async function batch(kind: BatchKind){
     if(selectionRead.current || !usablePage || detection.isPending || detection.isError)return;
-    selectionRead.current=true;setReadingSelection(true);setError("");setBatchError("");setFingerprintsSubmitted(0);setBatchReceipts([]);
+    selectionRead.current=true;setReadingSelection(true);setError("");setBatchError("");setBatchNotice("");setUnconfirmedReceipts([]);
     try{
       if (isServiceTier(kind)) {
         const selected=await completeSelection(readManagementSelection);
@@ -1370,7 +1405,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         const fresh = preparedFingerprints(verified).map(fingerprintKey).sort().join("\n");
         if (fresh !== plan.fingerprintTargets.map(fingerprintKey).sort().join("\n")) throw Error("指纹待检测范围已变化，请重新预览。");
         await controlRequest("/v1/model-fingerprints", {method:"POST",body:JSON.stringify({targets:plan.fingerprintTargets})});
-        setFingerprintsSubmitted(plan.fingerprintTargets.length);
+        setBatchNotice(`已提交 ${plan.fingerprintTargets.length} 项指纹检测`);
         void client.invalidateQueries({queryKey:["model-fingerprints"]});
       } else if (isServiceTier(plan.kind)) {
         const verified=await completeSelection(readManagementSelection, plan.revision);
@@ -1378,11 +1413,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         const signature = (entries: TierTarget[]) => entries.map(t => `${tierTargetKey(t)}:${t.scope}`).sort().join("\n");
         if (signature(fresh) !== signature(plan.tierTargets)) throw Error("档位待检测范围已变化，请重新预览。");
         const receipt = await submitTierChecks(plan.kind, plan.tierTargets, false);
-        setBatchReceipts([{label:detectionProjectLabels[plan.kind],accepted:true,message:`已排队 ${receipt.queued} 项`}]);
+        setBatchNotice(`${detectionProjectLabels[plan.kind]}已提交 · 排队 ${receipt.queued} 项`);
         void refreshTierViews(client, user);
       } else {
         await completeSelection(readManagementCheckSelection, plan.revision);
-        await queueChecks(plan.kind,plan.targets,false);
+        const receipts = await queueChecks(plan.kind,plan.targets,false);
+        if (receipts?.some(receipt => !receipt.accepted)) setUnconfirmedReceipts(receipts);
+        else setBatchNotice("批量检测已提交");
       }
       setBatchPreview(null);
     } catch (error) {
@@ -1399,7 +1436,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     return error instanceof Error && error.message ? error.message : fallback;
   }
   const batchBusy=readingSelection || batchSubmitting;
-  const batchUnconfirmed = batchReceipts.some(receipt => !receipt.accepted);
+  const batchUnconfirmed = unconfirmedReceipts.length > 0;
   const batchDisabled=(kind:BatchKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || batchBusy || (
     isServiceTier(kind) ? !filters.model && !modelsToCheck.length :
     kind === "fingerprint"
@@ -1644,7 +1681,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <details className="data-disclosure"><summary>渠道与模型</summary><ul className="dialog-preview-list">
               {batchPreview.items.map(item=><li key={item.id}><strong>{item.label}</strong><small>{item.models.join("、")}</small></li>)}
             </ul></details>
-            <p className="dialog-inline-note">每项可能发送多次请求，产生上游费用。</p>
+            <p className="dialog-inline-note">{batchPreview.kind === "check" ? modelCheckScope : "每项可能发送多次请求，产生上游费用。"}</p>
             {batchPreview.scope!==batchScope && <p className="dialog-inline-note" role="alert">筛选或检测数据已变化，请重新预览。</p>}
           </div>
           <div className="compact-dialog-footer">
@@ -1654,20 +1691,29 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>}
       {!batchPreview && !batchBusy && (batchError || batchUnconfirmed) && <Dialog.Root open onOpenChange={open => {
-        if (!open) { setBatchError(""); setBatchReceipts([]); }
+        if (!open) { setBatchError(""); setUnconfirmedReceipts([]); }
       }}>
         <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="guide-dialog compact-dialog">
           <CompactDialogHeader closeLabel="关闭批量检测提示">{batchUnconfirmed ? "批量检测提交结果未确认" : "批量检测失败"}</CompactDialogHeader>
           <div className="compact-dialog-scroll">
-            {batchError && <p className="dialog-inline-note" role="alert">{batchError}</p>}
-            {batchUnconfirmed && <>
-              {batchReceipts.map(receipt => <p key={receipt.label} className="dialog-inline-note">{receipt.label}：{receipt.message}</p>)}
-              <p className="dialog-inline-note">请先刷新并核对未确认的任务，避免重复提交。</p>
-            </>}
+            {batchUnconfirmed ? <>
+              {unconfirmedReceipts.map(receipt => <p key={receipt.label} className="dialog-inline-note">{receipt.label}：{receipt.message}</p>)}
+              <Dialog.Description className="dialog-inline-note">请先刷新并核对未确认的任务，避免重复提交。</Dialog.Description>
+            </> : <Dialog.Description className="dialog-inline-note" role="alert">{batchError}</Dialog.Description>}
           </div>
           <div className="compact-dialog-footer"><Dialog.Close className="button primary">知道了</Dialog.Close></div>
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>}
+      {checkError && <Dialog.Root open onOpenChange={open => { if (!open) setCheckError(""); }}>
+        <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="guide-dialog compact-dialog">
+          <CompactDialogHeader>渠道检测提交失败</CompactDialogHeader>
+          <div className="compact-dialog-scroll"><Dialog.Description className="dialog-inline-note" role="alert">{checkError}</Dialog.Description></div>
+          <div className="compact-dialog-footer"><Dialog.Close className="button primary">知道了</Dialog.Close></div>
+        </Dialog.Content></Dialog.Portal>
+      </Dialog.Root>}
+      {createPortal(<div role="status" className="management-batch-notice">
+        {batchNotice && section === "channels" && <span><Check size={16} aria-hidden="true" />{batchNotice}</span>}
+      </div>, document.body)}
       <section className="data-panel" id="management-channels" hidden={section !== "channels"} aria-labelledby="management-channel-title">
         <div className="sr-only"><h3 id="management-channel-title">渠道列表</h3>{resultsUnavailable ? "—" : total}</div>
         <div className="management-toolbar">
@@ -1981,7 +2027,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             )}
           </div>
           <div className="management-actions" role="group" aria-label="渠道管理操作">
-            <DetectionAction projects={detectionProjects} project={detectionProject} onSelect={project => { setDetectionProject(project); setFingerprintsSubmitted(0); }} selectDisabled={batchBusy}>
+            <DetectionAction projects={detectionProjects} project={detectionProject} onSelect={project => { setDetectionProject(project); setBatchNotice(""); }} selectDisabled={batchBusy}>
               <button
                 className="button small"
                 aria-label={`${detectionProjectLabels[detectionProject]} · ${eligibleCount} 个渠道`}
@@ -2013,7 +2059,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligibleCount} 个渠道`}
                 disabled={batchDisabled("check")}
                 aria-busy={batchBusy}
-                title={!modelsToCheck.length ? "请在检测模型设置中选择模型" : `检测 ${eligibleCount} 个渠道，${modelsToCheck.length} 个模型；可用的 Astra / 6.1-sol 同时检测模型指纹，每模型 3 次请求`}
+                title={!modelsToCheck.length ? "请在检测模型设置中选择模型" : `检测 ${eligibleCount} 个渠道，${modelsToCheck.length} 个模型；${modelCheckScope}`}
                 onClick={() => void check()}
               >
                 {batchBusy ? <Spinner small /> : <ScanLine size={15} />}
@@ -2029,16 +2075,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               disabled={!usablePage || !total || readingSelection}
               snapshot={async()=>managementOptimizationSnapshot(await withSelectionRequest(signal=>readManagementOptimizationPreview(user,filters,signal)),filters)}
             />
-            <WorkbenchNotice label="渠道管理状态" messages={[
-              !!fingerprintsSubmitted && `已提交 ${fingerprintsSubmitted} 项指纹检测`,
-              pageQuery.updating && "正在更新渠道结果，暂显示更新前内容…",
-              pageQuery.isError && `${resultsReadFailed ? "暂时无法读取渠道" : "暂时无法更新渠道"}：${pageQuery.error?.message || "请重试"}`,
-            ]} />
+            <span className="management-status-slot">
+              <WorkbenchNotice label="渠道管理状态" messages={[
+                pageQuery.updating && "正在更新渠道结果，暂显示更新前内容…",
+                pageQuery.isError && `${resultsReadFailed ? "暂时无法读取渠道" : "暂时无法更新渠道"}：${pageQuery.error?.message || "请重试"}`,
+              ]} />
+            </span>
           </div>
         </div>
-        {!batchUnconfirmed && !!batchReceipts.length && <div className="management-batch-feedback" role="status">
-          {batchReceipts.map(receipt => <p key={receipt.label}>{receipt.label}：{receipt.message}</p>)}
-        </div>}
         {!displayedPage && resultsReadFailed ? (
           <Empty title="暂时无法读取渠道">检测结果尚未完整读取，暂时无法判断是否有匹配渠道。请重试读取。</Empty>
         ) : !displayedPage || (rows.length === 0 && tablePending && !resultsReadFailed) ? (
@@ -2101,9 +2145,17 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                           const content = () => {
                             switch (id) {
                               case "fast":
-                              case "ultrafast": return <ServiceTierCell tier={id}
-                                targets={managementTierTargets(managementRow, displayedPage?.context.imports || [], tableModel, filters.accountId)}
-                                index={tableTiers.index} loading={tableTiers.isPending} failed={tableTiers.isError} />;
+                              case "ultrafast": {
+                                const siteModels = configured ? [] : selected ? [selected] : checks;
+                                const hasSiteEvidence = siteModels.some(check => Object.values(check.result?.service_tiers || {}).some(siteTierStatus));
+                                return <ServiceTierCell tier={id}
+                                  targets={hasSiteEvidence ? [] : managementTierTargets(managementRow, displayedPage?.context.imports || [], tableModel, filters.accountId)}
+                                  siteStatuses={siteModels.flatMap(check => {
+                                    const status = siteTierStatus(check.result?.service_tiers?.[id]);
+                                    return status ? [status] : [];
+                                  })}
+                                  index={tableTiers.index} loading={tableTiers.isPending} failed={tableTiers.isError} />;
+                              }
                               case "model": return <span className="mono management-table-label" title={tableModel}>{tableModel || ((t.list_overview?.total ?? checks.length) ? `${t.list_overview?.total ?? checks.length} 个模型` : "—")}</span>;
                               case "platform": return <>
                                 <span title={t.platform}>{t.platform}</span>
@@ -2137,7 +2189,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                               : <GroupModelMatch checks={overviewChecks} scope={scopeNote} />
                           );
                               case "price": return t.list_summary ? <LoadingIndicator size="inline" label="读取单价" /> : selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />;
-                              case "fingerprint": return <FingerprintCell entries={displayedPage?.context.fingerprints[managementRow.id] || []} supportedModels={displayedPage?.context.fingerprint_models} channel={[account.name, t.name].filter(Boolean).join(" / ")}/>;
+                              case "fingerprint": return <FingerprintCell entries={liveFingerprints(managementRow,displayedPage)} supportedModels={displayedPage?.context.fingerprint_models} channel={[account.name, t.name].filter(Boolean).join(" / ")}/>;
                               case "quality": {
                                 const result = groupQualityResult(t);
                                 return <span className="management-metric"><Verdict result={result} history={t.history} /><QualityProbability history={t.history} checkedAt={result?.checked_at} /></span>;
@@ -2174,7 +2226,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                           <button
                             className="button small"
                             aria-label={`检测 ${account.name} ${t.name}`}
-                            title={checkBusy(account, t, "check", configured) ? "检测正在排队或执行，请稍候" : model ? `检测 ${model}；可用的 Astra / 6.1-sol 同时检测模型指纹，每模型 3 次请求` : `检测已勾选的 ${modelsToCheck.length} 个模型，包含可用的 Astra / 6.1-sol 模型指纹`}
+                            title={checkBusy(account, t, "check", configured) ? "检测正在排队或执行，请稍候" : modelCheckScope}
                             disabled={!canCheck(account, t, "check", configured)}
                             aria-busy={checkBusy(account, t, "check", configured)}
                             onClick={() =>
