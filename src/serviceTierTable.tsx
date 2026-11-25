@@ -15,7 +15,7 @@ export type TierTarget = {
   model: string;
   scope: string;
 };
-export const tierTargetKey = ({ source_id, provider, model }: TierTarget) =>
+export const tierTargetKey = ({ source_id, provider, model }: Pick<TierTarget, "source_id" | "provider" | "model">) =>
   JSON.stringify([source_id, provider, model]);
 export const tierPending = (c?: ConfiguredCheck) => c?.state === "queued" || c?.state === "running";
 const checkKey = (kind: string, target: string) => kind + ":" + target;

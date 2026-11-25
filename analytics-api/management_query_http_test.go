@@ -12,6 +12,116 @@ import (
 	"testing"
 )
 
+func TestManagementHTTPTierSelectionKeepsSignedFilteredScopeWithoutRawReceipts(t *testing.T) {
+	s := managementHydrationFixture(t)
+	db := s.control.db
+	for _, q := range []string{
+		`UPDATE console_sub_targets SET name='Ignore off-page' WHERE group_id=60`,
+		`UPDATE console_sub_models SET result=jsonb_set(result,'{availability,status}','"error"') WHERE group_id=61`,
+		`UPDATE console_sub_models SET result=jsonb_set(result,'{service_tiers}',jsonb_build_object('ultrafast',jsonb_build_object('status','supported','checked_at',extract(epoch from now())::bigint))) WHERE model='gpt-5.5' AND group_id=59`,
+		`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,active,state)
+		 SELECT 'a',g,'Group '||g,'openai',g,true,'done' FROM generate_series(62,980) g`,
+		`INSERT INTO console_sub_models(account_id,group_id,model,state,message,result)
+		 SELECT 'a',g,m,'done','',jsonb_build_object('model',m,'checked_at',g,'availability',
+		   jsonb_build_object('id','historic-'||g||'-'||m,'status','success','text','TIER_MUST_NOT_READ_DIAGNOSTICS'))
+		 FROM generate_series(62,980) g CROSS JOIN unnest(ARRAY['gpt-5.5','gpt-6-astra','extra-model']) m`,
+		`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result)
+		 SELECT 'historic-'||g||'-'||m,'a',g,g,m,0,'[]','matched','{"input_price":2,"output_price":3}'
+		 FROM generate_series(62,980) g CROSS JOIN unnest(ARRAY['gpt-5.5','gpt-6-astra','extra-model']) m`,
+		`UPDATE console_sub_targets SET result=jsonb_build_object('quality',jsonb_build_object('id','q-'||group_id||'-gpt-5.5')) WHERE group_id<=61`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepareManagementRevisionsForTest(t, db)
+	owner, err := s.control.newSession(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := s.control.newSession(context.Background(), "foreign")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	call := func(session string, values url.Values, list bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?"+values.Encode(), nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+		if list {
+			r.Header.Set("Accept", managementPageV3MediaType)
+			r.Header.Set(managementListViewHeader, managementListViewV1)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
+	for _, c := range []struct {
+		filters string
+		count   int
+		catalog bool
+	}{
+		{`{"excludeName":"ignore"}`, 979, true},
+		{`{"availability":"success","excludeName":"ignore"}`, 978, true},
+		{`{"availability":"success","excludeName":"ignore","model":"gpt-5.5","ultrafast":"unknown"}`, 977, false},
+	} {
+		filters, err := parseManagementQuery(url.Values{"filters": {c.filters}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Use a real projected list snapshot to sign the token, including the
+		// group-availability path that intentionally differs from a raw read.
+		ctx := context.WithValue(context.Background(), managementListViewKey{}, true)
+		snapshot, err := s.readManagementQuerySnapshot(ctx, "owner", filters, "", false)
+		if err != nil || snapshot.Page.Total != c.count || len(snapshot.Page.Rows) != 25 {
+			t.Fatalf("filter %s: list total=%d err=%v", c.filters, snapshot.Page.Total, err)
+		}
+		first := call(owner, url.Values{"filters": {c.filters}}, true)
+		var page managementColumnPage
+		if err := json.Unmarshal(first.Body.Bytes(), &page); first.Code != 200 || err != nil || page.Revision != snapshot.Page.Revision || page.SelectionToken == "" {
+			t.Fatalf("list response did not issue the expected token: status=%d err=%v", first.Code, err)
+		}
+		params := url.Values{"filters": {c.filters}, "selection": {page.SelectionToken}, "check_selection": {"tier"}}
+		logs.Reset()
+		response := call(owner, params, false)
+		var selection managementTierSelectionResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &selection); response.Code != 200 || err != nil || selection.Format != "management-tier-selection-v1" || selection.Revision != snapshot.Page.Revision || selection.Total != c.count || selection.EligibleCount != c.count || len(selection.Eligible) != c.count {
+			t.Fatalf("filter %s: selection status=%d total=%d eligible=%d err=%v\n%s", c.filters, response.Code, selection.Total, len(selection.Eligible), err, logs.String())
+		}
+		for i, row := range selection.Eligible {
+			if row.ID != snapshot.Filtered.Rows[i].ID || len(row.Checks) != 0 || row.Selected != nil {
+				t.Fatal("tier action changed filter membership/order or serialized diagnostics", row.ID)
+			}
+		}
+		if strings.Contains(response.Body.String(), `"input":`) || strings.Contains(response.Body.String(), "TIER_MUST_NOT_READ_DIAGNOSTICS") || selection.Imports == nil || selection.Checks == nil {
+			t.Fatal("invalid compact tier response")
+		}
+		readLog := logs.String()
+		if !strings.Contains(readLog, "management_signal_receipts deferred=true") || !strings.Contains(readLog, "management_account_receipt_signals requested=61 resolved=61") ||
+			strings.Contains(readLog, "stage=account_receipts ") || strings.Contains(readLog, "stage=hydrate_page ") ||
+			strings.Contains(readLog, "catalog_only=true") != c.catalog {
+			t.Fatalf("tier selection fell back to expensive reads:\n%s", readLog)
+		}
+		if response := call(foreign, params, false); response.Code != 400 {
+			t.Fatal("cross-owner tier selection accepted", response.Code)
+		}
+		params.Set("filters", `{"search":"unrelated"}`)
+		if response := call(owner, params, false); response.Code != 400 {
+			t.Fatal("selection token accepted with different filters", response.Code)
+		}
+		params.Set("filters", c.filters)
+		if _, err := db.Exec(`UPDATE console_sub_models SET message=message||'changed' WHERE group_id=980`); err != nil {
+			t.Fatal(err)
+		}
+		if response := call(owner, params, false); response.Code != 409 {
+			t.Fatal("off-page evidence change accepted", response.Code)
+		}
+	}
+}
+
 func TestManagementHTTPCheckSelectionKeepsAllTargetsWithoutDiagnosticPayload(t *testing.T) {
 	s := managementHydrationFixture(t)
 	const marker = "BATCH_DIAGNOSTIC_MUST_NOT_BE_SERIALIZED"

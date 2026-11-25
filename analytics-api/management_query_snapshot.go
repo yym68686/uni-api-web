@@ -120,6 +120,7 @@ func (s *Service) readManagementResetDirectory(ctx context.Context, owner string
 func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, owner string, filters managementQueryFilters, token string, selection, rebase, preview, hydrate bool) (managementQuerySnapshot, error) {
 	ctx = managementTraceContext(ctx)
 	checkSelection, _ := ctx.Value(managementCheckSelectionKey{}).(bool)
+	tierSelection, _ := ctx.Value(managementTierSelectionKey{}).(bool)
 	projected := !selection || checkSelection
 	if projected && owner != "" {
 		ctx = context.WithValue(ctx, managementGatewayPartsScopeKey{}, &managementGatewayPartsScope{store: &s.gatewayParts, owner: owner})
@@ -150,7 +151,7 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 				version: managementTargetVersion{s.control.db, owner, proof.Epochs["console_sub_accounts"], proof.Epochs["console_sub_targets"], proof.Epochs["console_sub_capability_summaries"]},
 			})
 		}
-		stateOnly := !selection && !preview && managementListView(ctx) && out.Proof != nil && out.Proof.Stamp != "" &&
+		stateOnly := ((!selection && !preview && managementListView(ctx)) || tierSelection) && out.Proof != nil && out.Proof.Stamp != "" &&
 			filters.Model == "" && (filters.Availability == "success" || filters.Availability == "error") &&
 			filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == "" && !filters.hasServiceTiers()
 		catalogOnly := filters.Model == "" && (filters.Availability == "" || stateOnly) && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == "" && !filters.hasServiceTiers()
@@ -160,9 +161,10 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 		if projected {
 			reuse = &managementReceiptReuse{deferModelUsage: filters.PriceStatus == ""}
 		}
-		// Checks need model states, including those outside the current page.
-		// Do not hydrate replies or use the catalog-only shortcut for them.
-		view, err := s.readManagementDatabaseModeWithReceiptsFrom(ctx, tx, owner, facts, projected, filters.Model, catalogOnly && !selection, reuse)
+		// The tier action uses the catalog when no per-model predicate needs
+		// results. It needs installed binding identities and tier queue state,
+		// not individual site model replies.
+		view, err := s.readManagementDatabaseModeWithReceiptsFrom(ctx, tx, owner, facts, projected, filters.Model, catalogOnly && (!selection || tierSelection), reuse)
 		if err != nil {
 			return view, err
 		}

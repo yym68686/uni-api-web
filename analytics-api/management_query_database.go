@@ -113,7 +113,13 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 	if predicates {
 		endPredicates := managementReadSpan(ctx, "database_predicate_snapshot")
 		if catalogOnly {
-			out.Input.ModelsRevision, signals, err = readManagementRevisionCatalogFrom(ctx, db, owner, true)
+			if tierSelection, _ := ctx.Value(managementTierSelectionKey{}).(bool); tierSelection {
+				// Keep the complete model/receipt revision proof, but use typed
+				// receipts for the remaining account metadata instead of raw replies.
+				signals, out.Input.ModelsRevision, err = readManagementScopedStreams(ctx, db, owner, true, managementStreamScope{CatalogOnly: true, ReceiptReuse: reuse})
+			} else {
+				out.Input.ModelsRevision, signals, err = readManagementRevisionCatalogFrom(ctx, db, owner, true)
+			}
 		} else if model != "" {
 			names := managementScopeModelNames(model, facts, out.Bindings)
 			preview, _ := ctx.Value(managementOptimizationPreviewKey{}).(bool)
@@ -172,8 +178,8 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 	}
 	// Paged predicate reads normalize account metadata immediately below, just
 	// like page hydration. Use the same fully validated five-field receipts for
-	// those summaries. Ordinary/detail/selection and catalog-only reads keep
-	// the complete raw decoder. Both projected and raw account timings remain
+	// those summaries. Reads without a same-transaction projection keep the
+	// complete raw decoder. Both projected and raw account timings remain
 	// distinct from the later page hydration.
 	current := out.receiptReuse.current(db, owner)
 	readUsage := func(accounts []subAccount) error {

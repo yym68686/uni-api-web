@@ -110,6 +110,12 @@ export interface ManagementOptimizationPreview extends Omit<ManagementSelection,
   filters: SubFilters;
 }
 
+export interface ManagementTierSelection extends Pick<ManagementSelection, "revision" | "read_at_ms" | "total" | "eligible_count" | "eligible"> {
+  format: "management-tier-selection-v1";
+  imports: InstalledChannel[];
+  checks: ConfiguredCheck[];
+}
+
 const path = (
   filters: SubFilters,
   token?: { cursor?: string; selection?: string; refreshCursor?: boolean; selectedReceipts?: boolean },
@@ -469,6 +475,37 @@ export async function readManagementCheckSelection(
     !Array.isArray(selection.eligible) ||
     selection.eligible.length !== page.eligible_count ||
     !uniqueRows(selection.eligible)
+  ) {
+    throw Error("完整筛选结果已变化或读取不完整，请刷新渠道后重试");
+  }
+  return selection;
+}
+
+export async function readManagementTierSelection(
+  filters: SubFilters,
+  page: ManagementPage,
+  signal: AbortSignal,
+): Promise<ManagementTierSelection> {
+  let selection: ManagementTierSelection;
+  try {
+    selection = await controlRequest(path(filters, { selection: page.selection_token }) + "&check_selection=tier", { signal });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400 && error.message.trim() === "筛选参数无效")
+      throw Error("档位检测服务正在更新，请稍后重试。");
+    throw error;
+  }
+  signal.throwIfAborted();
+  if (
+    selection?.format !== "management-tier-selection-v1" ||
+    selection.revision !== page.revision ||
+    selection.total !== page.total ||
+    selection.eligible_count !== page.eligible_count ||
+    !count(selection.read_at_ms) ||
+    !Array.isArray(selection.eligible) ||
+    selection.eligible.length !== page.eligible_count ||
+    !uniqueRows(selection.eligible) ||
+    !Array.isArray(selection.imports) ||
+    !Array.isArray(selection.checks)
   ) {
     throw Error("完整筛选结果已变化或读取不完整，请刷新渠道后重试");
   }

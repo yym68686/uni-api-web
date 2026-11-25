@@ -41,6 +41,7 @@ type managementSelectionResponse struct {
 }
 
 type managementCheckSelectionKey struct{}
+type managementTierSelectionKey struct{}
 
 type managementCheckSelectionResponse struct {
 	Format        string               `json:"format"`
@@ -74,6 +75,38 @@ func managementCheckSelection(page managementQueryPage, rows []managementQueryRo
 	return managementCheckSelectionResponse{"management-check-selection-v1", page.Revision, page.ReadAtMS, page.Total, page.EligibleCount, eligible}
 }
 
+type managementTierSelectionResponse struct {
+	managementCheckSelectionResponse
+	Imports []subInstalledChannel `json:"imports"`
+	Checks  []configuredCheck     `json:"checks"`
+}
+
+func managementTierSelection(page managementQueryPage, rows []managementQueryRow, in managementQueryInput) managementTierSelectionResponse {
+	response := managementTierSelectionResponse{managementCheckSelection(page, rows), []subInstalledChannel{}, []configuredCheck{}}
+	response.Format = "management-tier-selection-v1"
+	groups := make(map[subBoundKey]bool)
+	for _, row := range response.Eligible {
+		if row.Configured == nil && row.Account.ID != "" {
+			groups[subBoundKey{AccountID: row.Account.ID, GroupID: row.Target.GroupID}] = true
+		}
+	}
+	for _, member := range in.Imports {
+		if member.Kind != "configured" && member.ServiceTierScope != "" && groups[subBoundKey{AccountID: member.AccountID, GroupID: member.GroupID}] {
+			response.Imports = append(response.Imports, subInstalledChannel{
+				SourceID: member.SourceID, Provider: member.Provider, Kind: member.Kind, Engine: member.Engine,
+				AccountID: member.AccountID, GroupID: member.GroupID, ServiceTierScope: member.ServiceTierScope,
+				Models: member.Models, ModelMappings: member.ModelMappings,
+			})
+		}
+	}
+	for _, check := range in.Checks {
+		if (check.Kind == "fast" || check.Kind == "ultrafast") && managementPending(check.State) {
+			response.Checks = append(response.Checks, configuredCheck{Source: check.Source, Provider: check.Provider, Model: check.Model, Kind: check.Kind, State: check.State})
+		}
+	}
+	return response
+}
+
 func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	filters := managementQueryFilters{GroupStatus: "available"}
 	for key, list := range values {
@@ -96,7 +129,7 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	if values.Has("model_view") && values.Get("model_view") != "selected" {
 		return filters, errManagementFilters
 	}
-	if values.Has("check_selection") && (values.Get("check_selection") != "1" || values.Get("selection") == "") {
+	if values.Has("check_selection") && (!slices.Contains([]string{"1", "tier"}, values.Get("check_selection")) || values.Get("selection") == "") {
 		return filters, errManagementFilters
 	}
 	raw := values.Get("filters")
@@ -218,9 +251,13 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	checkSelection := values.Get("check_selection") == "1"
+	checkSelection := values.Get("check_selection") != ""
+	tierSelection := values.Get("check_selection") == "tier"
 	if checkSelection {
 		ctx = context.WithValue(ctx, managementCheckSelectionKey{}, true)
+	}
+	if tierSelection {
+		ctx = context.WithValue(ctx, managementTierSelectionKey{}, true)
 	}
 	listView := r.Header.Get(managementListViewHeader)
 	if selection == "" && r.Header.Get("Accept") == managementPageV3MediaType &&
@@ -314,6 +351,8 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 			class = "management_source_incomplete"
 		}
 		http.Error(w, message, status)
+	} else if tierSelection {
+		err = writeManagementJSON(w, r.WithContext(ctx), managementTierSelection(page, snapshot.Filtered.Rows, view.Input))
 	} else if checkSelection {
 		err = writeManagementJSON(w, r.WithContext(ctx), managementCheckSelection(page, snapshot.Filtered.Rows))
 	} else if selection != "" {
@@ -337,5 +376,5 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	if err != nil && class == "none" {
 		class = "management_response_write_failed"
 	}
-	log.Printf("management_query read_ms=%d elapsed_ms=%d rows=%d total=%d selection=%t class=%s canceled=%t request_id=%s", readElapsed.Milliseconds(), time.Since(start).Milliseconds(), len(page.Rows), page.Total, selection != "", class, ctx.Err() != nil, consoleRequestID(r.Context()))
+	log.Printf("management_query read_ms=%d elapsed_ms=%d rows=%d total=%d selection=%t tier_selection=%t class=%s canceled=%t request_id=%s", readElapsed.Milliseconds(), time.Since(start).Milliseconds(), len(page.Rows), page.Total, selection != "", tierSelection, class, ctx.Err() != nil, consoleRequestID(r.Context()))
 }

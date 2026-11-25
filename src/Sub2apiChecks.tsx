@@ -50,7 +50,7 @@ import { isServiceTier, serviceTierFilterLabels, serviceTierName, serviceTiers, 
 import { managementTierTargets, refreshTierViews, ServiceTierCell, siteTierStatus, submitTierChecks, TierCheckSubmissionError, tierIndex, tierPending, tierTarget,
   tierRecord, tierTargetKey, useTierChecks, type TierTarget } from "./serviceTierTable";
 import type { InstalledChannel } from "./sub2apiImports";
-import { useManagementPage, readManagementCheckSelection, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation } from "./managementQuery";
+import { useManagementPage, readManagementCheckSelection, readManagementSelection, readManagementTierSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation, type ManagementTierSelection } from "./managementQuery";
 import type { ManagementPage, ManagementPagePosition, ManagementSelection } from "./managementQuery";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
@@ -1348,16 +1348,28 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     if (ready.length > FINGERPRINT_BATCH_LIMIT) throw Error(`单次最多提交 ${FINGERPRINT_BATCH_LIMIT} 项指纹检测，请缩小渠道或模型范围。`);
     return ready;
   }
-  function tierPreview(selection: Pick<ManagementSelection, "eligible" | "input">, tier: ServiceTier) {
-    const index = tierIndex(selection.input.checks);
+  function tierPreview(selection: ManagementTierSelection, tier: ServiceTier) {
+    const index = tierIndex(selection.checks);
+    const groupKey = (account: string, group: number) => JSON.stringify([account, group]);
+    const importsByGroup = new Map<string, ManagementTierSelection["imports"]>();
+    const selectedModels = new Set(modelsToCheck);
+    const selectedAliases = new Set<string>();
+    for (const member of selection.imports) {
+      const key = groupKey(member.account_id, member.group_id);
+      const bindings = importsByGroup.get(key);
+      if (bindings) bindings.push(member);
+      else importsByGroup.set(key, [member]);
+      if (!filters.model) for (const model of member.models) {
+        if (selectedModels.has(member.model_mappings?.[model] || model))
+          selectedAliases.add(tierTargetKey({source_id: member.source_id, provider: member.provider, model}));
+      }
+    }
     const targets = new Map<string, TierTarget>();
     const items: BatchPreview["items"] = [];
     for (const row of selection.eligible) {
       if (detection.isSaving(row) || !detection.isEnabled(row)) continue;
-      const members = managementTierTargets(row, selection.input.imports, filters.model, filters.accountId)
-        .filter(target => (filters.model || modelsToCheck.includes(target.model) || !row.configured &&
-          selection.input.imports.some(m => m.source_id === target.source_id && m.provider === target.provider &&
-            modelsToCheck.includes(m.model_mappings?.[target.model] || target.model))) &&
+      const members = managementTierTargets(row, importsByGroup.get(groupKey(row.account.id, row.target.group_id)) || [], filters.model, filters.accountId)
+        .filter(target => (filters.model || selectedModels.has(target.model) || !row.configured && selectedAliases.has(tierTargetKey(target))) &&
           !detection.disabled.has(detectionKey(target)) && !tierPending(tierRecord(index, tier, target)));
       for (const target of members) targets.set(tierTargetKey(target), target);
       if (members.length) items.push({id: row.id, label: `${row.account.name} / ${row.target.name}`, models: [...new Set(members.map(m => m.model))]});
@@ -1370,7 +1382,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     selectionRead.current=true;setReadingSelection(true);setError("");setBatchError("");setBatchNotice("");setUnconfirmedReceipts([]);
     try{
       if (isServiceTier(kind)) {
-        const selected=await completeSelection(readManagementSelection);
+        const selected=await completeSelection(readManagementTierSelection);
         const preview = tierPreview(selected, kind);
         setBatchPreview({kind,scope:batchScope,revision:selected.revision,total:selected.total,items:preview.items,
           targets:[],fingerprintTargets:[],tierTargets:preview.targets});
@@ -1411,7 +1423,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         setBatchNotice(`已提交 ${plan.fingerprintTargets.length} 项指纹检测`);
         void client.invalidateQueries({queryKey:["model-fingerprints"]});
       } else if (isServiceTier(plan.kind)) {
-        const verified=await completeSelection(readManagementSelection, plan.revision);
+        const verified=await completeSelection(readManagementTierSelection, plan.revision);
         const fresh = tierPreview(verified, plan.kind).targets;
         const signature = (entries: TierTarget[]) => entries.map(t => `${tierTargetKey(t)}:${t.scope}`).sort().join("\n");
         if (signature(fresh) !== signature(plan.tierTargets)) throw Error("档位待检测范围已变化，请重新预览。");

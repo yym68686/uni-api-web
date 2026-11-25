@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { Result, SubAccount, SubTarget } from "./Sub2apiChecks";
-import type { ManagementPage, ManagementSelection } from "./managementQuery";
+import type { ManagementPage, ManagementSelection, ManagementTierSelection } from "./managementQuery";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { SUB_MODELS, saveSubModels } from "./sub2apiModels";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
@@ -874,13 +874,14 @@ it("offers all four projects and queues only eligible fingerprints across manage
 });
 
 it.each([
-  { tier: "ultrafast", label: "Ultrafast", failure: 0 },
-  { tier: "fast", label: "Fast", failure: 0 },
-  { tier: "ultrafast", label: "Ultrafast", failure: 502 },
-  { tier: "ultrafast", label: "Ultrafast", failure: 409 },
-  { tier: "ultrafast", label: "Ultrafast", failure: 200 },
-] as const)("$tier covers all filtered pages and handles a second-batch response of $failure without replay", async ({tier, label, failure}) => {
-  const owner = `tier-batches-${tier}-${failure}`;
+  { tier: "ultrafast", label: "Ultrafast", failure: 0, stale: false },
+  { tier: "fast", label: "Fast", failure: 0, stale: false },
+  { tier: "ultrafast", label: "Ultrafast", failure: 502, stale: false },
+  { tier: "ultrafast", label: "Ultrafast", failure: 409, stale: false },
+  { tier: "ultrafast", label: "Ultrafast", failure: 200, stale: false },
+  { tier: "ultrafast", label: "Ultrafast", failure: 0, stale: true },
+] as const)("$tier covers all filtered pages (second-batch response: $failure, stale scope: $stale)", async ({tier, label, failure, stale}) => {
+  const owner = `tier-batches-${tier}-${failure}-${stale}`;
   const model = "gpt-6.2-sol";
   const scope = "a".repeat(64);
   saveSubFilters(owner, {...subFilterDefaults, model, availability: "success"});
@@ -896,14 +897,19 @@ it.each([
   });
   // Disabled or already-running rows may be displayed but must not be sent.
   const candidateIDs = matches.map(row => row.configured.provider).filter(id => id !== "native-2" && id !== "native-28");
-  const expectedTargets = candidateIDs.map(provider => ({source_id: "gateway", provider, models: [model], expected_scope: scope}));
+  const alias = "public-sol";
+  const site = {...matches[62], account, accountIds: [account.id], configured: undefined};
+  const binding = {...matches[62].configured, account_id: account.id, group_id: 63,
+    models: [alias, "gpt-5.5"], model_mappings: {[alias]: model}};
+  const expectedTargets = candidateIDs.map(provider => ({source_id: "gateway", provider, models: [provider === binding.provider ? alias : model], expected_scope: scope}));
   const running = {
     source_id: "gateway", provider: "native-28", kind: tier, model, state: "running", fingerprint: scope,
     message: "", result: null, history: undefined,
   };
-  const snapshot: ManagementSelection = {
-    ...selection(), rows: matches, eligible: matches, total: matches.length, eligible_count: matches.length,
-    input: {...selection().input, channels: matches.map(row => row.configured), checks: [running]},
+  const allRows: ManagementRow[] = [...matches.slice(0, -1), site];
+  const snapshot: ManagementTierSelection = {
+    format: "management-tier-selection-v1", revision: page().revision, read_at_ms: 1,
+    eligible: allRows, total: allRows.length, eligible_count: allRows.length, imports: [binding], checks: [running],
   };
   const writes: { kind: string; confirmed: boolean; manual: boolean; targets: typeof expectedTargets }[] = [];
   const tokens: string[] = [];
@@ -930,9 +936,17 @@ it.each([
     if (url.pathname.endsWith("/channel-management/query")) {
       expect(JSON.parse(url.searchParams.get("filters")!)).toMatchObject({model, availability: "success"});
       const token = url.searchParams.get("selection");
-      if (token) { tokens.push(token); return Response.json(snapshot); }
+      if (token) {
+        // The production full diagnostic read times out. Both the preview and
+        // pre-submit verification must use the targeted selection API.
+        if (url.searchParams.get("check_selection") !== "tier") return new Response(null, {status: 503});
+        tokens.push(token);
+        return Response.json(stale && tokens.length === 2
+          ? {...snapshot, imports: [{...binding, service_tier_scope: "b".repeat(64)}]}
+          : snapshot);
+      }
       const offset = Number(url.searchParams.get("cursor") || 0);
-      return Response.json({...page(offset), rows: snapshot.rows.slice(offset, offset + 25), total: snapshot.total, eligible_count: snapshot.eligible_count});
+      return Response.json({...page(offset), rows: allRows.slice(offset, offset + 25), total: snapshot.total, eligible_count: snapshot.eligible_count});
     }
     return Response.json({data: []});
   }));
@@ -955,6 +969,14 @@ it.each([
   expect(writes).toHaveLength(0);
 
   await user.click(within(preview).getByRole("button", {name: "确认提交检测"}));
+  if (stale) {
+    const error = await screen.findByRole("dialog", {name: "批量检测失败"});
+    expect(error).toHaveTextContent("档位待检测范围已变化，请重新预览。");
+    expect(tokens).toEqual(["signed-all", "signed-all"]);
+    expect(writes).toHaveLength(0);
+    expect(table.previousElementSibling).toBe(toolbar);
+    return;
+  }
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(within(preview).getByRole("button", {name: "正在核对并提交…"})).toBeDisabled();
   const readsBeforeReceipt = tierReads;
