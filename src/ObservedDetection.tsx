@@ -23,7 +23,7 @@ import { capabilityCheckScope, isCapabilityCheckModel } from "./sub2apiModels";
 import { toolUseLabels } from "./toolUse";
 import type { Channel } from "./types";
 import { Spinner } from "./ui";
-import { isServiceTier, serviceTierBatchLimit, serviceTierFilterLabels, serviceTierName } from "./serviceTierStatus";
+import { isServiceTier, serviceTierFilterLabels, serviceTierName } from "./serviceTierStatus";
 import { observedTierTarget, refreshTierViews, submitTierChecks, tierRecord, tierResultStatus,
   useTierChecks, useTierMembers, type TierTarget } from "./serviceTierTable";
 
@@ -142,9 +142,7 @@ export function useObservedDetection(
         ? "正在读取批量检测设置…"
         : tier && (tierMembers.isPending || tierMembers.isError || tierChecks.isPending || tierChecks.isError)
           ? "档位检测数据尚不可用。"
-          : tier && total > serviceTierBatchLimit
-            ? `单次最多提交 ${serviceTierBatchLimit} 项档位检测，请缩小筛选范围。`
-        : project === "fingerprint" &&
+          : project === "fingerprint" &&
             (fingerprints.isPending || fingerprints.isError)
           ? "指纹检测支持信息尚不可用。"
           : project === "fingerprint" && total > FINGERPRINT_BATCH_LIMIT
@@ -168,7 +166,9 @@ export function useObservedDetection(
     setNotice(undefined);
     try {
       const fingerprint = project === "fingerprint";
-      const result = tier ? await submitTierChecks(tier, targets as TierTarget[], manual) : await controlRequest<{ queued?: number }>(
+      const result = tier ? await submitTierChecks(tier, targets as TierTarget[], manual, () => {
+        void refreshTierViews(client, owner);
+      }) : await controlRequest<{ queued?: number }>(
         fingerprint
           ? "/v1/model-fingerprints"
           : "/v1/channel-management/checks",
@@ -191,8 +191,7 @@ export function useObservedDetection(
       setNotice({
         text: `已提交${detectionProjectLabels[project]} · ${result.queued ?? targets.length} 项`,
       });
-      if (tier) await refreshTierViews(client, owner);
-      else await client.invalidateQueries({
+      if (!tier) await client.invalidateQueries({
         queryKey: [fingerprint ? "model-fingerprints" : "configured-checks"],
       });
     } catch (error) {

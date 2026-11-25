@@ -873,6 +873,116 @@ it("offers all four projects and queues only eligible fingerprints across manage
   view.unmount();
 });
 
+it.each([
+  { tier: "ultrafast", label: "Ultrafast", failure: 0 },
+  { tier: "fast", label: "Fast", failure: 0 },
+  { tier: "ultrafast", label: "Ultrafast", failure: 502 },
+  { tier: "ultrafast", label: "Ultrafast", failure: 409 },
+  { tier: "ultrafast", label: "Ultrafast", failure: 200 },
+] as const)("$tier covers all filtered pages and handles a second-batch response of $failure without replay", async ({tier, label, failure}) => {
+  const owner = `tier-batches-${tier}-${failure}`;
+  const model = "gpt-6.2-sol";
+  const scope = "a".repeat(64);
+  saveSubFilters(owner, {...subFilterDefaults, model, availability: "success"});
+  const matches = Array.from({length: 63}, (_, i) => {
+    const row = {...rows[0], id: `row-${i + 1}`, target: target(i + 1)};
+    const configured: ManagedChannel = {
+      source_id: "gateway", source_name: "Gateway", provider: `native-${i + 1}`,
+      name: row.target.name, engine: "gpt", service_tier_scope: scope, models: [model, "gpt-5.5"],
+      account_ids: [], account_id: "", group_id: 0, api_key_id: "", key_position: 0,
+      key_prefix: "", positions: {}, revision: "native", manageable: false,
+    };
+    return {...row, account: {...account, id: "", name: "Native"}, accountIds: [], configured};
+  });
+  // Disabled or already-running rows may be displayed but must not be sent.
+  const candidateIDs = matches.map(row => row.configured.provider).filter(id => id !== "native-2" && id !== "native-28");
+  const expectedTargets = candidateIDs.map(provider => ({source_id: "gateway", provider, models: [model], expected_scope: scope}));
+  const running = {
+    source_id: "gateway", provider: "native-28", kind: tier, model, state: "running", fingerprint: scope,
+    message: "", result: null, history: undefined,
+  };
+  const snapshot: ManagementSelection = {
+    ...selection(), rows: matches, eligible: matches, total: matches.length, eligible_count: matches.length,
+    input: {...selection().input, channels: matches.map(row => row.configured), checks: [running]},
+  };
+  const writes: { kind: string; confirmed: boolean; manual: boolean; targets: typeof expectedTargets }[] = [];
+  const tokens: string[] = [];
+  let releaseFirst!: (response: Response) => void, tierReads = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const url = new URL(input);
+    if (init?.method === "POST") {
+      expect(url.pathname).toBe("/analytics/v1/channel-management/checks");
+      writes.push(JSON.parse(String(init.body)));
+      if (writes.length === 1) return new Promise<Response>(resolve => { releaseFirst = resolve; });
+      if (writes.length === 2 && failure)
+        return failure === 200 ? Response.json({queued: "invalid"}) : new Response(
+          failure === 409 ? "渠道配置已变化" : "<html>Bad Gateway</html>", {status: failure},
+        );
+      return Response.json({queued: writes.length === 2 ? 0 : 1}, {status: 202});
+    }
+    if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
+    if (url.pathname.endsWith("/detection-settings"))
+      return Response.json({disabled: [{source_id: "gateway", provider: "native-2"}]});
+    if (url.pathname.endsWith("/checks") && url.searchParams.get("kind") === "service-tiers") {
+      tierReads++;
+      return Response.json({data: [running]});
+    }
+    if (url.pathname.endsWith("/channel-management/query")) {
+      expect(JSON.parse(url.searchParams.get("filters")!)).toMatchObject({model, availability: "success"});
+      const token = url.searchParams.get("selection");
+      if (token) { tokens.push(token); return Response.json(snapshot); }
+      const offset = Number(url.searchParams.get("cursor") || 0);
+      return Response.json({...page(offset), rows: snapshot.rows.slice(offset, offset + 25), total: snapshot.total, eligible_count: snapshot.eligible_count});
+    }
+    return Response.json({data: []});
+  }));
+
+  localStorage.setItem(managementColumnsStorageKey, JSON.stringify(["model", "availability", tier]));
+  try { mount(owner); }
+  finally { localStorage.removeItem(managementColumnsStorageKey); }
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText("选择检测项目"), tier);
+  await user.click(await screen.findByRole("button", {name: "下一页"}));
+  await screen.findByText("Channel 26", {selector: "strong"});
+  const run = screen.getByRole("button", {name: `${label} 检测 · 63 个渠道`});
+  await waitFor(() => expect(run).toBeEnabled());
+  const table = screen.getByRole("region", {name: "渠道管理表，可横向滚动"});
+  const toolbar = table.previousElementSibling;
+  await user.click(run);
+  const preview = await screen.findByRole("dialog", {name: "核对批量检测范围"});
+  expect(within(preview).getByText(/本次计划 61 \/ 63 个渠道/)).toBeVisible();
+  expect(within(preview).getByText("最多 61 次可能计费的上游请求")).toBeVisible();
+  expect(writes).toHaveLength(0);
+
+  await user.click(within(preview).getByRole("button", {name: "确认提交检测"}));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(within(preview).getByRole("button", {name: "正在核对并提交…"})).toBeDisabled();
+  const readsBeforeReceipt = tierReads;
+  await act(async () => { releaseFirst(Response.json({queued: 29}, {status: 202})); });
+  if (!failure) {
+    const notice = await screen.findByText(`${label} 检测已提交 · 排队 30 项`);
+    expect(notice.closest('[role="status"]')?.parentElement).toBe(document.body);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  } else {
+    const dialog = await screen.findByRole("dialog", {
+      name: failure === 409 ? "批量检测未全部提交" : "批量检测提交结果未确认",
+    });
+    const message = within(dialog).getByRole("alert");
+    expect(message).toHaveTextContent("前 30 项已收到回执，新增排队 29 项。");
+    expect(message).toHaveTextContent(failure === 409 ? "本批 30 项未入队（渠道配置已变化）" : "本批 30 项提交结果未确认");
+    expect(message).toHaveTextContent("后续 1 项未提交。");
+    if (failure !== 409) expect(message).toHaveTextContent("避免重复提交");
+    await user.click(within(dialog).getByRole("button", {name: "知道了"}));
+  }
+  expect(tokens).toEqual(["signed-all", "signed-all"]);
+  expect(writes).toEqual([expectedTargets.slice(0, 30), expectedTargets.slice(30, 60),
+    ...(!failure ? [expectedTargets.slice(60)] : [])].map(targets => ({kind: tier, confirmed: true, manual: false, targets})));
+  await waitFor(() => expect(tierReads).toBeGreaterThan(readsBeforeReceipt));
+  expect(screen.getByRole("region", {name: "渠道管理表，可横向滚动"})).toBe(table);
+  expect(table.previousElementSibling).toBe(toolbar);
+  expect(toolbar).toHaveClass("management-toolbar");
+});
+
 it("persists each channel switch, keeps failed saves unchanged and restores it after a fresh page read",async()=>{
  let disabled:{account_id:string;group_id:number}[]=[];let fail=false;
  const patches:unknown[]=[];

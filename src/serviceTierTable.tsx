@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
-import { controlRequest } from "./api";
+import { ApiError, controlRequest } from "./api";
 import { channelMembers, type ConfiguredCheck, type ManagementRow } from "./channelManagement";
 import type { InstalledChannel } from "./sub2apiImports";
 import type { Channel } from "./types";
-import { isServiceTier, serviceTierFilterLabels, serviceTierFresh, serviceTierName, serviceTierVerified,
+import { isServiceTier, serviceTierBatchLimit, serviceTierFilterLabels, serviceTierFresh, serviceTierName, serviceTierVerified,
   type ServiceTier, type ServiceTierResult } from "./serviceTierStatus";
 
 export const tierMemberKey = (member: { source_id?: string; provider: string }) =>
@@ -115,11 +115,42 @@ export function refreshTierViews(client: QueryClient, owner: string) {
   ]);
 }
 
-export function submitTierChecks(tier: ServiceTier, targets: TierTarget[], manual: boolean) {
-  return controlRequest<{queued: number}>("/v1/channel-management/checks", {
-    method: "POST", body: JSON.stringify({
-      kind: tier, manual, confirmed: true, targets: targets.map(({model, scope, ...target}) =>
-        ({...target, models: [model], expected_scope: scope})),
-    }),
-  }, {localCheckRefresh: true});
+export class TierCheckSubmissionError extends Error {
+  constructor(error: unknown, queued: number, confirmed: number, batchSize: number, unsent: number) {
+    const rejected = error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408;
+    const reason = rejected ? error.message.trim() : error instanceof ApiError ? `HTTP ${error.status}` : "";
+    super([
+      confirmed ? `前 ${confirmed} 项已收到回执，新增排队 ${queued} 项。` : "",
+      `本批 ${batchSize} 项${rejected ? "未入队" : "提交结果未确认"}${reason ? `（${reason}）` : ""}。`,
+      unsent ? `后续 ${unsent} 项未提交。` : "",
+      !rejected ? "请先核对检测状态，避免重复提交。" : "",
+    ].filter(Boolean).join(" "));
+    this.title = !rejected ? "批量检测提交结果未确认" : confirmed ? "批量检测未全部提交" : "批量检测失败";
+  }
+  readonly title: string;
+}
+
+export async function submitTierChecks(tier: ServiceTier, targets: TierTarget[], manual: boolean, refresh?: () => void) {
+  let queued = 0;
+  // The API limit applies to one request, not to the confirmed selection.
+  for (let start = 0; start < targets.length; start += serviceTierBatchLimit) {
+    const batch = targets.slice(start, start + serviceTierBatchLimit);
+    try {
+      const receipt = await controlRequest<{queued: number}>("/v1/channel-management/checks", {
+        method: "POST", body: JSON.stringify({
+          kind: tier, manual, confirmed: true, targets: batch.map(({model, scope, ...target}) =>
+            ({...target, models: [model], expected_scope: scope})),
+        }),
+      }, {localCheckRefresh: true});
+      if (!Number.isSafeInteger(receipt?.queued) || receipt.queued < 0 || receipt.queued > batch.length)
+        throw Error("无效检测回执");
+      queued += receipt.queued;
+    } catch (error) {
+      // A lost receipt might have committed; refresh, but never replay the POST.
+      throw new TierCheckSubmissionError(error, queued, start, batch.length, targets.length - start - batch.length);
+    } finally {
+      refresh?.();
+    }
+  }
+  return {queued};
 }

@@ -34,7 +34,7 @@ import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
 import { CompactDialogHeader, RemovalDialog } from "./CompactDialog";
-import { useChannelDetection, detectionEnabled } from "./channelDetection";
+import { useChannelDetection, detectionEnabled, detectionKey } from "./channelDetection";
 import { DetectionAction, detectionProjectLabels, detectionProjects, useDetectionProject } from "./DetectionAction";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
@@ -46,8 +46,8 @@ import { ChannelConfigurationDialog, ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { ServiceTierChecks } from "./ServiceTierChecks";
-import { isServiceTier, serviceTierBatchLimit, serviceTierFilterLabels, serviceTierName, serviceTiers, type ServiceTier } from "./serviceTierStatus";
-import { managementTierTargets, refreshTierViews, ServiceTierCell, siteTierStatus, submitTierChecks, tierIndex, tierPending, tierTarget,
+import { isServiceTier, serviceTierFilterLabels, serviceTierName, serviceTiers, type ServiceTier } from "./serviceTierStatus";
+import { managementTierTargets, refreshTierViews, ServiceTierCell, siteTierStatus, submitTierChecks, TierCheckSubmissionError, tierIndex, tierPending, tierTarget,
   tierRecord, tierTargetKey, useTierChecks, type TierTarget } from "./serviceTierTable";
 import type { InstalledChannel } from "./sub2apiImports";
 import { useManagementPage, readManagementCheckSelection, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation } from "./managementQuery";
@@ -1198,7 +1198,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [batchPreview,setBatchPreview] = useState<BatchPreview|null>(null);
   const [unconfirmedReceipts,setUnconfirmedReceipts] = useState<{label:string;accepted:boolean;message:string}[]>([]);
   const [batchNotice,setBatchNotice] = useState("");
-  const [batchError,setBatchError] = useState("");
+  const [batchError,setBatchError] = useState<string | TierCheckSubmissionError>("");
   const [checkError,setCheckError] = useState("");
   const submittingBatch = useRef(false);
   const [batchSubmitting,setBatchSubmitting] = useState(false);
@@ -1358,12 +1358,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         .filter(target => (filters.model || modelsToCheck.includes(target.model) || !row.configured &&
           selection.input.imports.some(m => m.source_id === target.source_id && m.provider === target.provider &&
             modelsToCheck.includes(m.model_mappings?.[target.model] || target.model))) &&
-          !tierPending(tierRecord(index, tier, target)));
+          !detection.disabled.has(detectionKey(target)) && !tierPending(tierRecord(index, tier, target)));
       for (const target of members) targets.set(tierTargetKey(target), target);
       if (members.length) items.push({id: row.id, label: `${row.account.name} / ${row.target.name}`, models: [...new Set(members.map(m => m.model))]});
     }
     if (!targets.size) throw Error("当前筛选没有待检测的已接入渠道模型。");
-    if (targets.size > serviceTierBatchLimit) throw Error(`单次最多提交 ${serviceTierBatchLimit} 项档位检测，请缩小渠道或模型范围。`);
     return {items, targets: [...targets.values()]};
   }
   async function batch(kind: BatchKind){
@@ -1416,9 +1415,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         const fresh = tierPreview(verified, plan.kind).targets;
         const signature = (entries: TierTarget[]) => entries.map(t => `${tierTargetKey(t)}:${t.scope}`).sort().join("\n");
         if (signature(fresh) !== signature(plan.tierTargets)) throw Error("档位待检测范围已变化，请重新预览。");
-        const receipt = await submitTierChecks(plan.kind, plan.tierTargets, false);
+        const receipt = await submitTierChecks(plan.kind, plan.tierTargets, false, () => {
+          void refreshTierViews(client, user);
+        });
         setBatchNotice(`${detectionProjectLabels[plan.kind]}已提交 · 排队 ${receipt.queued} 项`);
-        void refreshTierViews(client, user);
       } else {
         await completeSelection(readManagementCheckSelection, plan.revision);
         setBatchPreview(null);
@@ -1429,7 +1429,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       setBatchPreview(null);
     } catch (error) {
       setBatchPreview(null);
-      setBatchError(batchFailure(error,"检测提交未确认，请先刷新核对。"));
+      setBatchError(error instanceof TierCheckSubmissionError ? error : batchFailure(error,"检测提交未确认，请先刷新核对。"));
     } finally {
       submittingBatch.current=false;setBatchSubmitting(false);
     }
@@ -1699,12 +1699,12 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         if (!open) { setBatchError(""); setUnconfirmedReceipts([]); }
       }}>
         <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="guide-dialog compact-dialog">
-          <CompactDialogHeader closeLabel="关闭批量检测提示">{batchUnconfirmed ? "批量检测提交结果未确认" : "批量检测失败"}</CompactDialogHeader>
+          <CompactDialogHeader closeLabel="关闭批量检测提示">{batchUnconfirmed ? "批量检测提交结果未确认" : batchError instanceof TierCheckSubmissionError ? batchError.title : "批量检测失败"}</CompactDialogHeader>
           <div className="compact-dialog-scroll">
             {batchUnconfirmed ? <>
               {unconfirmedReceipts.map(receipt => <p key={receipt.label} className="dialog-inline-note">{receipt.label}：{receipt.message}</p>)}
               <Dialog.Description className="dialog-inline-note">请先刷新并核对未确认的任务，避免重复提交。</Dialog.Description>
-            </> : <Dialog.Description className="dialog-inline-note" role="alert">{batchError}</Dialog.Description>}
+            </> : <Dialog.Description className="dialog-inline-note" role="alert">{batchError instanceof TierCheckSubmissionError ? batchError.message : batchError}</Dialog.Description>}
           </div>
           <div className="compact-dialog-footer"><Dialog.Close className="button primary">知道了</Dialog.Close></div>
         </Dialog.Content></Dialog.Portal>
