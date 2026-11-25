@@ -303,7 +303,7 @@ function PriceEditor({
             </span>
           </label>
           <PriceToggle name={`${price.model} 计算缓存写入费用`} label="计算缓存写入费用"
-            hint="关闭后不估算写入费用，但保留写入单价。" checked={chargesCacheWrite(draft)} disabled={disabled}
+            checked={chargesCacheWrite(draft)} disabled={disabled}
             onChange={charge_cache_write => change({ charge_cache_write })} />
           {tier ? (
             <div className="price-rule">
@@ -317,21 +317,21 @@ function PriceEditor({
               onChange={long_context_premium => change({ long_context_premium })} />
           )}
           <PriceToggle name={`${price.model} 确认价格并用于估算`} label="确认价格并用于估算"
-            hint="关闭后仍可保存价格，但不参与消费估算。" checked={!!draft.verified} disabled={disabled}
+            checked={!!draft.verified} disabled={disabled}
             onChange={verified => change({ verified })} />
         </fieldset>
       </div>
       <footer className="price-edit-footer" hidden={details}>
         <div className="price-form-status" aria-live="polite">
+        {!readOnly && <p role="status">{pending ? "正在保存…" : saved ? "价格已保存" : dirty
+          ? invalid || conflicted || error ? "未保存" : "未保存 · 修改会重算历史估算，不影响实际扣费。"
+          : ""}</p>}
         {readOnly && <p role="status">当前价格读取失败，刷新成功后才能编辑。</p>}
         {conflicted && <p role="alert">服务端价格已变化，请放弃草稿以查看最新价格。</p>}
         {error && <p role="alert">{price.model}：{error}</p>}
         {dirty && invalid && <p role="status">请核对价格和售卖比例的范围。</p>}
         </div>
         <div className="price-edit-actions">
-          <p role="status">{pending ? "正在保存…" : saved ? "价格已保存" : dirty
-            ? "未保存 · 修改会重算历史估算，不影响实际扣费。"
-            : ""}</p>
           <div>
             {dirty && <button className="button small" type="button" disabled={pending} onClick={discard}>放弃草稿</button>}
             <button className="button primary small" type="submit" disabled={blocked}>
@@ -348,14 +348,14 @@ function PriceEditor({
 function PriceToggle({ name, label, hint, checked, disabled, onChange }: {
   name: string;
   label: string;
-  hint: string;
+  hint?: string;
   checked: boolean;
   disabled: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
     <label className="price-rule">
-      <span><strong>{label}</strong><small>{hint}</small></span>
+      <span><strong>{label}</strong>{hint && <small>{hint}</small>}</span>
       <span className="price-table-toggle">
         <input type="checkbox" aria-label={name} checked={checked} disabled={disabled}
           onChange={event => onChange(event.target.checked)} />

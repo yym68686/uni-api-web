@@ -35,7 +35,7 @@ const plugin = {
       const json = (body, status=200) => {res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(body));};
       if (allowed(req,'/_audit/session') || path.endsWith('/auth/login')) {res.setHeader('Set-Cookie',authCookie+'; Path=/; SameSite=Strict');if(path.startsWith('/_audit/')){res.writeHead(302,{Location:'/#view=overview'});return res.end();}return json({ok:true});}
       if (path.endsWith('/auth/logout')) {res.setHeader('Set-Cookie','visual_audit_local=; Max-Age=0; Path=/');return json({ok:true});}
-      if (path.endsWith('/auth/me')) return json({enabled:true,authenticated:req.headers.cookie?.includes(authCookie)??false,username:'audit-admin'});
+      if (path.endsWith('/auth/me')) return json({enabled:true,authenticated:req.headers.cookie?.includes(authCookie)??false,browser_session_supported:true,username:'audit-admin'});
       const sid = url.searchParams.get('source_id') || /\/sources\/(source-\d+)\//.exec(path)?.[1];
       if (path === '/_audit/scenario') {
         const mode = url.searchParams.get('mode');

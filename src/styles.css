@@ -770,7 +770,24 @@ nav > button.active > svg {
 .account-name { max-width: 11rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .account-menu-panel { position:absolute; z-index:20; top:calc(100% + 8px); right:0; min-width:12rem; border:1px solid var(--line); border-radius:10px; background:var(--surface); box-shadow:0 8px 28px #0002; padding:10px; display:grid; gap:6px; overflow-wrap:anywhere; }
 .account-menu-panel strong {padding:5px 8px}
-.connection-form .session-option { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; }
+.connection-form .session-option {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  inline-size: fit-content;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.connection-form .session-option input {
+  inline-size: 16px;
+  block-size: 16px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
 .workspace:focus {outline:none}
 .menu-toggle {
   display: none;
