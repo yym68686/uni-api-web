@@ -93,6 +93,78 @@ export function optimizationFixture(): OptimizationSnapshot {
     filters: { ...subFilterDefaults },
   };
 }
+export function existingProtocolFixture(provider = "p"): OptimizationSnapshot {
+  const snapshot = optimizationFixture();
+  const { imports, routes, filters, accounts } = snapshot;
+  routes.s.optimize_extended = routes.s.legacy_engine_migration = true;
+  filters.model = "gpt-6.2-sol";
+  accounts[0].targets[0].models = [modelCheck("gpt-6.2-sol")];
+  const original = imports.data[0];
+  Object.assign(original, {
+    provider: "p--messages",
+    name: "kedaya-0.11",
+    engine: "claude",
+    models: ["old"],
+  });
+  Object.assign(routes.s.data[0], {
+    provider: original.provider,
+    engine: "claude",
+    engine_mode: "auto",
+  });
+  routes.s.data[1].model = routes.s.data[1].upstream_model = filters.model;
+  imports.data.push({
+    ...original,
+    provider,
+    name: "kedaya Responses",
+    engine: "codex",
+    models: ["kept-alias"],
+    model_mappings: { "kept-alias": "kept-upstream" },
+    positions: { "kept-alias": 2 },
+  });
+  routes.s.data.push(
+    { ...routes.s.data[0], provider: "peer", model: "kept-alias" },
+    {
+      ...routes.s.data[0],
+      provider,
+      engine: "codex",
+      model: "kept-alias",
+      upstream_model: "kept-upstream",
+      position: 2,
+    },
+  );
+  return snapshot;
+}
+export function fingerprintOptimizationFixture() {
+  const snapshot = optimizationFixture();
+  snapshot.fingerprints = [
+    {
+      account_id: "a",
+      group_id: 1,
+      model: "old",
+      revision: "site-rev",
+      state: "done",
+      message: "",
+      result: {
+        model: "old",
+        status: "mismatch",
+        probability: 0,
+        decision: "scored",
+        prediction: "other",
+        prediction_name: "其他模型",
+        expected_class: "old",
+        checked_at: 100,
+        reference_commit: "ref",
+        used_outputs: 3,
+        candidates: [
+          { model: "other", display_name: "其他模型", probability: 0.94 },
+          { model: "old", display_name: "请求模型", probability: 0 },
+          { model: "unknown-prob", display_name: "", probability: null },
+        ],
+      },
+    },
+  ];
+  return snapshot;
+}
 export function modelCheck(
   model: string,
   status: "success" | "error" = "success",

@@ -5,7 +5,7 @@ import {
   protocolForEngine,
 } from "./channelProtocol";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
-import type { FingerprintRecord } from "./ModelFingerprints";
+import type { FingerprintRecord, FingerprintResult } from "./ModelFingerprints";
 import {
   optimizationTierChanges,
   tierOptimizationEvents,
@@ -94,11 +94,18 @@ export interface OptimizationChange {
   reasons: string[];
   returnedModels?: string[];
   priceDetails?: string[];
+  fingerprintDetails?: {
+    id: string;
+    scope: string;
+    probability: FingerprintResult["probability"];
+    candidates: FingerprintResult["candidates"];
+  }[];
   checkedAt: number;
   detectedProtocols?: string[];
   blockedReason?: string;
   requiresLegacyMigration?: boolean;
   splitProtocol?: string;
+  reuseBinding?: OptimizationBinding;
   tier?: ServiceTier;
   tierScope?: string;
   tierEvidenceModels?: string[];
@@ -107,6 +114,8 @@ export interface OptimizationPlan {
   changes: OptimizationChange[];
   notes: string[];
 }
+export const optimizationTarget = (change: OptimizationChange) =>
+  change.reuseBinding ?? change.binding;
 const providerID = (source: string, provider: string) =>
   JSON.stringify([source, provider]);
 const bindingID = (source: string, key: string, provider: string) =>
@@ -370,6 +379,17 @@ function modelMatchesFilters(
       (e.tool?.result?.status || "untested") === filters.toolUse)
   );
 }
+function fingerprintMismatch(record?: FingerprintRecord) {
+  const result = record?.result;
+  if (
+    record?.state === "done" &&
+    result?.status === "mismatch" &&
+    result.decision !== "not_model" &&
+    result.used_outputs >= 3
+  )
+    return result;
+}
+
 function faults(
   e: Evidence,
   model: string,
@@ -383,12 +403,7 @@ function faults(
     if (assessPrice(e.check, prices).status === "abnormal")
       result.push(["price", "单价异常"]);
   }
-  if (
-    e.fingerprint?.state === "done" &&
-    e.fingerprint.result?.status === "mismatch" &&
-    e.fingerprint.result.decision !== "not_model" &&
-    e.fingerprint.result.used_outputs >= 3
-  )
+  if (fingerprintMismatch(e.fingerprint))
     result.push(["fingerprint", "模型指纹不匹配"]);
   if (
     isCapabilityCheckModel(model) &&
@@ -494,16 +509,18 @@ export function buildOptimizationPlan(
     }
     const bindings = new Map<string, OptimizationBinding>();
     const splitClaims = new Map<string, string>();
-    const siteBindings = new Map(
-      [...allowedSite.values()]
+    const routesByBinding = new Map<string, Routes["data"]>();
+    const occupiedProviders = new Set([
+      ...snapshot.imports.data
         .filter((item) => item.source_id === source)
-        .map((item) => [
-          bindingID(source, item.api_key_id, item.provider),
-          item,
-        ]),
-    );
+        .map((item) => item.provider),
+      ...routes.data.map((route) => route.provider),
+    ]);
     for (const route of routes.data) {
       const id = bindingID(source, route.api_key_id, route.provider);
+      const routeRows = routesByBinding.get(id);
+      if (routeRows) routeRows.push(route);
+      else routesByBinding.set(id, [route]);
       const installed = allowedSite.get(id);
       const native = allowedNative.get(
         providerID(source, route.origin_provider || route.provider),
@@ -525,10 +542,11 @@ export function buildOptimizationPlan(
       binding.current[route.model] = route.upstream_model || route.model;
       bindings.set(id, binding);
     }
+    // Resolve every binding before suggesting changes. A sibling can appear
+    // after the original channel in the caller-key catalog.
+    const validBindings = new Map<string, OptimizationBinding>();
     for (const binding of bindings.values()) {
-      const routeRows = routes.data.filter(
-        (r) => r.api_key_id === binding.key && r.provider === binding.provider,
-      );
+      const routeRows = routesByBinding.get(binding.id)!;
       const engines = [
         ...new Set(
           routeRows.map((r) => r.engine).filter((v): v is string => !!v),
@@ -570,6 +588,9 @@ export function buildOptimizationPlan(
         );
         continue;
       }
+      validBindings.set(binding.id, binding);
+    }
+    for (const binding of validBindings.values()) {
       const groups = boundGroups(binding.installed || binding.native);
       const migrate = binding.legacyEngineEligible && events.includes("legacy");
       if (migrate)
@@ -662,6 +683,33 @@ export function buildOptimizationPlan(
               ),
             ]
           : [];
+        const fingerprintDetails = new Map<
+          string,
+          NonNullable<OptimizationChange["fingerprintDetails"]>[number]
+        >();
+        if (events.includes("fingerprint") && publicModels.length)
+          for (const e of filteredEvidence) {
+            const record = e.fingerprint;
+            const mismatch = fingerprintMismatch(record);
+            if (!mismatch || !record) continue;
+            const id = fingerprintKey(record);
+            if (fingerprintDetails.has(id)) continue;
+            const account = snapshot.accounts.find(
+              (a) => a.id === record.account_id,
+            );
+            const group = account?.targets.find(
+              (t) => t.group_id === record.group_id,
+            );
+            fingerprintDetails.set(id, {
+              id,
+              scope:
+                [account?.name, group?.name].filter(Boolean).join(" · ") ||
+                record.provider ||
+                binding.name,
+              probability: mismatch.probability,
+              candidates: mismatch.candidates ?? [],
+            });
+          }
         const checkedAt = Math.max(
           0,
           ...evidence.map((e) => e.check.result?.checked_at || 0),
@@ -691,6 +739,7 @@ export function buildOptimizationPlan(
                 reasons,
                 returnedModels,
                 priceDetails,
+                fingerprintDetails: [...fingerprintDetails.values()],
                 checkedAt,
                 detectedProtocols,
               });
@@ -721,6 +770,7 @@ export function buildOptimizationPlan(
             detectedProtocols.length === 1 &&
             channelProtocols.find((p) => p.protocol === detectedProtocols[0]);
           let splitProtocol: string | undefined;
+          let reuseBinding: OptimizationBinding | undefined;
           let conflictDetail = "请在添加到渠道中按协议拆分";
           if (
             conflicting &&
@@ -736,26 +786,56 @@ export function buildOptimizationPlan(
               "",
             );
             const sibling = `${root}--${detected.protocol}`;
-            const existingRoot = siteBindings.get(
-              bindingID(source, binding.key, root),
+            const siblingID = bindingID(source, binding.key, sibling);
+            const rootID = bindingID(source, binding.key, root);
+            const compatible = [siblingID, rootID]
+              .map((id) => validBindings.get(id))
+              .filter(
+                (target): target is OptimizationBinding =>
+                  !!target?.installed?.manageable &&
+                  target.id !== binding.id &&
+                  target.installed.account_id ===
+                    binding.installed!.account_id &&
+                  target.installed.group_id === binding.installed!.group_id &&
+                  (target.legacyEngineEligible && events.includes("legacy")
+                    ? "responses"
+                    : target.protocol) === detected.protocol,
+              );
+            // Match normal additions: do not add another public name for an
+            // upstream already served, or replace an existing alias.
+            if (
+              compatible.some((target) =>
+                Object.values(target.current).includes(upstream),
+              )
+            )
+              continue;
+            reuseBinding = compatible.find(
+              (target) => !Object.hasOwn(target.current, upstream),
             );
-            const rootEngine = routes.data.find(
-              (r) => r.api_key_id === binding.key && r.provider === root,
-            )?.engine;
-            const existing =
-              siteBindings.has(bindingID(source, binding.key, sibling)) ||
-              (rootEngine
-                ? protocolForEngine(rootEngine)
-                : existingRoot?.protocol) === detected.protocol;
-            if (existing) {
-              conflictDetail = "已有该协议接入，请在对应接入中优化";
+            if (compatible.length && !reuseBinding) {
+              conflictDetail = "目标协议接入已使用同名模型，不能覆盖现有映射";
             } else if (
-              splitClaims.has(sibling) &&
-              splitClaims.get(sibling) !== binding.id
+              !reuseBinding &&
+              (occupiedProviders.has(sibling) ||
+                (rootID !== binding.id &&
+                  (allowedSite.get(rootID)?.protocol === detected.protocol ||
+                    routesByBinding
+                      .get(rootID)
+                      ?.some(
+                        (r) =>
+                          protocolForEngine(r.engine) === detected.protocol,
+                      ))))
+            ) {
+              conflictDetail =
+                "无法确认已有目标协议接入的完整配置，请刷新渠道管理";
+            } else if (
+              !reuseBinding &&
+              splitClaims.has(siblingID) &&
+              splitClaims.get(siblingID) !== binding.id
             ) {
               conflictDetail = "已在同一 Key 的另一接入中列出该协议变更";
-            } else {
-              splitClaims.set(sibling, binding.id);
+            } else if (!reuseBinding) {
+              splitClaims.set(siblingID, binding.id);
               splitProtocol = detected.protocol;
             }
           }
@@ -766,20 +846,25 @@ export function buildOptimizationPlan(
             upstream,
             action: "add",
             reasons: [
-              splitProtocol
-                ? "按检测协议自动创建接入；保留原协议和现有模型"
-                : "检测可用，未发现单价、模型匹配、指纹或能力异常",
+              reuseBinding
+                ? "新增到同一 Key 下已有的协议接入；保留原协议和现有模型"
+                : splitProtocol
+                  ? "按检测协议自动创建接入；保留原协议和现有模型"
+                  : "检测可用，未发现单价、模型匹配、指纹或能力异常",
             ],
             checkedAt,
             detectedProtocols,
-            requiresLegacyMigration: !!migrate && !splitProtocol,
+            requiresLegacyMigration: reuseBinding
+              ? !!reuseBinding.legacyEngineEligible && events.includes("legacy")
+              : !!migrate && !splitProtocol,
             splitProtocol,
+            reuseBinding,
             blockedReason: binding.installed
               ? !binding.protocol
                 ? "当前渠道协议未确认，请刷新或检查渠道配置"
                 : !detectedProtocols.length
                   ? "检测未记录上游协议，请先重新检测该模型"
-                  : conflicting && !splitProtocol
+                  : conflicting && !splitProtocol && !reuseBinding
                     ? `协议冲突：当前 ${channelProtocolLabel(binding.protocol)}，检测 ${detectedProtocols.map(channelProtocolLabel).join(" / ")}；${conflictDetail}`
                     : undefined
               : undefined,
@@ -788,8 +873,32 @@ export function buildOptimizationPlan(
       }
     }
   }
+  // Prefer the selectable suggestion on the original conflict card over a
+  // second copy on the destination card. One model write, one selection.
+  const additions = new Map<string, OptimizationChange>();
+  const additionID = (c: OptimizationChange) =>
+    JSON.stringify([optimizationTarget(c).id, c.model]);
+  for (const change of changes) {
+    if (change.action !== "add" || change.blockedReason || change.splitProtocol)
+      continue;
+    const id = additionID(change);
+    if (
+      !additions.has(id) ||
+      (change.reuseBinding && !additions.get(id)?.reuseBinding)
+    )
+      additions.set(id, change);
+  }
   return {
-    changes: [...changes, ...optimizationTierChanges(snapshot, events)],
+    changes: [
+      ...changes.filter(
+        (c) =>
+          c.action !== "add" ||
+          !!c.blockedReason ||
+          !!c.splitProtocol ||
+          additions.get(additionID(c)) === c,
+      ),
+      ...optimizationTierChanges(snapshot, events),
+    ],
     notes: [...notes],
   };
 }
@@ -817,22 +926,22 @@ export function optimizationRequests(
   const migrations = new Set(
     changes.filter((c) => c.action === "migrate").map((c) => c.binding.id),
   );
-  for (const c of changes)
-    if (c.requiresLegacyMigration && !migrations.has(c.binding.id))
-      throw Error(`${c.binding.name}：请同时勾选旧版默认协议升级`);
   for (const c of changes) {
     if (c.tier) continue;
-    const item = bindings.get(c.binding.id) || {
-      binding: c.binding,
-      models: { ...c.binding.current },
-      migrate: migrations.has(c.binding.id),
+    const target = optimizationTarget(c);
+    if (c.requiresLegacyMigration && !migrations.has(target.id))
+      throw Error(`${target.name}：请同时勾选旧版默认协议升级`);
+    const item = bindings.get(target.id) || {
+      binding: target,
+      models: { ...target.current },
+      migrate: migrations.has(target.id),
       splitProtocols: {},
     };
     if (c.action === "add") {
       item.models[c.model] = c.upstream;
       if (c.splitProtocol) item.splitProtocols[c.model] = c.splitProtocol;
     } else if (c.action === "remove") delete item.models[c.model];
-    bindings.set(c.binding.id, item);
+    bindings.set(target.id, item);
   }
   const orders = new Map<string, string[]>();
   const orderID = (source: string, key: string, model: string) =>

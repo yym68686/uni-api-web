@@ -3,13 +3,16 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sparkles, X } from "lucide-react";
 import { Spinner } from "./ui";
+import { rate } from "./format";
 import { channelEngineLabel, channelProtocolLabel } from "./channelProtocol";
 import {
   applyOptimization,
   buildOptimizationPlan,
   optimizationEvents,
+  optimizationTarget,
 } from "./channelOptimizationPlan";
 import type {
+  OptimizationChange,
   OptimizationEvent,
   OptimizationSnapshot,
 } from "./channelOptimizationPlan";
@@ -50,26 +53,43 @@ export function ChannelOptimization({
     return [...result.values()];
   }, [plan]);
   const eligible = plan.changes.filter((c) => !c.blockedReason);
-  function toggleChange(id: string, checked: boolean) {
-    const change = plan.changes.find((c) => c.id === id);
-    if (!change || change.blockedReason) return;
+  function selectChanges(items: OptimizationChange[], checked: boolean) {
     setSelected((old) => {
       const next = new Set(old);
-      if (checked) {
-        next.add(id);
-        if (change.requiresLegacyMigration)
-          for (const c of eligible)
-            if (c.binding.id === change.binding.id && c.action === "migrate")
-              next.add(c.id);
-      } else {
-        next.delete(id);
-        if (change.action === "migrate")
-          for (const c of eligible)
-            if (c.binding.id === change.binding.id && c.requiresLegacyMigration)
-              next.delete(c.id);
+      for (const change of items) {
+        if (checked) {
+          next.add(change.id);
+          if (change.requiresLegacyMigration)
+            for (const c of eligible)
+              if (
+                c.binding.id === optimizationTarget(change).id &&
+                c.action === "migrate"
+              )
+                next.add(c.id);
+        } else {
+          next.delete(change.id);
+          if (change.action === "migrate")
+            for (const c of eligible)
+              if (
+                optimizationTarget(c).id === change.binding.id &&
+                c.requiresLegacyMigration
+              )
+                next.delete(c.id);
+        }
       }
       return next;
     });
+  }
+  const selectedMembership = new Map<string, Set<string>>();
+  for (const change of eligible) {
+    if (!selected.has(change.id) || change.splitProtocol) continue;
+    if (change.action !== "add" && change.action !== "remove") continue;
+    const target = optimizationTarget(change);
+    const kept =
+      selectedMembership.get(target.id) || new Set(Object.keys(target.current));
+    if (change.action === "add") kept.add(change.model);
+    else kept.delete(change.model);
+    selectedMembership.set(target.id, kept);
   }
   async function open() {
     if (readingRef.current) return;
@@ -244,7 +264,8 @@ export function ChannelOptimization({
                   预览使用点击时读取的最新检测结果。仅优化已接入的渠道；新增模型放在路由末尾。
                 </p>
                 <p>
-                  协议冲突时按检测协议建立独立接入，不改动原协议上仍选用的模型。指纹只依据本轮完整结果，不使用样本不足时展示的上次结果。
+                  协议冲突时优先复用同一分组、同一 Key
+                  下已有的目标协议接入；没有时才新建，不改动原协议上仍选用的模型。指纹只依据本轮完整结果，不使用样本不足时展示的上次结果。
                 </p>
                 <p>
                   档位变更作用于整个接入。新增只依据业务凭据的有效验证；取消要求相关模型都明确不支持或未命中。
@@ -314,13 +335,9 @@ export function ChannelOptimization({
                   ? `Key ${b.keyPosition}`
                   : "全部 Key";
                 const selectable = changes.filter((c) => !c.blockedReason);
-                const kept = new Set(Object.keys(b.current));
-                for (const c of changes)
-                  if (selected.has(c.id)) {
-                    if (c.action === "add" && !c.splitProtocol)
-                      kept.add(c.model);
-                    else if (c.action === "remove") kept.delete(c.model);
-                  }
+                const keptCount =
+                  selectedMembership.get(b.id)?.size ??
+                  Object.keys(b.current).length;
                 return (
                   <section className="optimization-binding" key={b.id}>
                     <header>
@@ -334,14 +351,7 @@ export function ChannelOptimization({
                             selectable.every((c) => selected.has(c.id))
                           }
                           onChange={(e) =>
-                            setSelected((old) => {
-                              const next = new Set(old);
-                              for (const c of selectable) {
-                                if (e.target.checked) next.add(c.id);
-                                else next.delete(c.id);
-                              }
-                              return next;
-                            })
+                            selectChanges(selectable, e.target.checked)
                           }
                         />
                         <strong>{b.name}</strong>
@@ -373,7 +383,7 @@ export function ChannelOptimization({
                           aria-label={`${c.action === "migrate" ? "升级旧版默认协议" : `${c.action === "add" || c.action === "tier-add" ? "新增" : "取消"} ${c.model}`} · ${b.sourceName} ${keyLabel} ${b.name}`}
                           checked={selected.has(c.id)}
                           disabled={busy || finished || !!c.blockedReason}
-                          onChange={(e) => toggleChange(c.id, e.target.checked)}
+                          onChange={(e) => selectChanges([c], e.target.checked)}
                         />
                         <span
                           className={
@@ -384,7 +394,7 @@ export function ChannelOptimization({
                         >
                           {c.action === "migrate"
                             ? "协议升级"
-                            : c.splitProtocol
+                            : c.splitProtocol || c.reuseBinding
                               ? "按协议接入"
                               : c.tier
                                 ? c.action === "tier-add"
@@ -403,7 +413,12 @@ export function ChannelOptimization({
                           {c.model !== c.upstream && (
                             <small>原模型：{c.upstream}</small>
                           )}
-                          {c.splitProtocol ? (
+                          {c.reuseBinding ? (
+                            <small>
+                              目标接入：{c.reuseBinding.name} ·{" "}
+                              {channelProtocolLabel(c.detectedProtocols?.[0])}
+                            </small>
+                          ) : c.splitProtocol ? (
                             <small>
                               新接入协议：
                               {channelProtocolLabel(c.splitProtocol)}
@@ -429,6 +444,36 @@ export function ChannelOptimization({
                               返回模型：{c.returnedModels.join("、")}
                             </small>
                           )}
+                          {c.fingerprintDetails?.map((detail) => (
+                            <span
+                              className="optimization-fingerprint"
+                              key={detail.id}
+                            >
+                              {(c.fingerprintDetails?.length ?? 0) > 1 && (
+                                <small>检测来源：{detail.scope}</small>
+                              )}
+                              <small>
+                                请求模型的匹配概率：{rate(detail.probability)}
+                              </small>
+                              {detail.candidates.length > 0 && (
+                                <>
+                                  <small>参考库候选概率</small>
+                                  {detail.candidates.map((candidate) => (
+                                    <small
+                                      className="optimization-fingerprint-row"
+                                      key={candidate.model}
+                                    >
+                                      <span title={candidate.model}>
+                                        {candidate.display_name ||
+                                          candidate.model}
+                                      </span>
+                                      <span>{rate(candidate.probability)}</span>
+                                    </small>
+                                  ))}
+                                </>
+                              )}
+                            </span>
+                          ))}
                           {c.blockedReason && (
                             <strong className="optimization-blocked-reason">
                               {c.blockedReason}
@@ -457,7 +502,7 @@ export function ChannelOptimization({
                         </span>
                       </label>
                     ))}
-                    {!kept.size && (
+                    {!keptCount && (
                       <p className="coverage-note">
                         所选变更将取消最后一个模型：此 API key
                         将移除该渠道接入。

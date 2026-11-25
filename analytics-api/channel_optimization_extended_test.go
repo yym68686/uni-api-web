@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -49,11 +50,20 @@ func TestExtendedOptimizationCommitsProtocolAndTierInOneSnapshot(t *testing.T) {
 			writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: business, ServiceTierScope: scope,
 				ServiceTierRouting: map[string]string{"fast": "disabled_verified", "ultrafast": "enabled"}}}})
 		case "/v1/model-channels":
-			writeJSON(w, 200, map[string]any{"data": []batchCatalogRow{
+			rows := []batchCatalogRow{
 				{Provider: "peer", Model: "alias", Upstream: "claude-upstream", Engine: "claude"},
 				{Provider: messages, Model: "alias", Upstream: "claude-upstream", Engine: "claude"},
 				{Provider: "peer", Model: "new-model", Upstream: "new-model", Engine: "codex"},
-			}})
+				{Provider: "peer", Model: "gpt-6.2-sol", Upstream: "gpt-6.2-sol", Engine: "codex"},
+			}
+			for _, c := range current.Channels {
+				if c.Provider == responses {
+					for _, model := range c.Models {
+						rows = append(rows, batchCatalogRow{Provider: responses, Model: model, Upstream: model, Engine: "codex"})
+					}
+				}
+			}
+			writeJSON(w, 200, map[string]any{"data": rows})
 		case "/v1/channel-controls/restore":
 			var in struct {
 				Revision string           `json:"revision"`
@@ -64,7 +74,7 @@ func TestExtendedOptimizationCommitsProtocolAndTierInOneSnapshot(t *testing.T) {
 				return
 			}
 			restores++
-			current, revision = in.Snapshot, "r2"
+			current, revision = in.Snapshot, "r"+strconv.Itoa(restores+1)
 			writeJSON(w, 200, state())
 		default:
 			t.Errorf("unexpected gateway request: %s %s", r.Method, r.URL.Path)
@@ -155,5 +165,45 @@ func TestExtendedOptimizationCommitsProtocolAndTierInOneSnapshot(t *testing.T) {
 	}
 	if got := call(input); got.Code != 409 || restores != 1 {
 		t.Fatal("stale revision applied", got.Code, got.Body.String())
+	}
+
+	// This time the protocol sibling already exists. The preview submits the
+	// addition directly to that binding, with no target for Messages.
+	answer.Availability.Protocol = "chat"
+	_, err = s.control.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES ($1,1,'gpt-6.2-sol','done',$2)`, account.ID, mustJSON(answer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reuse := channelBatchInput{Revision: revision, Part: "optimize", Targets: []channelBatchTarget{{
+		Key: key, Provider: responses, Account: account.ID, Group: 1,
+		Current:   map[string]string{"new-model": "new-model"},
+		Models:    map[string]string{"new-model": "new-model", "gpt-6.2-sol": "gpt-6.2-sol"},
+		Positions: map[string]int{"new-model": 2, "gpt-6.2-sol": 2},
+	}}}
+	if got := call(reuse); got.Code != 400 || restores != 1 {
+		t.Fatal("changed detection protocol accepted", got.Code, got.Body.String())
+	}
+	answer.Availability.Protocol = "responses"
+	_, err = s.control.db.Exec(`UPDATE console_sub_models SET result=$2 WHERE account_id=$1 AND group_id=1 AND model='gpt-6.2-sol'`, account.ID, mustJSON(answer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := call(reuse); got.Code != 200 || restores != 2 {
+		t.Fatal("existing protocol binding not updated", got.Code, got.Body.String())
+	}
+	var reused retainedChannel
+	for _, channel := range current.Channels {
+		switch channel.Provider {
+		case responses:
+			reused = channel
+		case messages:
+			if !reflect.DeepEqual(channel, old) {
+				t.Fatal("reusing Responses changed the original Messages binding")
+			}
+		}
+	}
+	if len(current.Channels) != 2 || reused.Base != account.Base+"/v1/responses" ||
+		!reflect.DeepEqual(reused.Models, []string{"gpt-6.2-sol", "new-model"}) {
+		t.Fatal("Responses was duplicated or the existing model was lost", reused)
 	}
 }

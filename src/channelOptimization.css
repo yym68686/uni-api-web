@@ -128,6 +128,20 @@
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
+.optimization-fingerprint {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.optimization-change .optimization-fingerprint-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.optimization-fingerprint-row > :last-child {
+  flex-shrink: 0;
+}
 .optimization-result,
 .optimization-binding > .negative {
   padding: 12px 14px;

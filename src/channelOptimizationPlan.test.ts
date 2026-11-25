@@ -11,6 +11,8 @@ import type { SubTarget } from "./Sub2apiChecks";
 import type { ManagedChannel } from "./channelManagement";
 
 import {
+  existingProtocolFixture,
+  fingerprintOptimizationFixture,
   optimizationFixture,
   modelCheck,
 } from "./channelOptimization.test-data";
@@ -18,37 +20,21 @@ import {
 const events = optimizationEvents.map((e) => e.id);
 
 it("removes a confirmed fingerprint mismatch independently of the response model name", () => {
-  const snapshot = optimizationFixture();
+  const snapshot = fingerprintOptimizationFixture();
   const old = snapshot.accounts[0].targets[0].models![0];
   expect(old.result?.availability.model_match).toBe("match");
-  const verdict = {
-    model: "old",
-    status: "mismatch",
-    probability: 0.1,
-    decision: "scored" as const,
-    prediction: "",
-    prediction_name: "",
-    expected_class: "",
-    checked_at: 100,
-    reference_commit: "",
-    candidates: [],
-    used_outputs: 3,
-  };
-  const record = {
-    account_id: "a",
-    group_id: 1,
-    model: "old",
-    revision: "site-rev",
-    state: "done",
-    message: "",
-    result: verdict,
-  };
-  snapshot.fingerprints = [record];
+  const [record] = snapshot.fingerprints!;
+  const verdict = record.result!;
   expect(buildOptimizationPlan(snapshot, ["match"]).changes).toEqual([]);
   expect(
     buildOptimizationPlan(snapshot, ["fingerprint"]).changes,
   ).toMatchObject([
-    { model: "old", action: "remove", reasons: ["模型指纹不匹配"] },
+    {
+      model: "old",
+      action: "remove",
+      reasons: ["模型指纹不匹配"],
+      fingerprintDetails: [{ probability: 0, candidates: verdict.candidates }],
+    },
   ]);
   snapshot.fingerprints = [
     { ...record, state: "running", previous_result: verdict },
@@ -171,6 +157,119 @@ it("uses the effective caller-key engine instead of provider suffix or stale imp
   expect(
     buildOptimizationPlan(s, ["availability"]).changes[0].blockedReason,
   ).toBeUndefined();
+});
+
+it.each(["p", "p--responses"])(
+  "offers one selectable addition on the original card when reusing %s",
+  (provider) => {
+    const s = existingProtocolFixture(provider);
+    for (const reverse of [false, true]) {
+      if (reverse) {
+        // Swap the source/target discovery order without changing route priority.
+        const list = s.routes.s.data;
+        list.push(list.shift()!);
+      }
+      const plan = buildOptimizationPlan(s, events);
+      expect(plan.changes).toHaveLength(1);
+      expect(plan.changes[0]).toMatchObject({
+        binding: { provider: "p--messages" },
+        model: "gpt-6.2-sol",
+        reuseBinding: { provider },
+      });
+      expect(plan.changes[0].blockedReason).toBeUndefined();
+      expect(optimizationRequests(plan.changes, s.routes).get("s")).toEqual({
+        revision: "r1",
+        part: "optimize",
+        targets: [
+          {
+            provider,
+            account_id: "a",
+            group_id: 1,
+            api_key_id: "key",
+            current: { "kept-alias": "kept-upstream" },
+            models: {
+              "kept-alias": "kept-upstream",
+              "gpt-6.2-sol": "gpt-6.2-sol",
+            },
+            positions: { "kept-alias": 2, "gpt-6.2-sol": 2 },
+          },
+        ],
+      });
+    }
+    const disabled = buildOptimizationPlan(s, ["add"]).changes;
+    expect(
+      disabled.find((c) => c.binding.provider === "p--messages")?.blockedReason,
+    ).toContain("协议冲突");
+    expect(
+      disabled.find((c) => c.binding.provider === provider)?.blockedReason,
+    ).toBeUndefined();
+  },
+);
+
+it("does not re-add a model already served or overwrite a same-name alias on the target", () => {
+  const s = existingProtocolFixture();
+  const target = s.imports.data[1];
+  const row = s.routes.s.data.at(-1)!;
+  const model = "gpt-6.2-sol";
+  target.models = [model];
+  row.model = model;
+  row.upstream_model = model;
+  expect(buildOptimizationPlan(s, events).changes).toEqual([]);
+  target.model_mappings = { [model]: "other-upstream" };
+  row.upstream_model = "other-upstream";
+  const [change] = buildOptimizationPlan(s, events).changes;
+  expect(change.blockedReason).toContain("不能覆盖现有映射");
+  expect(() => optimizationRequests([change], s.routes)).toThrow(
+    "不能覆盖现有映射",
+  );
+});
+
+it("does not reuse a catalog row with an unconfirmed binding or the wrong group, key, or protocol", () => {
+  const model = "gpt-6.2-sol";
+  for (const mutate of [
+    (s: OptimizationSnapshot) => {
+      s.imports.data[1].group_id = 2;
+    },
+    (s: OptimizationSnapshot) => {
+      s.imports.data[1].account_id = "other-account";
+    },
+    (s: OptimizationSnapshot) => {
+      s.imports.data[1].models.push("missing-route");
+    },
+    (s: OptimizationSnapshot) => {
+      s.routes.s.data.at(-1)!.engine = "claude";
+    },
+    (s: OptimizationSnapshot) => {
+      s.imports.data[1].api_key_id = "other-key";
+      s.routes.s.data.at(-1)!.api_key_id = "other-key";
+    },
+  ]) {
+    const s = existingProtocolFixture("p--responses");
+    mutate(s);
+    const change = buildOptimizationPlan(s, events).changes.find(
+      (c) => c.model === model && c.binding.provider === "p--messages",
+    )!;
+    expect(change.reuseBinding).toBeUndefined();
+    expect(change.splitProtocol).toBeUndefined();
+    expect(change.blockedReason).toContain("无法确认");
+  }
+});
+
+it("merges a reused addition with a removal on the target without modifying the original", () => {
+  const s = existingProtocolFixture();
+  s.filters.model = "";
+  s.accounts[0].targets[0].models!.push(modelCheck("kept-upstream", "error"));
+  const plan = buildOptimizationPlan(s, events);
+  expect(
+    optimizationRequests(plan.changes, s.routes).get("s")?.targets,
+  ).toMatchObject([
+    {
+      provider: "p",
+      current: { "kept-alias": "kept-upstream" },
+      models: { "gpt-6.2-sol": "gpt-6.2-sol" },
+      positions: { "gpt-6.2-sol": 2 },
+    },
+  ]);
 });
 
 it("keeps unknown protocol additions visible but unselectable", () => {

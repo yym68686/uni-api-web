@@ -4,9 +4,93 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChannelOptimization } from "./ChannelOptimization";
 import {
+  existingProtocolFixture,
+  fingerprintOptimizationFixture,
   optimizationFixture,
   modelCheck,
 } from "./channelOptimization.test-data";
+
+it("shows the request match probability and every fingerprint candidate on the mismatch row", async () => {
+  const snapshot = fingerprintOptimizationFixture();
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ChannelOptimization snapshot={() => snapshot} />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+  const remove = screen.getByRole("checkbox", {
+    name: "取消 old · Fugue Key 1 Site-0.1",
+  });
+  const row = within(remove.closest("label")!);
+  expect(row.getByText("模型指纹不匹配")).toBeVisible();
+  expect(row.getByText("请求模型的匹配概率：0.0%")).toBeVisible();
+  expect(row.getByText("参考库候选概率")).toBeVisible();
+  expect(row.getByText("其他模型").parentElement).toHaveTextContent("94.0%");
+  expect(row.getByText("请求模型").parentElement).toHaveTextContent("0.0%");
+  expect(row.getByText("unknown-prob").parentElement).toHaveTextContent("—");
+  await user.click(
+    screen.getByRole("checkbox", { name: "取消指纹不匹配的模型" }),
+  );
+  expect(remove).not.toBeInTheDocument();
+  expect(screen.queryByText("参考库候选概率")).not.toBeInTheDocument();
+});
+
+it("lets kedaya be selected from the original card and applies only to its existing Responses binding", async () => {
+  const snapshot = existingProtocolFixture();
+  const fetch = vi.fn(async (_url: string, _init?: RequestInit) =>
+    Response.json({ revision: "r2" }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ChannelOptimization snapshot={() => snapshot} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+    expect(
+      screen.getByText(
+        "目标接入：kedaya Responses · Responses / Codex · codex",
+      ),
+    ).toBeVisible();
+    const add = screen.getByRole("checkbox", {
+      name: "新增 gpt-6.2-sol · Fugue Key 1 kedaya-0.11",
+    });
+    expect(add).toBeEnabled();
+    await user.click(add);
+    expect(add).toBeChecked();
+    expect(screen.getByText("已选 1 项变更")).toBeVisible();
+    await user.click(
+      screen.getByRole("checkbox", { name: "选择全部优化变更" }),
+    );
+    expect(add).not.toBeChecked();
+    await user.click(
+      screen.getByRole("checkbox", { name: "选择全部优化变更" }),
+    );
+    expect(add).toBeChecked();
+    expect(screen.getByText("已选 1 项变更")).toBeVisible();
+    expect(fetch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "一键应用优化" }));
+    await screen.findByText("已应用");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body));
+    expect(body.targets).toEqual([
+      {
+        api_key_id: "key",
+        provider: "p",
+        account_id: "a",
+        group_id: 1,
+        current: { "kept-alias": "kept-upstream" },
+        models: { "kept-alias": "kept-upstream", "gpt-6.2-sol": "gpt-6.2-sol" },
+        positions: { "kept-alias": 2, "gpt-6.2-sol": 2 },
+      },
+    ]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 it("keeps the toolbar unchanged on a long read error and retries from a dialog", async () => {
   const error = "数据读取超时。（请求编号：" + "x".repeat(200) + "）";
