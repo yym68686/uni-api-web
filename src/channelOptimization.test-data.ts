@@ -165,6 +165,42 @@ export function fingerprintOptimizationFixture() {
   ];
   return snapshot;
 }
+export function protocolSwitchFixture(
+  destination?: "new" | "existing" | "already-serving",
+) {
+  const s = existingProtocolFixture();
+  s.routes.s.optimize_protocol_moves = true;
+  const model = "gpt-6.2-sol";
+  const [from, to] = s.imports.data;
+  from.models.push(model, "sol-alias");
+  from.model_mappings = { "sol-alias": model };
+  const [originalRoute, peer] = s.routes.s.data;
+  s.routes.s.data.splice(
+    1,
+    0,
+    { ...originalRoute, model, upstream_model: model, position: 1 },
+    {
+      ...originalRoute,
+      model: "sol-alias",
+      upstream_model: model,
+      position: 1,
+    },
+  );
+  peer.position = 2;
+  if (destination === "new") {
+    s.imports.data.pop();
+    s.routes.s.data = s.routes.s.data.filter((r) => r.provider !== to.provider);
+  } else if (destination === "already-serving") {
+    to.models.push(model);
+    s.routes.s.data.push({
+      ...peer,
+      provider: to.provider,
+      engine: "codex",
+      position: 3,
+    });
+  }
+  return s;
+}
 export function modelCheck(
   model: string,
   status: "success" | "error" = "success",

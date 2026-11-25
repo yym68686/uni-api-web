@@ -8,6 +8,7 @@ import {
   fingerprintOptimizationFixture,
   optimizationFixture,
   modelCheck,
+  protocolSwitchFixture,
 } from "./channelOptimization.test-data";
 
 it("shows the request match probability and every fingerprint candidate on the mismatch row", async () => {
@@ -34,6 +35,44 @@ it("shows the request match probability and every fingerprint candidate on the m
   );
   expect(remove).not.toBeInTheDocument();
   expect(screen.queryByText("参考库候选概率")).not.toBeInTheDocument();
+});
+
+it("shows the two protocols and applies only the selected existing model's switch", async () => {
+  const snapshot = protocolSwitchFixture("existing");
+  const fetch = vi.fn(async (_url: string, _init?: RequestInit) =>
+    Response.json({ revision: "r2", protocol_moves: 1 }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ChannelOptimization snapshot={() => snapshot} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+    const change = screen.getByRole("checkbox", {
+      name: "切换协议 gpt-6.2-sol · Fugue Key 1 kedaya-0.11",
+    });
+    const row = within(change.closest("label")!);
+    expect(row.getByText(/Claude Messages.*→.*Responses/)).toBeVisible();
+    expect(row.getByText(/目标接入：kedaya Responses/)).toBeVisible();
+    await user.click(change);
+    expect(screen.getByText("已选 1 项变更")).toBeVisible();
+    expect(fetch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "一键应用优化" }));
+    await screen.findByText("已应用");
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body));
+    expect(body.part).toBe("optimize_protocol");
+    expect(body.protocol_moves).toHaveLength(1);
+    expect(
+      body.targets.find(
+        (target: { provider: string }) => target.provider === "p--messages",
+      ).models["sol-alias"],
+    ).toBe("gpt-6.2-sol");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 it("lets kedaya be selected from the original card and applies only to its existing Responses binding", async () => {
@@ -382,7 +421,9 @@ it("previews without writes and applies only explicitly checked changes", async 
   await user.click(
     screen.getByRole("checkbox", { name: "取消 old · Fugue Key 1 Site-0.1" }),
   );
-  expect(screen.getByText(/此 API key 将移除该渠道接入/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/不再有模型，将从此 API key 移除/),
+  ).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "一键应用优化" }));
   await screen.findByText("已应用");
   const body = JSON.parse(fetch.mock.calls[0][1]!.body as string);

@@ -45,6 +45,7 @@ export const optimizationEvents = [
   { id: "add", label: "新增可用模型" },
   { id: "legacy", label: "升级旧版默认协议" },
   { id: "protocol", label: "按检测协议接入模型" },
+  { id: "protocol-switch", label: "切换已接入模型的协议" },
   { id: "availability", label: "取消检测失败的模型" },
   { id: "tool", label: "取消不支持 Tool use 的模型" },
   { id: "price", label: "取消单价异常的模型" },
@@ -90,7 +91,7 @@ export interface OptimizationChange {
   binding: OptimizationBinding;
   model: string;
   upstream: string;
-  action: "add" | "remove" | "migrate" | "tier-add" | "tier-remove";
+  action: "add" | "remove" | "switch" | "migrate" | "tier-add" | "tier-remove";
   reasons: string[];
   returnedModels?: string[];
   priceDetails?: string[];
@@ -106,6 +107,10 @@ export interface OptimizationChange {
   requiresLegacyMigration?: boolean;
   splitProtocol?: string;
   reuseBinding?: OptimizationBinding;
+  protocolMove?: {
+    protocol: string;
+    provider: string;
+  };
   tier?: ServiceTier;
   tierScope?: string;
   tierEvidenceModels?: string[];
@@ -120,6 +125,10 @@ const providerID = (source: string, provider: string) =>
   JSON.stringify([source, provider]);
 const bindingID = (source: string, key: string, provider: string) =>
   JSON.stringify([source, key, provider]);
+const protocolRoot = (provider: string) =>
+  provider.replace(/--(?:responses|messages|gemini|chat)$/, "");
+const protocolSibling = (provider: string, protocol: string) =>
+  `${protocolRoot(provider)}--${protocol}`;
 
 // A configured provider only counts as joined when an actual caller key routes
 // to it (or its key-owned copy). An unreadable source is never "not joined".
@@ -744,9 +753,8 @@ export function buildOptimizationPlan(
                 detectedProtocols,
               });
             }
-        } else if (
-          events.includes("add") &&
-          !Object.hasOwn(binding.current, upstream) &&
+        }
+        const canConnect =
           !problems.length &&
           evidence.every(
             (e) =>
@@ -757,35 +765,54 @@ export function buildOptimizationPlan(
               (!isCapabilityCheckModel(upstream) ||
                 (!running(e.tool?.state) &&
                   e.tool?.result?.status !== "error")),
-          )
-        ) {
-          const effectiveProtocol = migrate ? "responses" : binding.protocol;
-          const conflicting =
-            !!binding.installed &&
-            !!effectiveProtocol &&
-            detectedProtocols.some(
-              (protocol) => protocol !== effectiveProtocol,
-            );
-          const detected =
-            detectedProtocols.length === 1 &&
-            channelProtocols.find((p) => p.protocol === detectedProtocols[0]);
+          );
+        if (!canConnect) continue;
+        const effectiveProtocol = migrate ? "responses" : binding.protocol;
+        const conflicting =
+          !!binding.installed &&
+          !!effectiveProtocol &&
+          detectedProtocols.some((protocol) => protocol !== effectiveProtocol);
+        const detected =
+          detectedProtocols.length === 1 &&
+          channelProtocols.find((p) => p.protocol === detectedProtocols[0]);
+        const switching = publicModels.length > 0;
+        if (
+          switching
+            ? !events.includes("protocol-switch") ||
+              !routes.optimize_protocol_moves ||
+              !conflicting
+            : !events.includes("add") ||
+              Object.hasOwn(binding.current, upstream)
+        )
+          continue;
+        for (const model of switching ? publicModels : [upstream]) {
+          if (switching && scope && scope !== upstream && scope !== model)
+            continue;
           let splitProtocol: string | undefined;
           let reuseBinding: OptimizationBinding | undefined;
+          let protocolMove: OptimizationChange["protocolMove"];
           let conflictDetail = "请在添加到渠道中按协议拆分";
+          if (
+            switching &&
+            (binding.engineMode !== "auto" ||
+              binding.engineOrigin === "user_override")
+          )
+            conflictDetail = "当前接入使用显式配置或人工覆盖，不能自动切换";
           if (
             conflicting &&
             detected &&
-            events.includes("protocol") &&
+            (switching || events.includes("protocol")) &&
             routes.optimize_extended &&
             routes.legacy_engine_migration &&
+            binding.installed?.manageable &&
             binding.engineMode === "auto" &&
             binding.engineOrigin !== "user_override"
           ) {
-            const root = binding.provider.replace(
-              /--(?:responses|messages|gemini|chat)$/,
-              "",
+            const root = protocolRoot(binding.provider);
+            const sibling = protocolSibling(
+              binding.provider,
+              detected.protocol,
             );
-            const sibling = `${root}--${detected.protocol}`;
             const siblingID = bindingID(source, binding.key, sibling);
             const rootID = bindingID(source, binding.key, root);
             const compatible = [siblingID, rootID]
@@ -797,21 +824,30 @@ export function buildOptimizationPlan(
                   target.installed.account_id ===
                     binding.installed!.account_id &&
                   target.installed.group_id === binding.installed!.group_id &&
-                  (target.legacyEngineEligible && events.includes("legacy")
+                  (target.legacyEngineEligible &&
+                  events.includes("legacy") &&
+                  (!switching || target.current[model] !== upstream)
                     ? "responses"
                     : target.protocol) === detected.protocol,
               );
             // Match normal additions: do not add another public name for an
             // upstream already served, or replace an existing alias.
             if (
+              !switching &&
               compatible.some((target) =>
                 Object.values(target.current).includes(upstream),
               )
             )
               continue;
-            reuseBinding = compatible.find(
-              (target) => !Object.hasOwn(target.current, upstream),
-            );
+            reuseBinding =
+              (switching
+                ? compatible.find(
+                    (target) => target.current[model] === upstream,
+                  )
+                : undefined) ??
+              compatible.find(
+                (target) => !Object.hasOwn(target.current, model),
+              );
             if (compatible.length && !reuseBinding) {
               conflictDetail = "目标协议接入已使用同名模型，不能覆盖现有映射";
             } else if (
@@ -838,27 +874,39 @@ export function buildOptimizationPlan(
               splitClaims.set(siblingID, binding.id);
               splitProtocol = detected.protocol;
             }
+            if (switching && (reuseBinding || splitProtocol))
+              protocolMove = {
+                protocol: detected.protocol,
+                provider: reuseBinding?.provider || sibling,
+              };
           }
           changes.push({
-            id: JSON.stringify([binding.id, upstream]),
+            id: JSON.stringify([binding.id, model]),
             binding,
-            model: upstream,
+            model,
             upstream,
-            action: "add",
+            action: switching ? "switch" : "add",
             reasons: [
-              reuseBinding
-                ? "新增到同一 Key 下已有的协议接入；保留原协议和现有模型"
-                : splitProtocol
-                  ? "按检测协议自动创建接入；保留原协议和现有模型"
-                  : "检测可用，未发现单价、模型匹配、指纹或能力异常",
+              switching
+                ? reuseBinding
+                  ? "移除该模型的旧协议路由，复用同一 Key 的目标接入"
+                  : splitProtocol
+                    ? "为该模型建立检测通过的协议路由，同时移除旧路由"
+                    : "检测通过的协议与当前接入不同"
+                : reuseBinding
+                  ? "新增到同一 Key 下已有的协议接入；保留原协议和现有模型"
+                  : splitProtocol
+                    ? "按检测协议自动创建接入；保留原协议和现有模型"
+                    : "检测可用，未发现单价、模型匹配、指纹或能力异常",
             ],
             checkedAt,
             detectedProtocols,
             requiresLegacyMigration: reuseBinding
               ? !!reuseBinding.legacyEngineEligible && events.includes("legacy")
-              : !!migrate && !splitProtocol,
+              : !!migrate && !splitProtocol && !switching,
             splitProtocol,
             reuseBinding,
+            protocolMove,
             blockedReason: binding.installed
               ? !binding.protocol
                 ? "当前渠道协议未确认，请刷新或检查渠道配置"
@@ -876,15 +924,28 @@ export function buildOptimizationPlan(
   // Prefer the selectable suggestion on the original conflict card over a
   // second copy on the destination card. One model write, one selection.
   const additions = new Map<string, OptimizationChange>();
-  const additionID = (c: OptimizationChange) =>
-    JSON.stringify([optimizationTarget(c).id, c.model]);
+  const destinationID = (c: OptimizationChange) => {
+    const b = c.binding;
+    const provider =
+      c.protocolMove?.provider ??
+      (c.splitProtocol
+        ? protocolSibling(b.provider, c.splitProtocol)
+        : optimizationTarget(c).provider);
+    return JSON.stringify([bindingID(b.source, b.key, provider), c.model]);
+  };
   for (const change of changes) {
-    if (change.action !== "add" || change.blockedReason || change.splitProtocol)
-      continue;
-    const id = additionID(change);
     if (
-      !additions.has(id) ||
-      (change.reuseBinding && !additions.get(id)?.reuseBinding)
+      (change.action !== "add" && change.action !== "switch") ||
+      change.blockedReason
+    )
+      continue;
+    const id = destinationID(change);
+    const prev = additions.get(id);
+    if (
+      !prev ||
+      (prev.action !== "switch" &&
+        (change.action === "switch" ||
+          (change.reuseBinding && !prev.reuseBinding)))
     )
       additions.set(id, change);
   }
@@ -892,10 +953,9 @@ export function buildOptimizationPlan(
     changes: [
       ...changes.filter(
         (c) =>
-          c.action !== "add" ||
+          (c.action !== "add" && c.action !== "switch") ||
           !!c.blockedReason ||
-          !!c.splitProtocol ||
-          additions.get(additionID(c)) === c,
+          additions.get(destinationID(c)) === c,
       ),
       ...optimizationTierChanges(snapshot, events),
     ],
@@ -926,22 +986,36 @@ export function optimizationRequests(
   const migrations = new Set(
     changes.filter((c) => c.action === "migrate").map((c) => c.binding.id),
   );
-  for (const c of changes) {
-    if (c.tier) continue;
-    const target = optimizationTarget(c);
-    if (c.requiresLegacyMigration && !migrations.has(target.id))
-      throw Error(`${target.name}：请同时勾选旧版默认协议升级`);
+  const membership = (target: OptimizationBinding) => {
     const item = bindings.get(target.id) || {
       binding: target,
       models: { ...target.current },
       migrate: migrations.has(target.id),
       splitProtocols: {},
     };
+    bindings.set(target.id, item);
+    return item;
+  };
+  for (const c of changes) {
+    if (c.tier) continue;
+    const target = optimizationTarget(c);
+    if (c.requiresLegacyMigration && !migrations.has(target.id))
+      throw Error(`${target.name}：请同时勾选旧版默认协议升级`);
+    const item = membership(target);
     if (c.action === "add") {
       item.models[c.model] = c.upstream;
       if (c.splitProtocol) item.splitProtocols[c.model] = c.splitProtocol;
     } else if (c.action === "remove") delete item.models[c.model];
-    bindings.set(target.id, item);
+    else if (c.action === "switch") {
+      if (!c.protocolMove || (!c.splitProtocol && !c.reuseBinding))
+        throw Error("目标协议未确认，请重新读取优化预览");
+      if (c.splitProtocol) {
+        item.splitProtocols[c.model] = c.splitProtocol;
+      } else {
+        delete membership(c.binding).models[c.model];
+        item.models[c.model] = c.upstream;
+      }
+    }
   }
   const orders = new Map<string, string[]>();
   const orderID = (source: string, key: string, model: string) =>
@@ -953,55 +1027,78 @@ export function optimizationRequests(
       if (!list.includes(r.provider)) list.push(r.provider);
       orders.set(id, list);
     }
-  for (const { binding: b, models } of bindings.values())
+  for (const c of changes) {
+    if (!c.protocolMove) continue;
+    const b = c.binding;
+    const id = orderID(b.source, b.key, c.model);
+    const list = orders.get(id);
+    if (!list?.includes(b.provider))
+      throw Error("模型路由已变化，请重新读取优化预览");
+    const destination = c.protocolMove.provider;
+    orders.set(
+      id,
+      list.includes(destination)
+        ? list.filter((p) => p !== b.provider)
+        : list.map((p) => (p === b.provider ? destination : p)),
+    );
+  }
+  for (const { binding: b, models, splitProtocols } of bindings.values())
     for (const model of Object.keys(b.current))
-      if (!(model in models)) {
+      if (!Object.hasOwn(models, model) || splitProtocols[model]) {
         const id = orderID(b.source, b.key, model);
         orders.set(
           id,
           (orders.get(id) || []).filter((p) => p !== b.provider),
         );
       }
-  for (const { binding: b, models } of bindings.values())
+  for (const { binding: b, models, splitProtocols } of bindings.values())
     for (const model of Object.keys(models)) {
       const id = orderID(b.source, b.key, model),
         list = orders.get(id) || [];
-      if (!list.includes(b.provider)) list.push(b.provider);
+      const provider = splitProtocols[model]
+        ? protocolSibling(b.provider, splitProtocols[model])
+        : b.provider;
+      if (!list.includes(provider)) list.push(provider);
       orders.set(id, list);
     }
-  const requests = new Map<
-    string,
-    {
-      revision: string;
-      part: "optimize";
-      tier_choices?: {
-        provider: string;
-        scope: string;
-        tier: ServiceTier;
-        enabled: boolean;
-        evidence_models: string[];
-      }[];
-      targets: {
-        api_key_id: string;
-        provider: string;
-        account_id?: string;
-        group_id?: number;
-        origin_provider?: string;
-        current: Record<string, string>;
-        models: Record<string, string>;
-        positions: Record<string, number>;
-        migrate_legacy_engine?: boolean;
-        split_protocols?: Record<string, string>;
-      }[];
-    }
-  >();
+  type Request = {
+    revision: string;
+    part: "optimize" | "optimize_protocol";
+    protocol_moves?: {
+      api_key_id: string;
+      from_provider: string;
+      to_provider: string;
+      model: string;
+      protocol: string;
+    }[];
+    tier_choices?: {
+      provider: string;
+      scope: string;
+      tier: ServiceTier;
+      enabled: boolean;
+      evidence_models: string[];
+    }[];
+    targets: {
+      api_key_id: string;
+      provider: string;
+      account_id?: string;
+      group_id?: number;
+      origin_provider?: string;
+      current: Record<string, string>;
+      models: Record<string, string>;
+      positions: Record<string, number>;
+      migrate_legacy_engine?: boolean;
+      split_protocols?: Record<string, string>;
+    }[];
+  };
+  const requests = new Map<string, Request>();
   for (const {
     binding: b,
     models,
     migrate,
     splitProtocols,
   } of bindings.values()) {
-    const request = requests.get(b.source) || {
+    const request: Request = requests.get(b.source) || {
       revision: b.revision,
       part: "optimize" as const,
       targets: [],
@@ -1015,7 +1112,9 @@ export function optimizationRequests(
         ? { account_id: b.installed.account_id, group_id: b.installed.group_id }
         : { origin_provider: b.native!.provider }),
       current: b.current,
-      ...(migrate && Object.keys(models).some((model) => !splitProtocols[model])
+      ...(migrate &&
+      !Object.keys(splitProtocols).length &&
+      Object.keys(models).length
         ? { migrate_legacy_engine: true }
         : {}),
       ...(Object.keys(splitProtocols).length
@@ -1026,12 +1125,27 @@ export function optimizationRequests(
         Object.keys(models).map((model) => [
           model,
           (orders.get(orderID(b.source, b.key, model)) || []).indexOf(
-            b.provider,
+            splitProtocols[model]
+              ? protocolSibling(b.provider, splitProtocols[model])
+              : b.provider,
           ) + 1,
         ]),
       ),
     });
     requests.set(b.source, request);
+  }
+  for (const c of changes) {
+    if (!c.protocolMove) continue;
+    const request = requests.get(c.binding.source)!;
+    // Older backends must reject a switch rather than apply only its removal.
+    request.part = "optimize_protocol";
+    (request.protocol_moves ??= []).push({
+      api_key_id: c.binding.key,
+      from_provider: c.binding.provider,
+      to_provider: c.protocolMove.provider,
+      model: c.model,
+      protocol: c.protocolMove.protocol,
+    });
   }
   for (const change of changes) {
     if (!change.tier || !change.tierScope || !change.tierEvidenceModels?.length)
@@ -1047,7 +1161,20 @@ export function optimizationRequests(
       throw Error(
         `${b.name}：所选变更会移除原接入，请取消该接入的档位变更后继续`,
       );
-    const request = requests.get(b.source) || {
+    if (
+      membership &&
+      change.action === "tier-add" &&
+      !change.tierEvidenceModels.some(
+        (model) =>
+          membership.models[model] === b.current[model] &&
+          !!b.current[model] &&
+          !membership.splitProtocols[model],
+      )
+    )
+      throw Error(
+        `${b.name}：已验证档位的模型将离开原接入，请取消该接入的档位变更`,
+      );
+    const request: Request = requests.get(b.source) || {
       revision: b.revision,
       part: "optimize" as const,
       targets: [],
@@ -1081,12 +1208,18 @@ export async function applyOptimization(
         const result = await controlRequest<{
           revision: string;
           tier_changes?: number;
+          protocol_moves?: number;
         }>(`/v1/sources/${encodeURIComponent(source)}/channel-batch`, {
           method: "POST",
           signal: AbortSignal.timeout(120000),
           body: JSON.stringify(body),
         });
         if (!result.revision) throw Error("未取得应用版本，请刷新核对实际结果");
+        if (
+          body.protocol_moves?.length &&
+          result.protocol_moves !== body.protocol_moves.length
+        )
+          throw Error("协议切换未收到完整回执，请刷新核对实际结果");
         if (
           body.tier_choices?.length &&
           result.tier_changes !== body.tier_choices.length

@@ -52,15 +52,27 @@ func TestExtendedOptimizationCommitsProtocolAndTierInOneSnapshot(t *testing.T) {
 		case "/v1/model-channels":
 			rows := []batchCatalogRow{
 				{Provider: "peer", Model: "alias", Upstream: "claude-upstream", Engine: "claude"},
-				{Provider: messages, Model: "alias", Upstream: "claude-upstream", Engine: "claude"},
 				{Provider: "peer", Model: "new-model", Upstream: "new-model", Engine: "codex"},
 				{Provider: "peer", Model: "gpt-6.2-sol", Upstream: "gpt-6.2-sol", Engine: "codex"},
 			}
 			for _, c := range current.Channels {
-				if c.Provider == responses {
-					for _, model := range c.Models {
-						rows = append(rows, batchCatalogRow{Provider: responses, Model: model, Upstream: model, Engine: "codex"})
-					}
+				var doc map[string]any
+				if json.Unmarshal(c.Definition, &doc) != nil {
+					t.Error("invalid fixture channel definition")
+					continue
+				}
+				mappings, err := protocolDocumentModels(doc)
+				if err != nil {
+					t.Error(err)
+					continue
+				}
+				spec, ok := protocolSpec(providerProtocol(c.Provider))
+				if !ok {
+					t.Errorf("unknown fixture protocol for %s", c.Provider)
+					continue
+				}
+				for model, upstream := range mappings {
+					rows = append(rows, batchCatalogRow{Provider: c.Provider, Model: model, Upstream: upstream, Engine: spec.Engine})
 				}
 			}
 			writeJSON(w, 200, map[string]any{"data": rows})
@@ -205,5 +217,70 @@ func TestExtendedOptimizationCommitsProtocolAndTierInOneSnapshot(t *testing.T) {
 	if len(current.Channels) != 2 || reused.Base != account.Base+"/v1/responses" ||
 		!reflect.DeepEqual(reused.Models, []string{"gpt-6.2-sol", "new-model"}) {
 		t.Fatal("Responses was duplicated or the existing model was lost", reused)
+	}
+
+	// Migrate the only model on Messages into the already installed Responses
+	// binding. The old route, new alias, priority and disabled policy commit together.
+	answer.Availability.Protocol = "chat"
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result)
+ VALUES ($1,1,'claude-upstream','done',$2)`, account.ID, mustJSON(answer)); err != nil {
+		t.Fatal(err)
+	}
+	move := channelBatchInput{Revision: revision, Part: "optimize_protocol", Targets: []channelBatchTarget{
+		{Key: key, Provider: messages, Account: account.ID, Group: 1, Current: map[string]string{"alias": "claude-upstream"}, Models: map[string]string{}},
+		{Key: key, Provider: responses, Account: account.ID, Group: 1, Current: reuse.Targets[0].Models,
+			Models:    map[string]string{"alias": "claude-upstream", "new-model": "new-model", "gpt-6.2-sol": "gpt-6.2-sol"},
+			Positions: map[string]int{"alias": 2, "new-model": 2, "gpt-6.2-sol": 2}},
+	}, ProtocolMoves: []optimizationProtocolMove{{Key: key, From: messages, To: responses, Model: "alias", Protocol: "responses"}}}
+	if got := call(move); got.Code != 409 || restores != 2 {
+		t.Fatal("stale detection allowed a move", got.Code, got.Body.String(), restores)
+	}
+	answer.Availability.Protocol = "responses"
+	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET result=$2 WHERE account_id=$1 AND model='claude-upstream'`, account.ID, mustJSON(answer)); err != nil {
+		t.Fatal(err)
+	}
+	move.Part = "optimize"
+	if got := call(move); got.Code != 400 || restores != 2 {
+		t.Fatal("non-versioned move was accepted", got.Code, got.Body.String(), restores)
+	}
+	move.Part = "optimize_protocol"
+	if got := call(move); got.Code != 200 || !strings.Contains(got.Body.String(), `"protocol_moves":1`) || restores != 3 {
+		t.Fatal("protocol move not applied", got.Code, got.Body.String(), restores)
+	}
+	if len(current.Channels) != 1 || current.Channels[0].Provider != responses || !strings.Contains(string(current.Channels[0].Definition), `"claude-upstream":"alias"`) {
+		t.Fatal("empty Messages binding was not removed or the alias was lost", current.Channels)
+	}
+	for _, rule := range current.Rules {
+		if rule.KeyID != key || rule.Model != "alias" {
+			continue
+		}
+		if !reflect.DeepEqual(rule.Order, []string{"peer", responses}) || !reflect.DeepEqual(rule.Disabled, []string{responses}) {
+			t.Fatal("moved alias lost its position or disabled policy", rule)
+		}
+	}
+
+	// Switch only one existing model from Responses into a newly created Chat
+	// binding. All unrelated models and their protocol stay in Responses.
+	answer.Availability.Protocol = "chat"
+	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET result=$2 WHERE account_id=$1 AND model='gpt-6.2-sol'`, account.ID, mustJSON(answer)); err != nil {
+		t.Fatal(err)
+	}
+	chat := protocolProvider(root, "chat")
+	split := channelBatchInput{Revision: revision, Part: "optimize_protocol", Targets: []channelBatchTarget{{
+		Key: key, Provider: responses, Account: account.ID, Group: 1, Current: move.Targets[1].Models, Models: move.Targets[1].Models,
+		Positions: move.Targets[1].Positions, SplitProtocols: map[string]string{"gpt-6.2-sol": "chat"},
+	}}, ProtocolMoves: []optimizationProtocolMove{{Key: key, From: responses, To: chat, Model: "gpt-6.2-sol", Protocol: "chat"}}}
+	if got := call(split); got.Code != 200 || restores != 4 {
+		t.Fatal("new protocol binding was not created", got.Code, got.Body.String(), restores)
+	}
+	bindings := map[string]retainedChannel{}
+	for _, channel := range current.Channels {
+		bindings[channel.Provider] = channel
+	}
+	if len(bindings) != 2 || bindings[responses].Base != account.Base+"/v1/responses" ||
+		!reflect.DeepEqual(bindings[responses].Models, []string{"alias", "new-model"}) ||
+		bindings[chat].Base != account.Base+"/v1/chat/completions" ||
+		!reflect.DeepEqual(bindings[chat].Models, []string{"gpt-6.2-sol"}) {
+		t.Fatal("split did not preserve the unswitched models", bindings)
 	}
 }

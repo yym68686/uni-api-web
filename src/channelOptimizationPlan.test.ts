@@ -15,9 +15,112 @@ import {
   fingerprintOptimizationFixture,
   optimizationFixture,
   modelCheck,
+  protocolSwitchFixture,
 } from "./channelOptimization.test-data";
 
 const events = optimizationEvents.map((e) => e.id);
+
+it.each(["existing", "new", "already-serving"] as const)(
+  "switches an existing model with a %s destination, preserving aliases and peer priority",
+  (destination) => {
+    const s = protocolSwitchFixture(destination);
+    const model = "gpt-6.2-sol";
+    const to = destination === "new" ? "p--responses" : "p";
+    const plan = buildOptimizationPlan(s, events);
+    expect(plan.changes.map((c) => [c.action, c.model])).toEqual([
+      ["switch", model],
+      ["switch", "sol-alias"],
+    ]);
+    expect(plan.changes.every((c) => !c.blockedReason)).toBe(true);
+    const req = optimizationRequests([plan.changes[0]], s.routes).get("s")!;
+    expect(req.part).toBe("optimize_protocol");
+    expect(req.protocol_moves).toEqual([
+      {
+        api_key_id: "key",
+        from_provider: "p--messages",
+        to_provider: to,
+        model,
+        protocol: "responses",
+      },
+    ]);
+    const from = req.targets.find((t) => t.provider === "p--messages")!;
+    expect(from.current).toEqual({
+      old: "old",
+      [model]: model,
+      "sol-alias": model,
+    });
+    if (destination === "new") {
+      expect(from).toMatchObject({
+        models: { old: "old", [model]: model, "sol-alias": model },
+        split_protocols: { [model]: "responses" },
+        positions: { [model]: 1 },
+      });
+      expect(req.targets).toHaveLength(1);
+    } else {
+      expect(from.models).toEqual({ old: "old", "sol-alias": model });
+      expect(req.targets.find((t) => t.provider === to)).toMatchObject({
+        models: { "kept-alias": "kept-upstream", [model]: model },
+        positions: {
+          "kept-alias": 2,
+          [model]: destination === "already-serving" ? 2 : 1,
+        },
+      });
+    }
+  },
+);
+
+it("never proposes a switch based on unfinished or unhealthy evidence or an old backend", () => {
+  const s = protocolSwitchFixture();
+  const check = s.accounts[0].targets[0].models![0];
+  check.state = "running";
+  expect(buildOptimizationPlan(s, events).changes).toEqual([]);
+  check.state = "done";
+  check.result!.availability.model_match = "mismatch";
+  expect(buildOptimizationPlan(s, ["protocol-switch"]).changes).toEqual([]);
+  check.result!.availability.model_match = "match";
+  check.result!.availability.terminal_status = "missing";
+  expect(buildOptimizationPlan(s, events).changes).toEqual([]);
+  check.result!.availability.terminal_status = "complete";
+  expect(
+    buildOptimizationPlan(s, events).changes.some((c) => c.action === "switch"),
+  ).toBe(true);
+  expect(
+    buildOptimizationPlan(s, ["add", "protocol"]).changes.some(
+      (c) => c.action === "switch",
+    ),
+  ).toBe(false);
+  s.routes.s.optimize_protocol_moves = false;
+  expect(
+    buildOptimizationPlan(s, events).changes.some((c) => c.action === "switch"),
+  ).toBe(false);
+});
+
+it("leaves a manual source protocol and a conflicting destination alias unchanged", () => {
+  const s = protocolSwitchFixture();
+  s.routes.s.data[0].engine_origin = "user_override";
+  for (const r of s.routes.s.data.filter((r) => r.provider === "p--messages"))
+    r.engine_origin = "user_override";
+  expect(
+    buildOptimizationPlan(s, ["protocol-switch"]).changes[0].blockedReason,
+  ).toContain("人工覆盖");
+  for (const r of s.routes.s.data) delete r.engine_origin;
+  const alias = "sol-alias";
+  const target = s.imports.data[1];
+  target.models.push(alias);
+  target.model_mappings![alias] = "different";
+  s.routes.s.data.push({
+    ...s.routes.s.data.at(-1)!,
+    model: alias,
+    upstream_model: "different",
+  });
+  const plan = buildOptimizationPlan(s, events);
+  expect(plan.changes.find((c) => c.model === alias)?.blockedReason).toContain(
+    "不能覆盖现有映射",
+  );
+  expect(plan.changes.find((c) => c.model === "gpt-6.2-sol")?.action).toBe(
+    "switch",
+  );
+});
 
 it("removes a confirmed fingerprint mismatch independently of the response model name", () => {
   const snapshot = fingerprintOptimizationFixture();

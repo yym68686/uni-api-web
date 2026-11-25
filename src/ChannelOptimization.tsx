@@ -82,14 +82,39 @@ export function ChannelOptimization({
   }
   const selectedMembership = new Map<string, Set<string>>();
   for (const change of eligible) {
-    if (!selected.has(change.id) || change.splitProtocol) continue;
-    if (change.action !== "add" && change.action !== "remove") continue;
-    const target = optimizationTarget(change);
-    const kept =
-      selectedMembership.get(target.id) || new Set(Object.keys(target.current));
-    if (change.action === "add") kept.add(change.model);
-    else kept.delete(change.model);
-    selectedMembership.set(target.id, kept);
+    if (!selected.has(change.id)) continue;
+    const update = (binding: OptimizationChange["binding"], add: boolean) => {
+      const kept =
+        selectedMembership.get(binding.id) ||
+        new Set(Object.keys(binding.current));
+      if (add) kept.add(change.model);
+      else kept.delete(change.model);
+      selectedMembership.set(binding.id, kept);
+    };
+    if (change.action === "remove" || change.action === "switch")
+      update(change.binding, false);
+    if (
+      !change.splitProtocol &&
+      (change.action === "add" || change.action === "switch")
+    )
+      update(optimizationTarget(change), true);
+  }
+  const tierConflicts = new Map<string, string>();
+  for (const change of eligible) {
+    if (!change.tier || !selected.has(change.id)) continue;
+    const remaining = selectedMembership.get(change.binding.id);
+    if (remaining?.size === 0) {
+      tierConflicts.set(change.id, "此接入将被移除，请取消该档位变更。");
+    } else if (
+      remaining &&
+      change.action === "tier-add" &&
+      !change.tierEvidenceModels?.some((model) => remaining.has(model))
+    ) {
+      tierConflicts.set(
+        change.id,
+        "已验证档位的模型将离开此接入，请取消该档位变更。",
+      );
+    }
   }
   async function open() {
     if (readingRef.current) return;
@@ -111,7 +136,14 @@ export function ChannelOptimization({
     setProgress({});
   }
   async function apply() {
-    if (!input || locked.current || finished || !selected.size) return;
+    if (
+      !input ||
+      locked.current ||
+      finished ||
+      !selected.size ||
+      tierConflicts.size
+    )
+      return;
     locked.current = true;
     setBusy(true);
     setError("");
@@ -265,7 +297,7 @@ export function ChannelOptimization({
                 </p>
                 <p>
                   协议冲突时优先复用同一分组、同一 Key
-                  下已有的目标协议接入；没有时才新建，不改动原协议上仍选用的模型。指纹只依据本轮完整结果，不使用样本不足时展示的上次结果。
+                  下已有的目标协议接入；没有时才新建。切换已接入模型会同时移除它的旧路由，保留未勾选模型及其协议。指纹只依据本轮完整结果，不使用样本不足时展示的上次结果。
                 </p>
                 <p>
                   档位变更作用于整个接入。新增只依据业务凭据的有效验证；取消要求相关模型都明确不支持或未命中。
@@ -317,6 +349,8 @@ export function ChannelOptimization({
                   {groups.length} 个接入 ·{" "}
                   {eligible.filter((c) => c.action === "add").length} 项新增 ·{" "}
                   {eligible.filter((c) => c.action === "remove").length} 项取消
+                  {!!eligible.filter((c) => c.action === "switch").length &&
+                    ` · ${eligible.filter((c) => c.action === "switch").length} 项协议切换`}
                   {!!eligible.filter((c) => c.action === "migrate").length &&
                     ` · ${eligible.filter((c) => c.action === "migrate").length} 项协议升级`}
                   {!!eligible.filter((c) => c.tier).length &&
@@ -380,7 +414,7 @@ export function ChannelOptimization({
                       >
                         <input
                           type="checkbox"
-                          aria-label={`${c.action === "migrate" ? "升级旧版默认协议" : `${c.action === "add" || c.action === "tier-add" ? "新增" : "取消"} ${c.model}`} · ${b.sourceName} ${keyLabel} ${b.name}`}
+                          aria-label={`${c.action === "migrate" ? "升级旧版默认协议" : `${c.action === "switch" ? "切换协议" : c.action === "add" || c.action === "tier-add" ? "新增" : "取消"} ${c.model}`} · ${b.sourceName} ${keyLabel} ${b.name}`}
                           checked={selected.has(c.id)}
                           disabled={busy || finished || !!c.blockedReason}
                           onChange={(e) => selectChanges([c], e.target.checked)}
@@ -394,26 +428,36 @@ export function ChannelOptimization({
                         >
                           {c.action === "migrate"
                             ? "协议 · 升级"
-                            : c.reuseBinding
-                              ? "协议 · 复用接入"
-                              : c.splitProtocol
-                                ? "协议 · 新接入"
-                              : c.tier
-                                ? c.action === "tier-add"
-                                  ? "接入档位 · 新增"
-                                  : "接入档位 · 取消"
-                                : c.action === "add"
-                                  ? "模型 · 新增"
-                                  : "模型 · 取消"}
+                            : c.action === "switch"
+                              ? "协议 · 切换"
+                              : c.reuseBinding
+                                ? "协议 · 复用接入"
+                                : c.splitProtocol
+                                  ? "协议 · 新接入"
+                                  : c.tier
+                                    ? c.action === "tier-add"
+                                      ? "接入档位 · 新增"
+                                      : "接入档位 · 取消"
+                                    : c.action === "add"
+                                      ? "模型 · 新增"
+                                      : "模型 · 取消"}
                         </span>
                         <span>
                           <strong>
                             {c.action === "migrate"
                               ? "旧版默认 gpt → 自动识别 codex"
-                              : c.tier ? `整个接入 · ${c.tier}` : c.model}
+                              : c.tier
+                                ? `整个接入 · ${c.tier}`
+                                : c.model}
                           </strong>
                           {c.model !== c.upstream && (
                             <small>原模型：{c.upstream}</small>
+                          )}
+                          {c.action === "switch" && (
+                            <small>
+                              {channelProtocolLabel(b.protocol)} →{" "}
+                              {channelProtocolLabel(c.detectedProtocols?.[0])}
+                            </small>
                           )}
                           {c.reuseBinding ? (
                             <small>
@@ -481,6 +525,14 @@ export function ChannelOptimization({
                               {c.blockedReason}
                             </strong>
                           )}
+                          {tierConflicts.has(c.id) && (
+                            <strong
+                              className="optimization-blocked-reason"
+                              role="alert"
+                            >
+                              {tierConflicts.get(c.id)}
+                            </strong>
+                          )}
                           {!!c.priceDetails?.length && (
                             <>
                               <small>
@@ -506,8 +558,7 @@ export function ChannelOptimization({
                     ))}
                     {!keptCount && (
                       <p className="coverage-note">
-                        所选变更将取消最后一个模型：此 API key
-                        将移除该渠道接入。
+                        所选变更后原接入不再有模型，将从此 API key 移除。
                       </p>
                     )}
                     {state &&
@@ -530,7 +581,9 @@ export function ChannelOptimization({
               </Dialog.Close>
               <button
                 className="button primary"
-                disabled={busy || finished || !selected.size}
+                disabled={
+                  busy || finished || !selected.size || !!tierConflicts.size
+                }
                 onClick={() => void apply()}
               >
                 {busy ? (

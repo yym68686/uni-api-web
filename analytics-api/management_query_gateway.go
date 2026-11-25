@@ -230,7 +230,8 @@ func managementGatewayRoutes(facts managementGatewayFacts) managementQueryRoutes
 	out := managementQueryRoutes{Data: []channelRoute{}, UnavailableKeys: []string{}, SnapshotConsistent: &consistent,
 		Revision: facts.Revision, Manageable: facts.Controls["temporary_channel_management"] == true,
 		BatchRevisions: true, AtomicBatch: true, OptimizeBatch: true, OptimizeExtended: facts.Controls["channel_settings"] == true,
-		LegacyMigration: facts.Controls["automatic_engine"] == true}
+		OptimizeProtocolMoves: facts.Controls["channel_settings"] == true && facts.Controls["automatic_engine"] == true,
+		LegacyMigration:       facts.Controls["automatic_engine"] == true}
 	providers := map[string]bool{}
 	for _, row := range facts.Catalog {
 		providers[row.Provider] = true

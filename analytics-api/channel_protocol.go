@@ -137,15 +137,6 @@ func (s *Service) validateBatchProtocols(ctx context.Context, in channelBatchInp
 	return nil
 }
 
-func validBatchProtocolSplit(t channelBatchTarget) bool {
-	for model, protocol := range t.SplitProtocols {
-		if _, ok := protocolSpec(protocol); !ok || t.Models[model] == "" || t.Current[model] != "" {
-			return false
-		}
-	}
-	return !t.MigrateLegacyEngine
-}
-
 func (s *Service) validateBatchProtocolSplits(ctx context.Context, src controlSource, snapshot retainedSnapshot, state map[string]any, owner string, in channelBatchInput, catalogs map[string][]batchCatalogRow, documents map[string]map[string]any) error {
 	var overrides map[string]bool
 	bases := map[string]string{}

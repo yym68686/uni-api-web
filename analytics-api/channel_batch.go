@@ -24,12 +24,13 @@ type channelBatchTarget struct {
 	Positions           map[string]int    `json:"positions"`
 }
 type channelBatchInput struct {
-	Revision        string                   `json:"revision"`
-	Part            string                   `json:"part"`
-	AllowUnverified bool                     `json:"allow_unverified_models"`
-	EvidenceSource  string                   `json:"evidence_source_id"`
-	Targets         []channelBatchTarget     `json:"targets"`
-	TierChoices     []optimizationTierChoice `json:"tier_choices,omitempty"`
+	Revision        string                     `json:"revision"`
+	Part            string                     `json:"part"`
+	AllowUnverified bool                       `json:"allow_unverified_models"`
+	EvidenceSource  string                     `json:"evidence_source_id"`
+	Targets         []channelBatchTarget       `json:"targets"`
+	TierChoices     []optimizationTierChoice   `json:"tier_choices,omitempty"`
+	ProtocolMoves   []optimizationProtocolMove `json:"protocol_moves,omitempty"`
 }
 
 func (in channelBatchInput) removes(t channelBatchTarget) bool {
@@ -58,7 +59,17 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch in.Part {
+	case "optimize_protocol":
+		if len(in.ProtocolMoves) == 0 {
+			http.Error(w, "请选择要切换协议的模型", http.StatusBadRequest)
+			return
+		}
+		in.Part = "optimize"
 	case "all", "models", "aliases", "positions", "delete", "optimize":
+		if len(in.ProtocolMoves) != 0 {
+			http.Error(w, "无效的协议切换操作", http.StatusBadRequest)
+			return
+		}
 	default:
 		http.Error(w, "无效的批量操作", 400)
 		return
@@ -87,7 +98,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		seen[t.Key+"\n"+t.Provider] = true
 		keys[t.Key] = true
 		if len(t.SplitProtocols) > 0 {
-			if in.Part != "optimize" || t.Account == "" || !validBatchProtocolSplit(*t) {
+			if in.Part != "optimize" || t.Account == "" || t.MigrateLegacyEngine {
 				http.Error(w, "无效的协议变更", 400)
 				return
 			}
@@ -111,6 +122,11 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	moveSources, err := validateOptimizationProtocolMoveTargets(src.ID, &in)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 	unlock := s.waitControlHTTP(w, ctx, src.ID, "修改")
 	if unlock == nil {
@@ -218,7 +234,8 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	neededByScope := map[validationScope]map[string]string{}
 	for _, t := range in.Targets {
-		if in.Part == "positions" || in.removes(t) {
+		id := t.Key + "\n" + t.Provider
+		if in.Part == "positions" || (in.removes(t) && !moveSources[id]) {
 			continue
 		}
 		doc, status, e := s.importProviderDocument(ctx, src, snapshot, t.Provider, in.Revision, baseDocuments)
@@ -226,7 +243,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, e.Error(), status)
 			return
 		}
-		documents[t.Key+"\n"+t.Provider] = doc
+		documents[id] = doc
 		scope := validationScope{t.Account, t.Group, t.Origin}
 		for model := range newChannelModels(t.Current, t.Models) {
 			if neededByScope[scope] == nil {
@@ -240,6 +257,11 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.validateBatchProtocolSplits(ctx, src, snapshot, state, owner, in, catalogs, documents); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	disabledMoves, err := s.prepareOptimizationProtocolMoves(ctx, src, snapshot, state, owner, in, catalogs, documents)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -271,6 +293,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 409)
 		return
 	}
+	retainProtocolMoveDisables(&snapshot, disabledMoves)
 	if err = applyOptimizationTierSettings(&snapshot, tierSettings); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -295,7 +318,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		retentionFailure(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"revision": applied["revision"], "changed": changed, "tier_changes": len(in.TierChoices)})
+	writeJSON(w, 200, map[string]any{"revision": applied["revision"], "changed": changed, "tier_changes": len(in.TierChoices), "protocol_moves": len(in.ProtocolMoves)})
 }
 
 // Models are canonical upstream names, not names to resolve through another
@@ -398,7 +421,7 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 			}
 			for i := range snapshot.Rules {
 				r := &snapshot.Rules[i]
-				if r.Model != "" {
+				if r.Model != "" && (r.KeyID == "" || r.KeyID == t.Key) {
 					if _, kept := t.Models[r.Model]; !kept {
 						r.Order = withoutProvider(r.Order, provider)
 						r.Disabled = withoutProvider(r.Disabled, provider)

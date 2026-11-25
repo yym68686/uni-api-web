@@ -12,16 +12,17 @@ type managementFingerprintRecord struct {
 }
 
 type managementQueryRoutes struct {
-	Data               []channelRoute `json:"data"`
-	UnavailableKeys    []string       `json:"unavailable_keys"`
-	SnapshotConsistent *bool          `json:"snapshot_consistent,omitempty"`
-	Revision           string         `json:"revision,omitempty"`
-	Manageable         bool           `json:"manageable,omitempty"`
-	BatchRevisions     bool           `json:"batch_revisions,omitempty"`
-	AtomicBatch        bool           `json:"atomic_batch,omitempty"`
-	OptimizeBatch      bool           `json:"optimize_batch,omitempty"`
-	OptimizeExtended   bool           `json:"optimize_extended,omitempty"`
-	LegacyMigration    bool           `json:"legacy_engine_migration,omitempty"`
+	Data                  []channelRoute `json:"data"`
+	UnavailableKeys       []string       `json:"unavailable_keys"`
+	SnapshotConsistent    *bool          `json:"snapshot_consistent,omitempty"`
+	Revision              string         `json:"revision,omitempty"`
+	Manageable            bool           `json:"manageable,omitempty"`
+	BatchRevisions        bool           `json:"batch_revisions,omitempty"`
+	AtomicBatch           bool           `json:"atomic_batch,omitempty"`
+	OptimizeBatch         bool           `json:"optimize_batch,omitempty"`
+	OptimizeExtended      bool           `json:"optimize_extended,omitempty"`
+	OptimizeProtocolMoves bool           `json:"optimize_protocol_moves,omitempty"`
+	LegacyMigration       bool           `json:"legacy_engine_migration,omitempty"`
 }
 
 func seedFingerprintModelOrder() []string {

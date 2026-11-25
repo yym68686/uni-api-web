@@ -100,7 +100,7 @@ func (s *Service) validateOptimizationTierEvidence(ctx context.Context, src cont
 		}
 		kept := true
 		for _, target := range targets {
-			if target.Provider == choice.Provider && (target.Models[model] == "" || target.Current[model] != target.Models[model]) {
+			if target.Provider == choice.Provider && (target.Models[model] == "" || target.SplitProtocols[model] != "" || target.Current[model] != target.Models[model]) {
 				kept = false
 			}
 		}
