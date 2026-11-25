@@ -373,10 +373,10 @@ export function AccountForm({
               <div className="compact-dialog-options">
                 <label className="dialog-check-row">
                   <input type="checkbox" checked={detectOnAdd} disabled={busy || !detectionModels?.length}
-                    aria-label="同步并检测已选模型" aria-describedby={detectOnAdd ? `${noteId}-cost` : undefined}
+                    aria-label="同步并检测已选模型" aria-describedby={`${noteId}-detection`}
                     onChange={event => setDetectOnAdd(event.target.checked)} />
                   <span>同步后检测模型</span>
-                  <small id={`${noteId}-cost`}>{detectOnAdd ? `${detectionModels?.length ?? 0} 个 / 分组 · 可能计费` : "仅同步"}</small>
+                  <small id={`${noteId}-detection`}>{detectOnAdd ? `${detectionModels?.length ?? 0} 个 / 分组` : "仅同步"}</small>
                 </label>
               </div>
             )}

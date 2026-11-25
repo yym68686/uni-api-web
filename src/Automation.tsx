@@ -672,7 +672,7 @@ export function Automation({
                 </div>
                 {!order ? (
                   <>
-                    <p className="dialog-inline-note">会向所选渠道发起检测请求，可能产生费用；不会调序。</p>
+                    <p className="dialog-inline-note">会向所选渠道发起检测请求，不会调序。</p>
                     <div className="automation-form">
                       {numeric([["quality_concurrency", "检测并发数", 1, 16]])}
                     </div>

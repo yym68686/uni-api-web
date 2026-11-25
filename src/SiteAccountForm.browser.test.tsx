@@ -10,7 +10,8 @@ it("keeps account setup compact and turns model detection off without submitting
   const dialog = screen.getByRole("dialog", { name: "添加站点账号" });
   const detection = screen.getByRole("checkbox", { name: "同步并检测已选模型" });
   expect(detection).toBeChecked();
-  expect(detection.closest(".dialog-check-row")).toHaveTextContent("可能计费");
+  expect(detection.closest(".dialog-check-row")).toHaveTextContent("1 个 / 分组");
+  expect(detection.closest(".dialog-check-row")).not.toHaveTextContent("计费");
   expect(dialog.querySelector(".compact-dialog-footer")).toContainElement(screen.getByRole("button", { name: "连接并检测" }));
   await user.click(detection);
   expect(detection).not.toBeChecked();

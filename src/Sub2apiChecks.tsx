@@ -92,7 +92,7 @@ import type { ChannelAddDraft, ChannelAddRequest, ConfiguredChannelAddDraft, Sit
 
 const SiteAccountSettings = lazy(() => import("./SiteAccountSettings").then(m => ({default: m.SiteAccountSettings})));
 const Sub2apiImport = lazy(() => import("./Sub2apiImport").then(m => ({default: m.Sub2apiImport})));
-const modelCheckScope = "检测可用性，以及适用的降智、指纹、压缩、Tool use、Fast 和 Ultrafast；可能产生多次上游费用。";
+const modelCheckScope = "检测可用性，以及适用的降智、指纹、压缩、Tool use、Fast 和 Ultrafast。";
 
 const managementColumnChoices = [
   {id: "model", label: "模型"},
