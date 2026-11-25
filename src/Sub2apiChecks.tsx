@@ -1630,6 +1630,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                     <div className="sub-account-status">
                       <span
                         className="sub-account-progress"
+                        data-tone={a.state === "idle" ? "healthy" : a.state === "error" ? "critical"
+                          : a.state === "interrupted" || (pending(a.state) && a.sync_phase?.startsWith("waiting_")) ? "warning" : undefined}
                         role={pending(a.state) ? "status" : undefined}
                       >
                         {pending(a.state) && <Spinner small />}

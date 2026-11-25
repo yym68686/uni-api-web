@@ -13,14 +13,14 @@
   --focus-ring:color-mix(in srgb,var(--accent) 40%,transparent);
   --edge-shadow:color-mix(in srgb,var(--ink) 7%,transparent);
   --overlay:#0007;
-  --green:var(--ink);
-  --green-bg:var(--subtle);
-  --danger:var(--ink);
-  --danger-bg:var(--subtle);
-  --critical:var(--ink);
-  --critical-bg:var(--subtle);
-  --warning:var(--ink);
-  --warning-row:var(--subtle);
+  --green:#166846;
+  --green-bg:#e8f4ed;
+  --danger:#a4373e;
+  --danger-bg:#fbe9ec;
+  --critical:#b62e42;
+  --critical-bg:#fbe9ec;
+  --warning:#856000;
+  --warning-row:#fcf5eb;
   --shadow:0 4px 16px #0003;
   --border:var(--line);
   --panel:var(--surface);
@@ -43,14 +43,14 @@
   --accent-fill:#aebfe3;
   --accent-ink:#171717;
   --overlay:#0007;
-  --green:var(--ink);
-  --green-bg:var(--subtle);
-  --danger:var(--ink);
-  --danger-bg:var(--subtle);
-  --critical:var(--ink);
-  --critical-bg:var(--subtle);
-  --warning:var(--ink);
-  --warning-row:var(--subtle);
+  --green:#8cc8a0;
+  --green-bg:#203b30;
+  --danger:#ffa4aa;
+  --danger-bg:#38282a;
+  --critical:#ff9ca8;
+  --critical-bg:#412831;
+  --warning:#e9cc70;
+  --warning-row:#332b1a;
   --shadow:0 4px 16px #0003;
   color-scheme:dark;
 }
@@ -410,7 +410,7 @@
 .workspace .observation-table th {font-size:11px;font-weight:600;background:var(--subtle)}
 .workspace .observation-table th:first-child,.workspace .observation-table td:first-child {padding-left:13px}
 .workspace .observation-table tbody tr {height:47px}
-.workspace .observation-table tr[data-route-alert] td {background:var(--warning-row)}
+.workspace .observation-table tr[data-route-alert] td {background:var(--subtle)}
 .workspace .observation-table :is(th,td) {text-align:end;font-variant-numeric:tabular-nums}
 .workspace .observation-table :is(th,td):is(.channel-identity,.observation-status,.column-fingerprint,.observation-detection-actions) {text-align:start}
 .workspace .observation-table :is(th,td).rank {text-align:center}
@@ -477,7 +477,7 @@
   .workspace .observation-table .rank {width:2.5rem;min-width:2.5rem;padding-inline:5px}
   .workspace .observation-table[data-ranked] .channel-identity {inset-inline-start:2.5rem}
   .workspace .observation-table tbody tr:hover > :is(.channel-identity,.rank) {background-color:var(--subtle)}
-  .workspace .observation-table tbody tr[data-route-alert] > :is(.channel-identity,.rank) {background-color:var(--warning-row)}
+  .workspace .observation-table tbody tr[data-route-alert] > :is(.channel-identity,.rank) {background-color:var(--subtle)}
   .workspace .observation-table tbody tr:is([data-route-dragging],[data-route-drop]) > :is(.channel-identity,.rank) {background-color:var(--selection)}
 }
 @media(max-width:440px) {

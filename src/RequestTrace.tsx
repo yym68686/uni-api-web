@@ -700,11 +700,11 @@ export function TraceTimeline({
         </div>
       </div>
       {trace.gatewayDecision && trace.downstreamHTTP ? (
-        <p className="trace-notice">
+        <p className="trace-notice warning">
           {headers?.status === trace.downstreamHTTP ? "响应头" : trace.httpSource === "final_facts" ? "终态记录的响应" : "请求汇总"} HTTP {trace.downstreamHTTP} · 网关判定 {trace.gatewayDecision}
         </p>
       ) : trace.statusConflict && (
-        <p className="trace-notice">
+        <p className="trace-notice warning">
           {headers?.status === trace.downstreamHTTP ? "响应头" : "观测响应"} HTTP {trace.downstreamHTTP} · 网关最终 HTTP {final?.status}（请求汇总）
         </p>
       )}

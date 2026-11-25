@@ -157,7 +157,7 @@ export function Status({ row, upstreamGroup }: { row: Channel; upstreamGroup?: G
     <span className="status-pill cooling"><span className="tiny-dot" />分组已停用</span>
   </Tip>;
   return (
-    <span className={`status-pill ${row.eligible ? "healthy" : "cooling"}`}>
+    <span className={`status-pill ${row.eligible ? "healthy" : row.reason === "channel_cooldown" ? "warning" : "cooling"}`}>
       <span className="tiny-dot" />
       {reasonLabel[row.reason] || (row.eligible ? "可用" : "不可用")}
     </span>
@@ -276,11 +276,13 @@ export function ChannelMetricCells({
       case "success": {
         const measured = row.stats?.success_rate;
         const success = measured != null && measured >= 0 && measured <= 1 ? measured : null;
+        const tone = success == null ? undefined : success >= 0.95 ? "healthy" : success >= 0.8 ? "warning" : "critical";
         return <td className="column-run column-success">
         <Tip keyboard={false} text={<FailureCounts channels={[row]} summary />}>
           <div className="success-cell">
             <span
-              className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}
+              className={success == null ? "mono muted" : "mono attempt-rate"}
+              data-tone={tone}
             >
               {success == null ? <span className="observation-no-sample">{row.history_configured === false ? "未接入" : stale ? "未同步" : metricsUnavailable ? "未取得" : "无样本"}</span> : rate(success)}
             </span>

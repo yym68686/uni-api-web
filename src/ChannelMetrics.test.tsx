@@ -80,15 +80,16 @@ it("mounts only compact observation metrics and keeps counts aligned", () => {
   expect(screen.getByRole("columnheader", {name:"站点余额"})).toBeVisible();
 });
 
-it.each([.98, .87, .55, 0])(
-  "renders the exact attempt rate for %s without severity bars",
-  (rate) => {
+it.each([[.98, "healthy"], [.87, "warning"], [.55, "critical"], [0, "critical"]] as const)(
+  "retains the severity of the exact attempt rate for %s without restoring decorative bars",
+  (rate, tone) => {
     const row = {provider: "channel", eligible: true, stats: {...emptyStats(), success_rate: rate, success_rate_denominator: 100}} as Channel;
     const {container} = render(<Tooltip.Provider><table><tbody><tr>
       <ChannelMetricCells row={row} actualRange={{supported:false}} columns={["success"]} />
     </tr></tbody></table></Tooltip.Provider>);
     expect(container.querySelector(".rate-track")).toBeNull();
     expect(screen.getByText(`${(rate * 100).toFixed(1)}%`)).toBeVisible();
+    expect(screen.getByText(`${(rate * 100).toFixed(1)}%`)).toHaveAttribute("data-tone", tone);
   },
 );
 

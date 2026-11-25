@@ -1233,6 +1233,10 @@ nav > button.active > svg {
   background: var(--green-bg);
   color: var(--green);
 }
+.status-pill.warning {
+  background: var(--warning-row);
+  color: var(--warning);
+}
 .status-pill.cooling {
   background: var(--danger-bg);
   color: var(--danger);
@@ -2575,7 +2579,7 @@ nav > button.active > svg {
 .channel-remove-confirm {margin-top:16px;padding:16px;border-radius:10px;background:var(--danger-bg);font-size:12px;line-height:1.8;}
 .channel-access-actions {display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:14px;}
 .channel-remove-confirm .button {min-height:36px;}
-.channel-remove-confirm .button.danger {background:var(--danger);border-color:var(--danger);color:#fff;}
+.channel-remove-confirm .button.danger {background:var(--danger);border-color:var(--danger);color:var(--bg);}
 
 .channel-settings-overlay {z-index:85;background:var(--overlay);}
 .channel-settings-dialog {position:fixed;z-index:90;left:50%;top:50%;transform:translate(-50%,-50%);width:min(1060px,calc(100vw - 40px));height:min(760px,calc(100dvh - 40px));display:flex;flex-direction:column;overflow:hidden;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);}

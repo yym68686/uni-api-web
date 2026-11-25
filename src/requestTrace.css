@@ -123,7 +123,7 @@
   --trace-tone: var(--red, #db6672);
 }
 .trace-run .warning {
-  --trace-tone: var(--ink);
+  --trace-tone: var(--warning);
 }
 .trace-run .neutral {
   --trace-tone: var(--muted);
@@ -166,7 +166,7 @@
   border-radius: 0 5px 5px 0;
 }
 .trace-notice.warning {
-  color: #c4a246;
+  color: var(--warning);
 }
 .trace-route-decisions {
   margin: 0 24px 18px;
@@ -693,7 +693,7 @@
   --trace-tone: var(--red, #db6672);
 }
 .trace-detail-drawer .warning {
-  --trace-tone: #c4a246;
+  --trace-tone: var(--warning);
 }
 .trace-detail-drawer .neutral {
   --trace-tone: var(--muted);

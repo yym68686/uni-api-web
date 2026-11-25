@@ -65,8 +65,8 @@
   background: var(--subtle);
 }
 .request-log-table .trace-status.success { --trace-tone:var(--green); }
-.request-log-table .trace-status.failure { --trace-tone:var(--danger); }
-.request-log-table .trace-status.warning { --trace-tone:var(--danger); }
+.request-log-table .trace-status.failure { --trace-tone:var(--critical); }
+.request-log-table .trace-status:is(.warning,[data-interrupted]) { --trace-tone:var(--warning); }
 .request-log-id {
   display: block;
   border: 0;
