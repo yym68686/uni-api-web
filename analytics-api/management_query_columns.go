@@ -32,6 +32,7 @@ type managementColumnResultParts struct {
 	Availability map[string]json.RawMessage `json:"availability"`
 	Quality      map[string]json.RawMessage `json:"quality"`
 	Verdict      json.RawMessage            `json:"verdict"`
+	ServiceTiers json.RawMessage            `json:"service_tiers,omitempty"`
 }
 
 func managementColumns(rows []map[string]json.RawMessage) managementResultColumns {
@@ -78,6 +79,9 @@ func encodeManagementColumnPage(page managementPageResponse) (managementColumnPa
 			return out, err
 		}
 		meta[i] = map[string]json.RawMessage{"model": parts.Model, "checked_at": parts.CheckedAt, "verdict": parts.Verdict}
+		if parts.ServiceTiers != nil {
+			meta[i]["service_tiers"] = parts.ServiceTiers
+		}
 		availability[i], quality[i] = parts.Availability, parts.Quality
 	}
 	out.managementWirePage.Results = nil

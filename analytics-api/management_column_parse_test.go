@@ -72,6 +72,12 @@ func TestManagementColumnParserPreservesRawValuesAndReferences(t *testing.T) {
 			row := managementQueryRow{ID: fmt.Sprint(g), Target: subTarget{GroupID: int64(g)}}
 			for m := 0; m < 1+rng.Intn(8); m++ {
 				r := &subResult{Model: fmt.Sprintf("模型🙂<>&\u2028-\xff-%d", m), CheckedAt: rng.Int63(), Verdict: "pass"}
+				if m%3 == 0 {
+					r.ServiceTiers = map[string]subTierProbe{
+						"fast":      {Status: "supported", Observed: "priority", CheckedAt: r.CheckedAt},
+						"ultrafast": {Status: "inconclusive", CheckedAt: r.CheckedAt},
+					}
+				}
 				for _, probe := range []*subProbe{&r.Availability, &r.Quality} {
 					*probe = subProbe{CurlToken: "opaque", ID: "fixture-id", StartedAt: -1, RequestIDs: []string{}, RequestedModel: "alias", ResponseModel: r.Model, ModelMatch: "missing", Status: "success", TerminalStatus: "missing", Text: "\x00\"\\模型", Message: "complete diagnostic", TTFT: usageInt(0), ResponseCreatedMS: usageInt(-1), FirstResponseMS: usageInt(1), Protocol: "responses", Duration: math.MaxInt64, HTTPStatus: 200}
 					if rng.Intn(3) == 0 {

@@ -195,6 +195,8 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	var mu sync.Mutex
 	keys := map[string]subRemoteKey{}
 	var created, probes, refreshed atomic.Int32
+	var compactions atomic.Int32
+	speedProbes := map[string]int{}
 	var groupCount atomic.Int32
 	groupCount.Store(3)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -233,20 +235,38 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		if r.URL.Path == "/v1/responses" {
 			probes.Add(1)
 			if subFixtureCompaction(r) {
-				compactSSE(w, "gpt-5.6-terra", `[{"type":"compaction","encrypted_content":"opaque"}]`)
+				compactions.Add(1)
+				var in struct{ Model string }
+				_ = json.NewDecoder(r.Body).Decode(&in)
+				compactSSE(w, in.Model, `[{"type":"compaction","encrypted_content":"opaque"}]`)
 				return
 			}
 			var in struct {
+				Model string
+				Tier  string `json:"service_tier"`
 				Input []struct {
-					Content string `json:"content"`
+					Content json.RawMessage `json:"content"`
 				} `json:"input"`
 			}
-			json.NewDecoder(r.Body).Decode(&in)
-			answer := "test"
-			if in.Input[0].Content == checkPrompt {
-				answer = "21"
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in.Tier != "" {
+				if r.Header.Get("Authorization") != "Bearer key-secret-1" {
+					t.Error("unselected group was probed for a speed tier")
+				}
+				mu.Lock()
+				speedProbes[in.Model+"/"+in.Tier]++
+				mu.Unlock()
+				writeJSON(w, 200, map[string]any{"id": "resp-fixture", "model": in.Model, "status": "completed", "service_tier": in.Tier, "output": []any{}})
+				return
 			}
-			subSSE(w, answer)
+			answer := "test"
+			if len(in.Input) > 0 {
+				var prompt string
+				if json.Unmarshal(in.Input[0].Content, &prompt) == nil && prompt == checkPrompt {
+					answer = "21"
+				}
+			}
+			subSSE(w, answer, in.Model)
 			return
 		}
 		if r.Header.Get("Authorization") == "Bearer access-secret" {
@@ -401,20 +421,41 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	if w.Code != 202 {
 		t.Fatal(w.Body.String())
 	}
+	compactBefore := compactions.Load()
 	service.subWorkOne(context.Background())
-	if probes.Load() != int32(6*subFixtureSyncProbeCount()) {
-		t.Fatal("filter ignored", probes.Load())
+	var wantCompaction, wantSpeed int32
+	mu.Lock()
+	for _, model := range subModels {
+		if subCapabilityModel(model) {
+			wantCompaction++
+		}
+		if subTierModel(model) {
+			wantSpeed += 2
+			for _, tier := range []string{"fast", "ultrafast"} {
+				if speedProbes[model+"/"+tier] != 1 {
+					t.Errorf("expected exactly one %s probe for %s", tier, model)
+				}
+			}
+		}
+	}
+	gotSpeed := len(speedProbes)
+	mu.Unlock()
+	// Account sync tries one viable model for remote compaction. The
+	// explicit selection compacts every applicable model and tests two tiers.
+	wantProbes := int32(6*subFixtureSyncProbeCount()) - 1 + wantCompaction + wantSpeed
+	if probes.Load() != wantProbes || compactions.Load()-compactBefore != wantCompaction || gotSpeed != int(wantSpeed) {
+		t.Fatal("unexpected explicit model-check coverage", probes.Load(), wantProbes, compactions.Load()-compactBefore, gotSpeed)
 	}
 	request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", syncBody, token)
 	request("POST", "/v1/sub2api/accounts/"+added.ID+"/stop", "{}", token)
-	if service.subWorkOne(context.Background()) || probes.Load() != int32(6*subFixtureSyncProbeCount()) {
+	if service.subWorkOne(context.Background()) || probes.Load() != wantProbes {
 		t.Fatal("stopped work executed")
 	}
 	store.db.Exec(`UPDATE console_sub_accounts SET state='running',job_id='crashed',lease_until=now()-interval '1 minute' WHERE id=$1`, added.ID)
 	store.db.Exec(`UPDATE console_sub_targets SET state='running' WHERE account_id=$1 AND group_id=1`, added.ID)
 	service.subWorkOne(context.Background())
 	store.db.QueryRow(`SELECT state FROM console_sub_accounts WHERE id=$1`, added.ID).Scan(&state)
-	if state != "interrupted" || probes.Load() != int32(6*subFixtureSyncProbeCount()) {
+	if state != "interrupted" || probes.Load() != wantProbes {
 		t.Fatal("interrupted job replayed", state)
 	}
 	if w = request("DELETE", "/v1/sub2api/accounts/"+added.ID, "", token); w.Code != 200 {
