@@ -594,7 +594,7 @@ it.each([false, true])("preselects Fast and submits it with the correct evidence
   await waitFor(() => expect(fast).toBeChecked());
   expect(ultra).not.toBeChecked();
   expect(ultra).toBeDisabled();
-  expect(group.getByText(siteOnly ? "站点支持 · 业务 Key 待验证" : "已验证 1/1")).toBeVisible();
+  expect(group.getByText(siteOnly ? "分组已验证支持" : "已验证 1/1")).toBeVisible();
   if (!siteOnly) await user.click(fast);
   await user.click(add);
   await waitFor(() => expect(writes).toHaveLength(1));

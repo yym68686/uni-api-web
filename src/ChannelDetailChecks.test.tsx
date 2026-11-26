@@ -6,6 +6,7 @@ import { expect, it, vi } from "vitest";
 import { ChannelDetailChecks } from "./ChannelDetailChecks";
 import type { Channel } from "./types";
 import type { ConfiguredCheck } from "./channelManagement";
+import type { ChannelCheck } from "./ChannelChecks";
 const row = {
   source_id: "do",
   source_name: "DigitalOcean",
@@ -13,7 +14,7 @@ const row = {
   model: "codex-public-alias",
   upstream_model: "real-upstream",
 } as Channel;
-function mount(channel = row) {
+function mount(channel = row, quality?: ChannelCheck) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -21,7 +22,7 @@ function mount(channel = row) {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <Tooltip.Provider><ChannelDetailChecks row={channel} owner="audit" /></Tooltip.Provider>
+        <Tooltip.Provider><ChannelDetailChecks row={channel} owner="audit" quality={quality} /></Tooltip.Provider>
       </QueryClientProvider>,
     ),
   };
@@ -221,9 +222,36 @@ it.each(["claude-opus-4-8","gemini-3.1-pro","deepseek"])('does not offer Codex c
  for(const name of ['Tool use 检测','远程压缩检测']) {
   const button=screen.getByRole('button',{name});expect(button).toBeDisabled();await user.click(button);
  }
- await waitFor(() => expect(screen.getAllByText('不适用')).toHaveLength(4));
+ await waitFor(() => expect(screen.getAllByText('不适用')).toHaveLength(5));
  expect(screen.getByRole('button',{name:'可用性检测'})).toBeEnabled();
  expect(fetcher.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
+it("keeps fingerprint actions and the latest quality summary in the independent check list", async () => {
+  const writes: unknown[] = [];
+  const model = "gpt-6.2-sol";
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/model-fingerprints")) {
+      if (init?.method === "POST") writes.push(JSON.parse(String(init.body)));
+      return Response.json({data: [], supported_models: [model]});
+    }
+    return Response.json({data: []});
+  }));
+  mount({...row, model}, {
+    source_id: row.source_id!, provider: row.provider, model: "gpt-6-astra",
+    verdict: "pass", checked_at: 100, duration_ms: 50, text: "",
+    history: {total: 2, successful: 2, passed: 2},
+  });
+  const section = screen.getByRole("region", {name: "渠道独立检测"});
+  const action = within(section).getByRole("button", {name: "指纹检测"});
+  const grid = action.closest(".detail-check-grid") as HTMLElement;
+  expect(within(grid).getByRole("button", {name: "降智检测"})).toBeVisible();
+  expect(within(grid).getByText("不降智")).toHaveClass("positive");
+  expect(within(grid).getByText("100.0%")).toBeVisible();
+  expect(section.lastElementChild).toBe(grid);
+  await waitFor(() => expect(action).toBeEnabled());
+  await userEvent.setup().click(action);
+  expect(writes).toEqual([{targets: [{source_id: row.source_id, provider: row.provider, model}]}]);
 });
 
 it("independently submits Fast and Ultrafast with the verified inventory scope and preserves separate statuses", async () => {
@@ -236,9 +264,9 @@ it("independently submits Fast and Ultrafast with the verified inventory scope a
   const confirm = vi.fn(() => false);
   vi.stubGlobal("confirm", confirm);
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes("channel-management?view=service-tiers")) return Response.json({data:[{
-      source_id: channel.source_id, provider: channel.provider, models:[model], engine:"codex", service_tier_scope:scope,
-    }], unavailable_sources:[]});
+    if (url.includes("/service-tier-target?")) return Response.json({
+      applicable:true, scope, group_results: {fast:{status:"supported", observed:"priority", checked_at:now - 10}},
+    });
     if (init?.method === "POST") {
       const body = JSON.parse(String(init.body));
       writes.push(body);
@@ -251,6 +279,8 @@ it("independently submits Fast and Ultrafast with the verified inventory scope a
   const fast = screen.getByRole("button",{name:"Fast 检测"});
   const ultra = screen.getByRole("button",{name:"Ultrafast 检测"});
   await waitFor(() => expect(fast).toBeEnabled());
+  expect(within(fast.closest(".detail-check-item") as HTMLElement).getByText("已验证支持")).toHaveAttribute("title", expect.stringContaining("分组检测"));
+  expect(within(ultra.closest(".detail-check-item") as HTMLElement).getByText("未检测")).toBeVisible();
   const user = userEvent.setup();
   await user.click(fast);
   await waitFor(() => expect(fast).toBeDisabled());
@@ -269,9 +299,10 @@ it("independently submits Fast and Ultrafast with the verified inventory scope a
   await waitFor(() => expect(within(ultra.closest(".detail-check-item") as HTMLElement).getByText("未命中")).toHaveClass("detail-check-warning"));
   expect(fast).toBeEnabled();
   expect(ultra).toBeEnabled();
-  // A previous source/model/credential receipt cannot claim support.
+  // A stale channel scope falls back to the matching group result.
   checks = checks.map(c => ({...c, fingerprint:"b".repeat(64)}));
   await act(async () => { await client.invalidateQueries({queryKey:["configured-checks"]}); });
-  await waitFor(() => expect(within(fast.closest(".detail-check-item") as HTMLElement).getByText("未确认")).toBeVisible());
+  await waitFor(() => expect(within(fast.closest(".detail-check-item") as HTMLElement).getByText("已验证支持")).toHaveAttribute("title", expect.stringContaining("分组检测")));
+  expect(within(ultra.closest(".detail-check-item") as HTMLElement).getByText("未确认")).toBeVisible();
   vi.unstubAllGlobals();
 });

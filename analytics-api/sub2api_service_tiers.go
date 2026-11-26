@@ -15,8 +15,8 @@ func subTierModel(model string) bool {
 	return subCapabilityModel(model) && subModelProtocol(model) == "responses"
 }
 
-// Site probes describe the current test credential only. They can inform a
-// channel import preference, but cannot verify a separate business key.
+// Site probes record the observed tier for a specific group and upstream
+// model. An import can bind that result to the group's installed channel.
 type subTierProbe struct {
 	Status    string `json:"status"`
 	Observed  string `json:"observed,omitempty"`

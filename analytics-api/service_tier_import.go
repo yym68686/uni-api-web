@@ -6,19 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
 
-// Site results recommend a preference for the selected upstream models, but
-// never become routing evidence for the separately provisioned business Key.
-func (s *Service) siteTierImportCounts(ctx context.Context, account string, group int64, models map[string]string) (map[string]int, error) {
-	counts := map[string]int{}
-	upstreams := make([]string, 0, len(models))
-	for _, upstream := range models {
-		upstreams = append(upstreams, upstream)
-	}
+func (s *Service) groupTierResults(ctx context.Context, account string, group int64, upstreams []string) (map[string]map[string]subTierProbe, error) {
 	rows, err := s.control.db.QueryContext(ctx, `SELECT model,result->'service_tiers' FROM console_sub_models
  WHERE account_id=$1 AND group_id=$2 AND model=ANY($3) AND result ? 'service_tiers'`, account, group, upstreams)
 	if err != nil {
@@ -40,6 +35,15 @@ func (s *Service) siteTierImportCounts(ctx context.Context, account string, grou
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
+	return results, nil
+}
+
+func (s *Service) siteTierImportCounts(ctx context.Context, account string, group int64, models map[string]string) (map[string]int, error) {
+	counts := map[string]int{}
+	results, err := s.groupTierResults(ctx, account, group, slices.Collect(maps.Values(models)))
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().Unix()
 	for _, upstream := range models {
 		for tier, result := range results[upstream] {
@@ -59,6 +63,38 @@ type serviceTierImportBinding struct {
 type serviceTierImportPlan struct {
 	set    map[string]any
 	counts map[string]int
+}
+
+// The site probe covers a group and wire model. Build a fresh binding
+// for the installed configuration without contacting the upstream again.
+func (s *Service) planGroupTierImport(ctx context.Context, src controlSource, provider, base, key string, models map[string]string, in subImportInput) (serviceTierImportPlan, error) {
+	plan := serviceTierImportPlan{set: map[string]any{}, counts: map[string]int{}}
+	results, err := s.groupTierResults(ctx, in.AccountID, in.GroupID, slices.Collect(maps.Values(models)))
+	if err != nil {
+		return plan, err
+	}
+	admin, err := serviceTierAdmin(src)
+	if err != nil {
+		return plan, err
+	}
+	bindings, err := serviceTierImportBindings(ctx, admin, provider, base, key, models)
+	if err != nil {
+		return plan, err
+	}
+	now := time.Now().Unix()
+	for public, upstream := range models {
+		binding := bindings[public].Binding
+		if !serviceTierDigest(binding) {
+			continue
+		}
+		for tier, result := range results[upstream] {
+			if in.ServiceTierSiteChoices[tier] && result.Status == "supported" && serviceTierFresh(result.CheckedAt, now) {
+				plan.set["/preferences/service_tier_evidence/"+binding+"/"+tier] = result.CheckedAt
+				plan.counts[tier]++
+			}
+		}
+	}
+	return plan, nil
 }
 
 func validTierChoices(v map[string]bool) bool {

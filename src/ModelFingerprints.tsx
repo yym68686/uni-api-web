@@ -3,7 +3,7 @@ import { useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { Check, ChevronDown, CircleHelp, Fingerprint, X } from "./icons";
+import { Check, ChevronDown, CircleHelp, Fingerprint, Play, RefreshCw, X } from "./icons";
 import { ApiError, controlRequest } from "./api";
 import { channelMembers, useChannelManagement } from "./channelManagement";
 import type { ManagementRow } from "./channelManagement";
@@ -324,7 +324,7 @@ export function FingerprintCell({ entries, error, loading, supportedModels = [],
     </Dialog.Portal>
   </Dialog.Root>;
 }
-export function FingerprintPanel({ targets, revisions, onlySupported }: { targets: FingerprintTarget[]; revisions?: Record<string,string>; onlySupported?: boolean }) {
+export function FingerprintPanel({ targets, revisions, onlySupported, inline }: { targets: FingerprintTarget[]; revisions?: Record<string,string>; onlySupported?: boolean; inline?: boolean }) {
   const query = useModelFingerprints(), client = useQueryClient();
   const detailId = useId();
   const submitting = useRef(new Set<string>());
@@ -347,10 +347,7 @@ export function FingerprintPanel({ targets, revisions, onlySupported }: { target
   }
   const visible = onlySupported ? targets.filter(t => query.supportedModels.includes(t.model) || query.index.has(fingerprintKey(t))) : targets;
   if (!visible.length) return null;
-  return <section className="fingerprint-panel">
-    <h3><Fingerprint size={16}/>模型指纹 <Tip text={fingerprintNote}><CircleHelp size={13}/></Tip></h3>
-    {query.isError && <p role="alert">{fingerprintReadMessage(query.error)} <button className="button small" onClick={() => void query.refetch()}>重试</button></p>}
-    {visible.map((target, i) => {
+  const rows = visible.map((target, i) => {
       const key = fingerprintKey(target);
       let record = query.index.get(key);
       if (record?.state === "done" && target.source_id && fingerprintKey(record) === key && revisions && record.revision !== revisions[JSON.stringify([target.source_id,target.provider])]) record = undefined;
@@ -360,17 +357,19 @@ export function FingerprintPanel({ targets, revisions, onlySupported }: { target
       const supported = query.supportedModels.includes(target.model);
       const actionTarget = pending && record ? {source_id:record.source_id,provider:record.provider,account_id:record.account_id,group_id:record.group_id,model:record.model} : target;
       const attempt = attempts[fingerprintKey(actionTarget)] ?? attempts[key];
-      const availableDetails = Boolean(result || record?.message);
+      const availableDetails = Boolean(result || record?.message || inline && attempt?.error);
       const open = expanded === key;
       const unavailable = !query.isError && !query.isPending && !supported;
-      return <div className="fingerprint-detail" key={key}>
-        <div className="fingerprint-heading"><strong title={target.model}>{target.model}</strong>{query.isError ? <span className="muted">待启用</span> : unavailable && !record ? <span className="muted" title="指纹检测服务待更新">指纹检测服务待更新</span> : <FingerprintStatus record={record}/>}
-          {availableDetails && <button className="button small icon-button fingerprint-disclosure" aria-label="检测详情" aria-expanded={open} aria-controls={`${detailId}-${i}`} title="检测详情" onClick={() => setExpanded(open ? undefined : key)}><ChevronDown size={14}/></button>}
-          {unavailable && <button className="button small icon-button" aria-label="重新检查" title="重新检查" onClick={() => void query.refetch()}><Fingerprint size={14}/></button>}
-          <button className="button small" disabled={attempt?.busy || query.isError || query.isPending || (!pending && !supported)} aria-busy={attempt?.busy} onClick={() => void run(actionTarget, pending)}>{pending ? "取消检测" : partial ? "继续采样" : "检测指纹"}</button>
-        </div>
-        {attempt?.error && <p role="alert">{attempt.error}</p>}
-        {availableDetails && <div className="fingerprint-diagnostics" hidden={!open} id={`${detailId}-${i}`}>
+      const label = pending ? "取消检测" : partial ? "继续采样" : inline ? "指纹检测" : "检测指纹";
+      const action = <button className="button small" type="button"
+        title={inline ? `${target.model} · ${fingerprintNote}` : undefined}
+        disabled={attempt?.busy || query.isError || query.isPending || (!pending && !supported)}
+        aria-busy={attempt?.busy} onClick={() => void run(actionTarget, pending)}>
+        {inline && (attempt?.busy ? <Spinner small/> : <Play size={13}/>)} {label}
+      </button>;
+      const disclosure = availableDetails && <button className="button small icon-button fingerprint-disclosure" type="button" aria-label="检测详情" aria-expanded={open} aria-controls={`${detailId}-${i}`} title="检测详情" onClick={() => setExpanded(open ? undefined : key)}><ChevronDown size={14}/></button>;
+      const diagnostics = availableDetails && <div className="fingerprint-diagnostics" hidden={!open} id={`${detailId}-${i}`}>
+          {inline && attempt?.error && <p className="negative">{attempt.error}</p>}
           {record?.message && <p className="muted">{record.message}</p>}
           {result && <>
           {result.checked_at > 0 && <time className="muted" dateTime={new Date(result.checked_at * 1000).toISOString()}>{time(result.checked_at)}</time>}
@@ -381,10 +380,35 @@ export function FingerprintPanel({ targets, revisions, onlySupported }: { target
           {partialFingerprint(result) ? <FingerprintCandidateRanking partial={result}/> :
             result.candidates?.length > 0 && <ol>{result.candidates.map(c => <li key={c.model}>{c.display_name} <span className="mono">{rate(c.probability)}</span></li>)}</ol>}
           {result.samples?.filter(s=>s.state==="error").map(s=><p key={s.request_id}>{fingerprintSampleFailure(s).detail}</p>)}
-          <small className="muted">lm-detector · {result.reference_commit?.slice(0,12)}</small>
+          {result.reference_commit && <small className="muted">lm-detector · {result.reference_commit.slice(0,12)}</small>}
           </>}
-        </div>}
+        </div>;
+      if (inline) return <div className="detail-check-item detail-check-fingerprint" key={key}>
+        {action}
+        <span role="status" className="muted">
+          {attempt?.busy ? "正在提交…" : attempt?.error ? <span className="negative">提交失败</span> :
+            query.isError ? <span title={fingerprintReadMessage(query.error)}>读取失败</span> :
+            query.isPending ? "读取中…" : unavailable && !record ? "不适用" : <FingerprintStatus record={record}/>}
+        </span>
+        {query.isError ? <button className="button small icon-button fingerprint-disclosure" type="button"
+          aria-label="指纹检测读取失败 · 重试" title="重试" onClick={() => void query.refetch()}><RefreshCw size={14}/></button> : disclosure}
+        {attempt?.error && <span className="sr-only" role="alert">{attempt.error}</span>}
+        {diagnostics}
       </div>;
-    })}
+      return <div className="fingerprint-detail" key={key}>
+        <div className="fingerprint-heading"><strong title={target.model}>{target.model}</strong>{query.isError ? <span className="muted">待启用</span> : unavailable && !record ? <span className="muted" title="指纹检测服务待更新">指纹检测服务待更新</span> : <FingerprintStatus record={record}/>}
+          {disclosure}
+          {unavailable && <button className="button small icon-button" aria-label="重新检查" title="重新检查" onClick={() => void query.refetch()}><Fingerprint size={14}/></button>}
+          {action}
+        </div>
+        {attempt?.error && <p role="alert">{attempt.error}</p>}
+        {diagnostics}
+      </div>;
+    });
+  if (inline) return <>{rows}</>;
+  return <section className="fingerprint-panel">
+    <h3><Fingerprint size={16}/>模型指纹 <Tip text={fingerprintNote}><CircleHelp size={13}/></Tip></h3>
+    {query.isError && <p role="alert">{fingerprintReadMessage(query.error)} <button className="button small" onClick={() => void query.refetch()}>重试</button></p>}
+    {rows}
   </section>;
 }

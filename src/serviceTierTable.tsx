@@ -74,7 +74,7 @@ export function ServiceTierCell({tier, targets, index, loading, failed, siteStat
 }) {
   if (!siteStatuses.length && targets.length > 0 && (failed || loading)) return <span className="muted">{failed ? "读取失败" : "读取中…"}</span>;
   const statuses = siteStatuses.length ? siteStatuses : targets.map(target => tierResultStatus(tierRecord(index, tier, target), target));
-  const detail = siteStatuses.length ? " · 站点检测 Key，不代表已接入渠道的业务凭据" : "";
+  const detail = siteStatuses.length ? " · 分组检测" : "";
   const verified = statuses.filter(s => s === "supported").length;
   if (verified && verified !== statuses.length)
     return <span className="positive" title={`${verified}/${statuses.length} 个渠道模型已验证支持${detail}`}>部分支持 · {verified}/{statuses.length}</span>;

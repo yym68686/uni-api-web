@@ -648,6 +648,8 @@ function Sub2apiImportForm({
         "sub-import-options",
         "channel-routes",
         "channel-management",
+        "service-tier-members",
+        "detail-tier-target",
       ].map((name) => client.invalidateQueries({ queryKey: [name] })),
     );
   }
@@ -1329,9 +1331,9 @@ function Sub2apiImportForm({
                         checked={tierIsEnabled(tier)} disabled={busy || !tierAvailable(tier)}
                         onChange={event => setTierOverride({destination:tierDestination, choices:{...tierChoices, [tier]:event.target.checked}})}/>
                       {serviceTierName[tier]}
-                      <small className={verifiedTierCount(tier) ? "positive" : "muted"}>
+                      <small className={tierAvailable(tier) ? "positive" : "muted"}>
                         {verifiedTierCount(tier) ? `已验证 ${verifiedTierCount(tier)}/${tierPreview.data?.total}` :
-                          siteTierCount(tier) ? "站点支持 · 业务 Key 待验证" :
+                          siteTierCount(tier) ? "分组已验证支持" :
                           waitingForTiers ? "核对中…" : tierPreview.isError || tierPreview.data?.verification_unavailable ? "未能验证" : "未验证"}
                       </small>
                     </label>)}

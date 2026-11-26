@@ -21,6 +21,13 @@ const fixtureRouting = new Map();
 const tierRouting = provider => fixtureRouting.get(provider) || {fast:'enabled',ultrafast:'disabled_verified'};
 for (const member of managed) member.service_tier_scope = tierScope;
 const fixtureChecks = [];
+const fingerprintFixture = {
+  source_id: channels[0].source_id, provider: channels[0].provider, model: channels[0].model,
+  state: 'done', message: '', revision: 'audit-only', result: {
+    model: channels[0].model, status: 'match', probability: 0.998, decision: 'scored',
+    expected_class: channels[0].model, used_outputs: 3, checked_at: Math.floor(at/1000), candidates: [],
+  },
+};
 const testAccount = {id:'wallet-fixture',name:'跨区域演示钱包账号',base:'https://long-wallet-site.example.test/account-management',email:'visual-audit@example.test',provider_kind:'sub2api',state:'idle',message:'',synced_at:Math.floor(at/1000),targets:[]};
 const logs = Array.from({length:16},(_,i)=>({event_id:'evt-'+i,source_id:sources[i%3].id,instance_id:'fixture-instance',request_id:'request-audit-a-long-deliberate-trace-id-for-layout-review-'+String(i).padStart(4,'0'),trace_id:'trace-'+i,key_id:'demo',model:models[i%4],endpoint:'/v1/responses',stream:i%4!==3,at_ms:at-i*7300,started_ms:at-i*7300-3900,status:i%3===1?502:200,outcome:i%3===1?'failed':'success',result:i%3===1?'failed':'success',failure_reason:i%3===1?'missing_response_completed':'',response_headers_status:200,duration_ms:3901+i*377,dispatch_ms:88+i*8,response_created_ms:344+i*11,first_text_ms:i%4!==3?1500+i*127:null,input_tokens:19293+i*367,output_tokens:548+i*208,cache_read_tokens:9810}));
 for (const [i, log] of logs.entries()) {
@@ -110,6 +117,17 @@ const plugin = {
       if (path.endsWith('/channel-options')) return json({revision:'r1',keys:scope(keys).map(k=>({...k,key_id:'demo'})),channels:[]});
       if (path.endsWith('/channel-controls')) return json({revision:'r1',rules:[]});
       if (path.endsWith('/service-tier-routing')) return json({scope:tierScope,routing:tierRouting(url.searchParams.get('provider'))});
+      if (path.endsWith('/service-tier-target')) {
+        const candidate = managed.find(member => member.source_id === sid && member.provider === url.searchParams.get('provider'));
+        const model = url.searchParams.get('model');
+        return json({scope:tierScope, applicable: !!candidate?.models.includes(model) && model.startsWith('gpt-'),
+          group_results: candidate?.provider === longName ? {fast:{status:'supported',observed:'priority',checked_at:Math.floor(Date.now()/1000)}} : {}});
+      }
+      if (path.endsWith('/model-fingerprints')) return json({data:[fingerprintFixture],supported_models:models});
+      if (path.endsWith('/sources/all/channel-checks')) {
+        return json({data:[{source_id:channels[0].source_id,provider:longName,model:'gpt-6-astra',
+          verdict:'pass',checked_at:Math.floor(at/1000),duration_ms:520,history:{total:2,successful:2,passed:2}}]});
+      }
       if (path.endsWith('/channel-settings')) {
         const provider=url.searchParams.get('provider'), member=managed.find(m=>m.provider===provider&&m.source_id===sid);
         if (!member) return json({message:'模拟渠道不存在'},404);

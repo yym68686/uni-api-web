@@ -370,6 +370,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/channel-management/checks", s.queueConfiguredChecks)
 	mux.HandleFunc("POST /v1/sources/{id}/service-tier-evidence", s.publishServiceTier)
 	mux.HandleFunc("GET /v1/sources/{id}/service-tier-routing", s.serviceTierRouting)
+	mux.HandleFunc("GET /v1/sources/{id}/service-tier-target", s.serviceTierTarget)
 	mux.HandleFunc("POST /v1/sources/{id}/service-tier-routing", s.applyServiceTierRouting)
 	mux.HandleFunc("GET /v1/channel-management/detection-settings", s.channelDetectionSettings)
 	mux.HandleFunc("PATCH /v1/channel-management/detection-settings", s.channelDetectionSettings)

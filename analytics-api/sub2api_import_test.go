@@ -81,7 +81,12 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	created := 0
 	imports := 0
 	revision := "boot:1"
+	callerKey := "key-" + strings.Repeat("a", 64)
+	provider := subProviderName(account, 7, callerKey)
+	rawScope := strings.Repeat("c", 64)
 	startSyncOnRead := false
+	changedIdentity := false
+	exposeInstalled := false
 	var last map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		success := func(data any) { writeJSON(w, 200, map[string]any{"code": 0, "data": data}) }
@@ -120,6 +125,38 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 			t.Error("wrong gateway auth")
 		}
 		switch r.URL.Path {
+		case serviceTierProbePath:
+			var input struct {
+				Verify    bool   `json:"verify_only"`
+				Provider  string `json:"provider"`
+				Model     string `json:"model"`
+				Candidate *struct {
+					APIKey string `json:"api_key"`
+				} `json:"candidate"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil || !input.Verify || input.Provider != provider {
+				t.Error("expected local verification for exact channel", err)
+				http.Error(w, "unexpected probe", 400)
+				return
+			}
+			if input.Candidate == nil {
+				if input.Model != checkModel {
+					t.Errorf("unexpected public model %q", input.Model)
+				}
+				writeJSON(w, 200, serviceTierResult{Status: "ready", Scope: rawScope, Binding: strings.Repeat("b", 64), UpstreamModel: checkModel})
+				return
+			}
+			if input.Candidate.APIKey != "business-secret" {
+				t.Error("expected local binding for the business key")
+			}
+			writeJSON(w, 200, map[string]any{"models": map[string]serviceTierImportBinding{
+				checkModel: {Binding: strings.Repeat("b", 64)},
+			}})
+		case "/v1/channel-settings/providers":
+			writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{
+				Provider: provider, Base: "https://site.example/v1/responses", Temporary: true,
+				IdentityChanged: changedIdentity, ServiceTierScope: rawScope,
+			}}})
 		case "/v1/channel-controls":
 			if startSyncOnRead {
 				startSyncOnRead = false
@@ -127,7 +164,11 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 					t.Error(err)
 				}
 			}
-			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_import": true, "temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "temporary_channels": []any{}})
+			temporary := []any{}
+			if exposeInstalled {
+				temporary = append(temporary, map[string]any{"provider": provider, "api_key_id": callerKey, "models": []string{checkModel}})
+			}
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_import": true, "temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "temporary_channels": temporary})
 		case "/v1/channel-settings/export":
 			writeJSON(w, 200, map[string]any{"revision": revision, "channel_settings": map[string]any{}, "temporary_definitions": map[string]any{}})
 		case "/v1/model-channels":
@@ -184,7 +225,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	if previewResponse.Code != 200 || json.Unmarshal(previewResponse.Body.Bytes(), &options) != nil ||
 		options.Total != 1 || options.SiteSupported["fast"] != 1 || len(options.SiteSupported) != 1 ||
 		len(options.Verified) != 0 || created != 0 || imports != 0 {
-		t.Fatal("first import preview should recommend Fast without creating a key or claiming business verification", previewResponse.Code, previewResponse.Body.String())
+		t.Fatal("first import preview should recommend Fast from the group without creating a key", previewResponse.Code, previewResponse.Body.String())
 	}
 	if w := request([]string{checkModel}, "boot:1", foreign); w.Code != 404 {
 		t.Fatal("foreign import allowed", w.Code)
@@ -270,12 +311,43 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	}
 	var preferences struct{ Set map[string]any }
 	if err := json.Unmarshal(saved.Settings[saved.Channels[0].Provider], &preferences); err != nil ||
-		len(preferences.Set) != 1 || preferences.Set["/preferences/service_tier_disabled/fast"] != false {
-		t.Fatal("expected Fast enabled without promoting a site probe to business-key evidence", preferences.Set, err)
+		len(preferences.Set) != 3 || preferences.Set["/preferences/service_tier_disabled/fast"] != false ||
+		preferences.Set["/preferences/service_tier_disabled/ultrafast"] != true ||
+		preferences.Set["/preferences/service_tier_evidence/"+strings.Repeat("b", 64)+"/fast"] != float64(now) {
+		t.Fatal("expected group Fast evidence with only Fast enabled", preferences.Set, err)
 	}
 	if strings.Contains(w.Body.String(), "secret") {
 		t.Fatal("credential leak")
 	}
+	exposeInstalled = true
+	targetRequest := func(cookie string) (int, map[string]subTierProbe) {
+		q := url.Values{"provider": {provider}, "model": {checkModel}}
+		r := httptest.NewRequest("GET", "/v1/sources/"+sourceID+"/service-tier-target?"+q.Encode(), nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		var result struct {
+			Applicable   bool                    `json:"applicable"`
+			Scope        string                  `json:"scope"`
+			GroupResults map[string]subTierProbe `json:"group_results"`
+		}
+		if w.Code == 200 && (json.Unmarshal(w.Body.Bytes(), &result) != nil || !result.Applicable || !serviceTierDigest(result.Scope) || result.Scope == rawScope) {
+			t.Fatalf("invalid live target: %s", w.Body.String())
+		}
+		return w.Code, result.GroupResults
+	}
+	if code, results := targetRequest(session); code != 200 || results["fast"].Status != "supported" || results["fast"].CheckedAt != now {
+		t.Fatal("imported channel could not read the result from its own group", code, results)
+	}
+	if _, results := targetRequest(foreign); len(results) != 0 {
+		t.Fatal("foreign group results exposed", results)
+	}
+	changedIdentity = true
+	if code, results := targetRequest(session); code != 200 || len(results) != 0 {
+		t.Fatal("new identity must not inherit results from its former group", code, results)
+	}
+	changedIdentity = false
+	exposeInstalled = false
 	if w = request([]string{checkModel}, "boot:1", session); w.Code != 409 {
 		t.Fatal("stale revision accepted")
 	}

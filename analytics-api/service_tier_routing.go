@@ -17,6 +17,88 @@ type serviceTierRoutingChoice struct {
 	Enabled  bool   `json:"enabled"`
 }
 
+// Resolve the exact live provider/model, not a cached management inventory.
+// verify_only is local to the gateway and does not start an upstream request.
+func (s *Service) serviceTierTarget(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	provider, model := q.Get("provider"), q.Get("model")
+	if !validTierRoutingProvider(provider) || !validProbeModel(model) {
+		http.Error(w, "无效渠道或模型", 400)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	src, err := s.control.source(ctx, r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "来源不存在", 404)
+		return
+	}
+	admin, err := serviceTierAdmin(src)
+	if err != nil {
+		http.Error(w, err.Error(), 403)
+		return
+	}
+	target, err := serviceTierGateway(ctx, admin, provider, model, "fast", "", true)
+	if err != nil {
+		http.Error(w, "无法读取当前渠道档位检测范围", 503)
+		return
+	}
+	out := map[string]any{"applicable": target.Status == "ready", "scope": serviceTierScope(src, target.Scope)}
+	if target.Status == "ready" && target.UpstreamModel != "" && generatedSubProvider(provider) {
+		owner, _ := s.controlUser(r)
+		out["group_results"], err = s.installedGroupTierResults(ctx, src, owner, provider, target.UpstreamModel, target.Scope)
+		if err != nil {
+			http.Error(w, "无法读取分组档位检测结果", 503)
+			return
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, 200, out)
+}
+
+func (s *Service) installedGroupTierResults(ctx context.Context, src controlSource, owner, provider, upstream, scope string) (map[string]subTierProbe, error) {
+	providers, err := effectiveProviders(ctx, src, true)
+	if err != nil {
+		return nil, err
+	}
+	var base string
+	for _, p := range providers {
+		if p.Provider == provider && p.Temporary && !p.IdentityChanged && p.ServiceTierScope == scope {
+			base = p.Base
+			break
+		}
+	}
+	if base == "" {
+		return nil, nil
+	}
+	raw, _, err := subGateway(ctx, src, http.MethodGet, "/v1/channel-controls", nil)
+	if err != nil {
+		return nil, err
+	}
+	var state subGatewayControls
+	if err := decodeMap(raw, &state); err != nil {
+		return nil, err
+	}
+	refs, err := s.control.subChannelRefs(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	index := newSubProviderRefIndex(refs)
+	for _, channel := range state.Temporary {
+		if channel.Provider != provider || channel.IdentityChanged || channel.KeyID == "" {
+			continue
+		}
+		matches := index.matches(provider, channel.KeyID, base)
+		if len(matches) != 1 {
+			return nil, nil
+		}
+		ref := matches[0]
+		results, err := s.groupTierResults(ctx, ref.Account, ref.Group, []string{upstream})
+		return results[upstream], err
+	}
+	return nil, nil
+}
+
 func (s *Service) serviceTierRouting(w http.ResponseWriter, r *http.Request) {
 	src, err := s.control.source(r.Context(), r.PathValue("id"))
 	if err != nil {

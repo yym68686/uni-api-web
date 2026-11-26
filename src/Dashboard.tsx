@@ -59,7 +59,6 @@ import {
   ChannelCheckAction,
   LatestChannelCheck,
   useChannelChecks,
-  CheckVerdict,
   withSubQuality,
   useSubQualitySummary,
 } from "./ChannelChecks";
@@ -69,7 +68,7 @@ import {
   ChannelRowActions,
 } from "./ChannelControls";
 import { useChannelRouteDrag } from "./ChannelRouteDrag";
-import { useSubImports, boundGroups } from "./sub2apiImports";
+import { useSubImports } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
 import { DetailDrawer } from "./DetailDrawer";
@@ -87,7 +86,6 @@ import { ChannelDetailChecks } from "./ChannelDetailChecks";
 import { FingerprintCell, FingerprintColumnHeader, fingerprintNote, observedFingerprints, useModelFingerprints } from "./ModelFingerprints";
 import type { GroupRejection } from "./fingerprintRejections";
 import type { ChannelTimeseriesProps } from "./channelTimeseries";
-import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
 import { channelBilling, channelBillingHint } from "./channelBilling";
@@ -502,7 +500,6 @@ function Detail({
   upstreamGroup?: GroupRejection;
 }) {
   if (!row) return null;
-  const installed = imports?.data?.data.find((item) => item.source_id === row?.source_id && item.provider === row?.provider);
   const hasControls = !!row.source_id && trend.connection.account;
   return (
     <DetailDrawer key={rowId(row)} title={<SiteLink base={site} provider={row.provider}>{channelName(row)}</SiteLink>}
@@ -569,15 +566,9 @@ function Detail({
               <ChannelDetailTrends key={`${providerId(row)}:${row.model}:trends`} row={row} {...trend} />
         </> },
         ...(imports ? [{ id: "models", label: "模型", content: <ChannelModels key={`models:${providerId(row)}`} row={row} imports={imports} catalog={catalog} keyId={trend.keyId} session={session} /> }] : []),
-        ...(hasControls ? [{ id: "checks", label: "检测", content: <>
-              <ChannelDetailChecks key={`${providerId(row)}:${row.model}:checks`} row={row} owner={session} />
-              <section className="detail-section">
-                <h3>降智检测</h3>
-                {check ? <div className="quality-status-stack"><Tip text={check.history && check.history.total > 0 ? qualityTooltip(check.history, check.checked_at, check.origin) : `最近检测：${dateTime(check.checked_at)}`}><CheckVerdict result={check} /></Tip><QualityProbability history={check.history} checkedAt={check.checked_at} origin={check.origin} /></div> : <p className="muted">暂无检测结果。</p>}
-                {row.source_id && <QualityHistory key={providerId(row)} path={`/v1/sources/${encodeURIComponent(row.source_id)}/channel-checks/history?${new URLSearchParams({ provider: row.provider })}`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title={check?.history_scope === "account_group" ? "共享检测记录" : "渠道检测记录"} />}
-                {check?.history_scope !== "account_group" && boundGroups(installed).map(group => <QualityHistory key={`${group.account_id}:${group.group_id}`} path={`/v1/sub2api/accounts/${encodeURIComponent(group.account_id)}/groups/${group.group_id}/quality-history`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title={`sub2api 检测记录 · 分组 #${group.group_id}`} />)}
-              </section>
-        </> }, { id: "settings", label: "设置", content: <section className="detail-section" aria-label="渠道设置与访问">
+        ...(hasControls ? [{ id: "checks", label: "检测", content:
+          <ChannelDetailChecks key={`${providerId(row)}:${row.model}:checks`} row={row} owner={session} quality={check} />
+        }, { id: "settings", label: "设置", content: <section className="detail-section" aria-label="渠道设置与访问">
                 <div className="detail-channel-actions"><h3>设置与访问</h3><ChannelSettings row={row}/></div>
                 <ChannelAccess key={`access:${providerId(row)}`} row={row} imports={imports} onRemoved={onClose} />
         </section> }] : []),

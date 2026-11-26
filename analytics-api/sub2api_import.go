@@ -467,38 +467,44 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 		if err != nil {
 			return nil, code, err
 		}
-		if part.Protocol == "responses" && len(in.ServiceTierEnabled)+len(in.ServiceTierSiteChoices) > 0 {
-			set := map[string]any{}
-			if len(in.ServiceTierEnabled) > 0 {
+		if part.Protocol == "responses" {
+			// These are opt-outs at the gateway. Omitting an unchecked tier
+			// would silently leave it on after import, even without evidence.
+			set := map[string]any{
+				"/preferences/service_tier_disabled/fast":      true,
+				"/preferences/service_tier_disabled/ultrafast": true,
+			}
+			if in.ServiceTierEnabled["fast"] || in.ServiceTierEnabled["ultrafast"] {
 				plan, err := s.planServiceTierImport(ctx, src, name, channel.Base, upstreamKey, part.Models)
 				if err != nil {
 					return nil, 409, errors.New("档位检测证据无法确认，请刷新后重试")
 				}
-				set = importTierSettings(plan, in)
+				for path, value := range importTierSettings(plan, in) {
+					set[path] = value
+				}
 				for tier, count := range plan.counts {
 					appliedTiers[tier] = count > 0
 				}
 			}
-			if len(in.ServiceTierSiteChoices) > 0 {
-				counts, err := s.siteTierImportCounts(ctx, in.AccountID, in.GroupID, part.Models)
+			if in.ServiceTierSiteChoices["fast"] || in.ServiceTierSiteChoices["ultrafast"] {
+				shared, err := s.planGroupTierImport(ctx, src, name, channel.Base, upstreamKey, part.Models, in)
 				if err != nil {
 					return nil, 409, errors.New("站点档位检测结果无法确认，请刷新后重试")
 				}
-				for tier, enabled := range in.ServiceTierSiteChoices {
-					if enabled && counts[tier] == 0 {
-						continue
+				for path, value := range shared.set {
+					set[path] = value
+				}
+				for tier, count := range shared.counts {
+					if count > 0 {
+						set["/preferences/service_tier_disabled/"+tier] = false
+						appliedTiers[tier] = true
 					}
-					// This is a routing preference, not evidence for the separate business Key.
-					set["/preferences/service_tier_disabled/"+tier] = !enabled
-					appliedTiers[tier] = true
 				}
 			}
-			if len(set) > 0 {
-				if snapshot.Settings == nil {
-					snapshot.Settings = map[string]json.RawMessage{}
-				}
-				snapshot.Settings[name] = json.RawMessage(mustJSON(map[string]any{"set": set}))
+			if snapshot.Settings == nil {
+				snapshot.Settings = map[string]json.RawMessage{}
 			}
+			snapshot.Settings[name] = json.RawMessage(mustJSON(map[string]any{"set": set}))
 		}
 	}
 	for tier, enabled := range in.ServiceTierEnabled {

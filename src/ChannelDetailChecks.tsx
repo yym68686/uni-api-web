@@ -1,7 +1,7 @@
 import { FingerprintPanel } from "./ModelFingerprints";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, RefreshCw } from "./icons";
 import { controlRequest } from "./api";
 import { useConfiguredChecks } from "./channelManagement";
@@ -13,11 +13,13 @@ import type { ToolUseResult } from "./toolUse";
 import { toolUseLabels } from "./toolUse";
 import { compactionLabels } from "./SubCompaction";
 import { Spinner } from "./ui";
-import { time, providerId } from "./format";
+import { time } from "./format";
 import { WorkbenchNotice } from "./Workbench";
 import { detectionProjectLabels } from "./DetectionAction";
 import { isServiceTier, serviceTierFilterLabels, serviceTierFresh, serviceTierVerified, serviceTiers, type ServiceTier, type ServiceTierResult } from "./serviceTierStatus";
-import { observedTierTarget, refreshTierViews, submitTierChecks, useTierMembers } from "./serviceTierTable";
+import { refreshTierViews, submitTierChecks } from "./serviceTierTable";
+import type { ChannelCheck } from "./ChannelChecks";
+import { QualityProbability } from "./QualityHistory";
 
 type Kind = "availability" | "quality" | "tool-use" | "compaction" | ServiceTier;
 const items: { kind: Kind; label: string; description: string }[] = [
@@ -44,12 +46,26 @@ const items: { kind: Kind; label: string; description: string }[] = [
   ...serviceTiers.map(kind => ({ kind, label: detectionProjectLabels[kind], description: "当前渠道 · 当前模型" })),
 ];
 const pending = (state?: string) => state === "queued" || state === "running";
-export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: string }) {
+const qualityLabels = { pass: "不降智", fail: "降智", error: "检测失败", inconclusive: "无法判定" };
+export function ChannelDetailChecks({ row, owner, quality }: { row: Channel; owner: string; quality?: ChannelCheck }) {
   const client = useQueryClient(),
     query = useConfiguredChecks();
-  const members = useTierMembers(owner, !!row.source_id);
-  const tierReadFailed = members.isError || members.unavailable.includes(row.source_id || "");
-  const tierTarget = observedTierTarget(row, members.members.get(providerId(row)));
+  const mayProbeTier = !!row.source_id;
+  const target = useQuery({
+    queryKey: ["detail-tier-target", owner, row.source_id, row.provider, row.model],
+    enabled: mayProbeTier,
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    queryFn: ({signal}) => controlRequest<{
+      applicable: boolean; scope: string;
+      group_results?: Partial<Record<ServiceTier, ServiceTierResult>>;
+    }>(`/v1/sources/${encodeURIComponent(row.source_id!)}/service-tier-target?` +
+      new URLSearchParams({provider: row.provider, model: row.model}), {signal}),
+  });
+  const tierReadFailed = mayProbeTier && target.isError;
+  const tierTarget = mayProbeTier && target.data?.applicable && target.data.scope && row.source_id
+    ? { source_id: row.source_id, provider: row.provider, model: row.model, scope: target.data.scope } : undefined;
   const active = useRef(new Set<Kind>());
   const [submitting, setSubmitting] = useState(new Set<Kind>());
   const [errors, setErrors] = useState<Partial<Record<Kind, string>>>({});
@@ -107,7 +123,7 @@ export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: strin
   const applicable = (kind: Kind) =>
     isServiceTier(kind) ? !!tierTarget :
       (kind !== "compaction" && kind !== "tool-use") || isCapabilityCheckModel(row.model);
-  const tierLoading = members.isPending || query.isPending;
+  const tierLoading = mayProbeTier && (target.isPending || query.isPending);
   const tierBlocked = tierReadFailed || query.isError || tierLoading;
   async function run(kind: Kind) {
     if (
@@ -165,16 +181,32 @@ export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: strin
   }
   const tierResult = (c?: ConfiguredCheck) =>
     c && tierTarget && c.fingerprint === tierTarget.scope ? c.result as ServiceTierResult | null : null;
-  const text = (kind: Kind, c?: ConfiguredCheck) => {
+  const displayedTier = (kind: ServiceTier, c?: ConfiguredCheck) => {
+    const own = tierResult(c);
+    const shared = target.data?.group_results?.[kind];
+    return shared && serviceTierFresh(shared.checked_at) &&
+      (!own || !serviceTierFresh(own.checked_at) || shared.checked_at > own.checked_at)
+      ? {result: shared, shared: true} : {result: own, shared: false};
+  };
+  const text = (kind: Kind, c: ConfiguredCheck | undefined, tier: ReturnType<typeof displayedTier> | null, latestQuality?: ChannelCheck) => {
     if (isServiceTier(kind)) {
       if (tierReadFailed || query.isError) return "读取失败";
       if (tierLoading) return "读取中…";
     }
     if (!applicable(kind)) return "不适用";
-    if (!c) return "未检测";
-    if (c.state === "queued") return "已排队";
-    if (c.state === "running") return "检测中";
-    if (c.state === "error") return "检测失败";
+    if (!c && !tier?.result && !latestQuality) return "未检测";
+    if (c?.state === "queued") return "已排队";
+    if (c?.state === "running") return "检测中";
+    if (tier) {
+      const {result, shared} = tier;
+      if (!result || !serviceTierFresh(result.checked_at)) return c?.state === "error" ? "检测失败" : c?.state === "interrupted" ? "已中断" : "未确认";
+      if (result.status === "not_applicable") return "不适用";
+      if (result.status === "inconclusive") return "结果未确认";
+      if (result.status === "supported" && !shared && !serviceTierVerified(result)) return "未确认";
+      return serviceTierFilterLabels[result.status] || "未确认";
+    }
+    if (latestQuality) return qualityLabels[latestQuality.verdict];
+    if (!c || c.state === "error") return "检测失败";
     if (kind === "availability")
       return importModelLabel({
         model: row.model,
@@ -183,25 +215,11 @@ export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: strin
         result: c.result as SubTarget["result"],
       });
     if (c.state === "interrupted") return "已中断";
-    if (isServiceTier(kind)) {
-      const result = tierResult(c);
-      if (!result || !serviceTierFresh(result.checked_at)) return "未确认";
-      if (result.status === "not_applicable") return "不适用";
-      if (result.status === "inconclusive") return "结果未确认";
-      if (result.status === "supported" && !serviceTierVerified(result)) return "未确认";
-      return serviceTierFilterLabels[result.status] || "未确认";
+    if (kind === "quality") {
+      const verdict = (c.result as SubTarget["result"])?.verdict;
+      return verdict && Object.hasOwn(qualityLabels, verdict)
+        ? qualityLabels[verdict as keyof typeof qualityLabels] : "未检测";
     }
-    if (kind === "quality")
-      return (
-        (
-          {
-            pass: "不降智",
-            fail: "降智",
-            error: "检测失败",
-            inconclusive: "无法判定",
-          } as Record<string, string>
-        )[(c.result as SubTarget["result"])?.verdict || ""] || "未检测"
-      );
     const status = (c.result as ToolUseResult)?.status;
     return (kind === "tool-use" ? toolUseLabels : compactionLabels)[
       status || "untested"
@@ -213,7 +231,7 @@ export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: strin
         <h3>独立检测</h3>
         <button className="button small detail-check-retry" hidden={!query.isError && !tierReadFailed}
           aria-label="检测状态读取失败 · 重试" title="检测状态读取失败 · 重试"
-          onClick={() => { void query.refetch(); void members.refetch(); }}>
+          onClick={() => { void query.refetch(); if (mayProbeTier) void target.refetch(); }}>
           <RefreshCw size={18} />
         </button>
       </div>
@@ -221,17 +239,20 @@ export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: strin
         {items.map(({ kind, label, description }) => {
           const c = applicable(kind) ? entry(kind) : undefined,
             busy = submitting.has(kind) || pending(c?.state);
+          const latestQuality = kind === "quality" && quality &&
+            (!c || quality.checked_at > (c.result?.checked_at || 0)) ? quality : undefined;
           const message =
-            c?.message ||
+            latestQuality?.message || c?.message ||
             (kind === "availability"
               ? (c?.result as SubTarget["result"])?.availability?.message
               : kind === "quality"
                 ? (c?.result as SubTarget["result"])?.quality?.message
                 : !isServiceTier(kind) ? (c?.result as ToolUseResult)?.message : undefined);
-          const status = text(kind, c);
-          const tierEvidence = isServiceTier(kind) ? tierResult(c) : null;
+          const tier = isServiceTier(kind) ? displayedTier(kind, c) : null;
+          const status = text(kind, c, tier, latestQuality);
+          const tierEvidence = tier?.result;
           const observed = tierEvidence?.observed;
-          const checkedAt = isServiceTier(kind) ? tierEvidence?.checked_at : c?.result?.checked_at;
+          const checkedAt = tier ? tierEvidence?.checked_at : latestQuality?.checked_at || c?.result?.checked_at;
           return (
             <div key={kind} className="detail-check-item">
               <button
@@ -245,8 +266,9 @@ export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: strin
                 {busy ? <Spinner small /> : <Play size={13} />} {label}
               </button>
               <span
+                data-quality={kind === "quality" || undefined}
                 className={
-                  status === "已验证支持" ? "positive" :
+                  status === "已验证支持" || status === "不降智" ? "positive" :
                     status === "未命中" || status === "结果未确认" || status === "已中断" ? "detail-check-warning" :
                   status.includes("失败") || status === "明确不支持" ||
                   status.startsWith("不支持") ||
@@ -255,16 +277,17 @@ export function ChannelDetailChecks({ row, owner }: { row: Channel; owner: strin
                     : "muted"
                 }
                 role="status"
-                title={[observed && `实际档位：${observed}`, checkedAt && time(checkedAt)].filter(Boolean).join(" · ") || undefined}
+                title={[tier?.shared && "分组检测", observed && `实际档位：${observed}`, checkedAt && time(checkedAt)].filter(Boolean).join(" · ") || undefined}
               >
-                {submitting.has(kind) ? "正在提交…" : accepted[kind] && !c ? "已提交" : status}
+                {submitting.has(kind) ? "正在提交…" : accepted[kind] && !c && !tierEvidence ? "已提交" : status}
+                {kind === "quality" && quality && !busy && <QualityProbability history={quality.history} checkedAt={quality.checked_at} origin={quality.origin} />}
               </span>
               <WorkbenchNotice urgent={!!errors[kind]} label={`${label}详情`} messages={[errors[kind], message]} />
             </div>
           );
         })}
+        {row.source_id && <FingerprintPanel inline targets={[{source_id:row.source_id,provider:row.provider,model:row.model}]}/>}
       </div>
-      {row.source_id && <FingerprintPanel onlySupported targets={[{source_id:row.source_id,provider:row.provider,model:row.model}]}/>}
     </section>
   );
 }

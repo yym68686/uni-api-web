@@ -283,8 +283,14 @@ func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
 			if err != nil || code != 200 || mutations != 1 {
 				t.Fatal(code, err, mutations)
 			}
-			if len(applied.Channels) != 2 || len(applied.Settings) != 1 || !reflect.DeepEqual(applied.Rules[0].Order, []string{"configured", "sub2api-new", "existing"}) || !reflect.DeepEqual(applied.Rules[0].Disabled, []string{"existing"}) || applied.Rules[1].KeyID != "other" {
+			if len(applied.Channels) != 2 || len(applied.Settings) != 2 || !strings.Contains(string(applied.Settings["existing"]), `"/preferences/cooldown_period":30`) || !reflect.DeepEqual(applied.Rules[0].Order, []string{"configured", "sub2api-new", "existing"}) || !reflect.DeepEqual(applied.Rules[0].Disabled, []string{"existing"}) || applied.Rules[1].KeyID != "other" {
 				t.Fatal("other configuration changed")
+			}
+			var prefs struct{ Set map[string]any }
+			if err := json.Unmarshal(applied.Settings["sub2api-new"], &prefs); err != nil ||
+				prefs.Set["/preferences/service_tier_disabled/fast"] != true ||
+				prefs.Set["/preferences/service_tier_disabled/ultrafast"] != true {
+				t.Fatal("unchecked tiers must be disabled", prefs, err)
 			}
 			var doc map[string]any
 			json.Unmarshal(applied.Channels[1].Definition, &doc)
