@@ -16,21 +16,22 @@ import (
 )
 
 type subImportInput struct {
-	Provider              string            `json:"provider,omitempty"`
-	Protocols             map[string]string `json:"protocols,omitempty"`
-	AllowUnverifiedModels bool              `json:"allow_unverified_models,omitempty"`
-	Positions             map[string]int    `json:"positions,omitempty"`
-	ModelMappings         map[string]string `json:"model_mappings,omitempty"`
-	CompactionEnabled     *bool             `json:"compaction_enabled,omitempty"`
-	ServiceTierEnabled    map[string]bool   `json:"service_tier_enabled,omitempty"`
-	Action                string            `json:"action"`
-	AccountID             string            `json:"account_id"`
-	GroupID               int64             `json:"group_id"`
-	SourceID              string            `json:"source_id"`
-	KeyID                 string            `json:"api_key_id"`
-	Revision              string            `json:"revision"`
-	Models                []string          `json:"models"`
-	Position              int               `json:"position"`
+	Provider               string            `json:"provider,omitempty"`
+	Protocols              map[string]string `json:"protocols,omitempty"`
+	AllowUnverifiedModels  bool              `json:"allow_unverified_models,omitempty"`
+	Positions              map[string]int    `json:"positions,omitempty"`
+	ModelMappings          map[string]string `json:"model_mappings,omitempty"`
+	CompactionEnabled      *bool             `json:"compaction_enabled,omitempty"`
+	ServiceTierEnabled     map[string]bool   `json:"service_tier_enabled,omitempty"`
+	ServiceTierSiteChoices map[string]bool   `json:"service_tier_site_choices,omitempty"`
+	Action                 string            `json:"action"`
+	AccountID              string            `json:"account_id"`
+	GroupID                int64             `json:"group_id"`
+	SourceID               string            `json:"source_id"`
+	KeyID                  string            `json:"api_key_id"`
+	Revision               string            `json:"revision"`
+	Models                 []string          `json:"models"`
+	Position               int               `json:"position"`
 }
 
 func subProviderName(account string, group int64, key string) string {
@@ -197,9 +198,16 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	owner, _ := s.controlUser(r)
 	publicModels, modelErr := importPublicModels(in.Models, in.ModelMappings)
-	if modelErr != nil || !validTierChoices(in.ServiceTierEnabled) || validateModelPositions(publicModels, in.Positions) != nil || in.Position < 1 || len(in.Revision) > 256 {
+	if modelErr != nil || !validTierChoices(in.ServiceTierEnabled) || !validTierChoices(in.ServiceTierSiteChoices) ||
+		validateModelPositions(publicModels, in.Positions) != nil || in.Position < 1 || len(in.Revision) > 256 {
 		http.Error(w, "请选择模型和有效位置", 400)
 		return
+	}
+	for tier := range in.ServiceTierSiteChoices {
+		if _, duplicate := in.ServiceTierEnabled[tier]; duplicate {
+			http.Error(w, "档位设置重复", 400)
+			return
+		}
 	}
 	seen := map[string]bool{}
 	for _, model := range importUpstreamModels(in.Models, in.ModelMappings) {
@@ -459,26 +467,48 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 		if err != nil {
 			return nil, code, err
 		}
-		if part.Protocol == "responses" && len(in.ServiceTierEnabled) > 0 {
-			plan, err := s.planServiceTierImport(ctx, src, name, channel.Base, upstreamKey, part.Models)
-			if err != nil {
-				return nil, 409, errors.New("档位检测证据无法确认，请刷新后重试")
+		if part.Protocol == "responses" && len(in.ServiceTierEnabled)+len(in.ServiceTierSiteChoices) > 0 {
+			set := map[string]any{}
+			if len(in.ServiceTierEnabled) > 0 {
+				plan, err := s.planServiceTierImport(ctx, src, name, channel.Base, upstreamKey, part.Models)
+				if err != nil {
+					return nil, 409, errors.New("档位检测证据无法确认，请刷新后重试")
+				}
+				set = importTierSettings(plan, in)
+				for tier, count := range plan.counts {
+					appliedTiers[tier] = count > 0
+				}
 			}
-			set := importTierSettings(plan, in)
+			if len(in.ServiceTierSiteChoices) > 0 {
+				counts, err := s.siteTierImportCounts(ctx, in.AccountID, in.GroupID, part.Models)
+				if err != nil {
+					return nil, 409, errors.New("站点档位检测结果无法确认，请刷新后重试")
+				}
+				for tier, enabled := range in.ServiceTierSiteChoices {
+					if enabled && counts[tier] == 0 {
+						continue
+					}
+					// This is a routing preference, not evidence for the separate business Key.
+					set["/preferences/service_tier_disabled/"+tier] = !enabled
+					appliedTiers[tier] = true
+				}
+			}
 			if len(set) > 0 {
 				if snapshot.Settings == nil {
 					snapshot.Settings = map[string]json.RawMessage{}
 				}
 				snapshot.Settings[name] = json.RawMessage(mustJSON(map[string]any{"set": set}))
 			}
-			for tier, count := range plan.counts {
-				appliedTiers[tier] = count > 0
-			}
 		}
 	}
 	for tier, enabled := range in.ServiceTierEnabled {
 		if enabled && !appliedTiers[tier] {
 			return nil, 409, errors.New("所选档位的验证已失效，请刷新后重试")
+		}
+	}
+	for tier, enabled := range in.ServiceTierSiteChoices {
+		if enabled && !appliedTiers[tier] {
+			return nil, 409, errors.New("所选档位的站点检测结果已失效，请刷新后重试")
 		}
 	}
 	admin := src

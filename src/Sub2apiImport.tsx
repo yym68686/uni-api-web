@@ -353,12 +353,22 @@ function Sub2apiImportForm({
   const tierPreview = useQuery({
     queryKey: ["service-tier-import-options", tierPreviewBody],
     enabled: checkTiers && settledTierBody === tierPreviewBody,
-    queryFn: ({ signal }) => controlRequest<{verified: Partial<Record<ServiceTier, number>>; total: number}>(
+    queryFn: ({ signal }) => controlRequest<{
+      verified: Partial<Record<ServiceTier, number>>;
+      site_supported?: Partial<Record<ServiceTier, number>>;
+      verification_unavailable?: boolean;
+      total: number;
+    }>(
       "/v1/sub2api/channel-tier-options", {method: "POST", signal, body: tierPreviewBody}),
     retry: false, staleTime: 15000, refetchOnWindowFocus: false,
   });
-  const tierCount = (tier: ServiceTier) => tierPreview.isError ? 0 : tierPreview.data?.verified?.[tier] || 0;
-  const tierIsEnabled = (tier: ServiceTier) => tierCount(tier) > 0 && tierChoices[tier] !== false;
+  const verifiedTierCount = (tier: ServiceTier) => !checkTiers || tierPreview.isError ? 0 : tierPreview.data?.verified?.[tier] || 0;
+  const siteTierCount = (tier: ServiceTier) => !checkTiers || tierPreview.isError ? 0 : tierPreview.data?.site_supported?.[tier] || 0;
+  const tierAvailable = (tier: ServiceTier) => verifiedTierCount(tier) > 0 || siteTierCount(tier) > 0;
+  const tierIsEnabled = (tier: ServiceTier) => tierAvailable(tier) && tierChoices[tier] !== false;
+  const tierSelection = (basis: "verified" | "site") => Object.fromEntries(serviceTiers
+    .filter(tier => basis === "verified" ? verifiedTierCount(tier) > 0 : verifiedTierCount(tier) === 0 && siteTierCount(tier) > 0)
+    .map(tier => [tier, tierIsEnabled(tier)]));
   const waitingForTiers = checkTiers && !tierPreview.data && !tierPreview.isError;
   const options = useQuery({
     queryKey: ["sub-import-options", source, key, account.id, target.group_id],
@@ -668,8 +678,9 @@ function Sub2apiImportForm({
       ...(action === "add" ? { compaction_enabled: compactionEnabled } : {
         action, provider: item?.provider || editing?.provider,
       }),
-      ...(action === "add" && serviceTiers.some(tier => tierCount(tier) > 0) && {
-        service_tier_enabled: Object.fromEntries(serviceTiers.filter(tier => tierCount(tier) > 0).map(tier => [tier, tierIsEnabled(tier)])),
+      ...(action === "add" && serviceTiers.some(tierAvailable) && {
+        service_tier_enabled: tierSelection("verified"),
+        service_tier_site_choices: tierSelection("site"),
       }),
       ...(action !== "delete" && {
         models: originals,
@@ -1315,12 +1326,13 @@ function Sub2apiImportForm({
                     </label>
                     {serviceTiers.map(tier => <label className="settings-check" key={tier}>
                       <input type="checkbox" aria-label={`开启 ${serviceTierName[tier]}`}
-                        checked={tierIsEnabled(tier)} disabled={busy || !tierCount(tier)}
+                        checked={tierIsEnabled(tier)} disabled={busy || !tierAvailable(tier)}
                         onChange={event => setTierOverride({destination:tierDestination, choices:{...tierChoices, [tier]:event.target.checked}})}/>
                       {serviceTierName[tier]}
-                      <small className={tierCount(tier) ? "positive" : "muted"}>
-                        {tierCount(tier) ? `已验证 ${tierCount(tier)}/${tierPreview.data?.total}` :
-                          waitingForTiers ? "核对中…" : tierPreview.isError ? "未能验证" : "未验证"}
+                      <small className={verifiedTierCount(tier) ? "positive" : "muted"}>
+                        {verifiedTierCount(tier) ? `已验证 ${verifiedTierCount(tier)}/${tierPreview.data?.total}` :
+                          siteTierCount(tier) ? "站点支持 · 业务 Key 待验证" :
+                          waitingForTiers ? "核对中…" : tierPreview.isError || tierPreview.data?.verification_unavailable ? "未能验证" : "未验证"}
                       </small>
                     </label>)}
                     </div>

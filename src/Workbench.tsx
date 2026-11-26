@@ -49,12 +49,13 @@ export function useWorkbenchTools() {
   return { observeHeading, level };
 }
 
-export function WorkbenchDisclosure({ label, children, icon, className = "", title }: {
+export function WorkbenchDisclosure({ label, children, icon, className = "", title, align = "end" }: {
   label: string;
   children: ReactNode;
   icon?: ReactNode;
   className?: string;
   title?: string;
+  align?: "start" | "end";
 }) {
   const id = useId();
   const disclosure = useRef<HTMLDetailsElement>(null);
@@ -65,16 +66,23 @@ export function WorkbenchDisclosure({ label, children, icon, className = "", tit
       const panel = disclosure.current;
       if (panel?.open && insidePointer.current !== event && !event.composedPath().includes(panel)) panel.open = false;
     };
-    const position = () => {
+    const position = (event: Event) => {
       const anchor = disclosure.current?.querySelector("summary")?.getBoundingClientRect();
       const popover = body.current;
       if (!disclosure.current?.open || !anchor || !popover || window.innerWidth <= 780) return;
+      if (event.type === "scroll" && event.target instanceof Node && popover.contains(event.target)) return;
       const width = popover.offsetWidth;
+      popover.style.removeProperty("--workbench-max-height");
       const height = popover.offsetHeight;
-      popover.style.setProperty("--workbench-left", Math.max(12, Math.min(anchor.right - width, innerWidth - width - 12)) + "px");
-      const top = anchor.bottom + height + 20 <= innerHeight || anchor.top < height + 20
-        ? Math.min(anchor.bottom + 8, innerHeight - height - 12) : anchor.top - height - 8;
-      popover.style.setProperty("--workbench-top", Math.max(12, top) + "px");
+      const left = align === "start" ? anchor.left : anchor.right - width;
+      popover.style.setProperty("--workbench-left", Math.max(12, Math.min(left, innerWidth - width - 12)) + "px");
+      const below = innerHeight - anchor.bottom - 20;
+      const above = anchor.top - 20;
+      const openAbove = height > below && above > below;
+      const maxHeight = Math.max(0, openAbove ? above : below);
+      popover.style.setProperty("--workbench-max-height", maxHeight + "px");
+      popover.style.setProperty("--workbench-top", openAbove ? "auto" : Math.max(12, anchor.bottom + 8) + "px");
+      popover.style.setProperty("--workbench-bottom", openAbove ? innerHeight - anchor.top + 8 + "px" : "auto");
     };
     const details = disclosure.current;
     details?.addEventListener("toggle", position);
@@ -87,7 +95,7 @@ export function WorkbenchDisclosure({ label, children, icon, className = "", tit
       window.removeEventListener("resize", position);
       window.removeEventListener("scroll", position, true);
     };
-  }, []);
+  }, [align]);
   return <details ref={disclosure} className={`workbench-disclosure ${className}`} onPointerDownCapture={event => {
     // React portal children are inside this disclosure even though they are outside its DOM.
     insidePointer.current = event.nativeEvent;

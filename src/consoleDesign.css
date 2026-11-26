@@ -26,7 +26,8 @@ h1, h2, h3 { overflow-wrap: anywhere; }
 .workspace :is(.data-actions,.workbench-tools) :is(.button,.select-field), .workspace .management-toolbar :is(.button,.search-field) { min-height: 40px; }
 .workspace .channel-browser .workbench-popover :is(.select-field,.button) { max-width: 100%; }
 .workbench-disclosure > .workbench-popover {
-  position: fixed; inset: var(--workbench-top, 104px) auto auto var(--workbench-left, 12px);
+  position: fixed; inset: var(--workbench-top, 104px) auto var(--workbench-bottom, auto) var(--workbench-left, 12px);
+  max-height: min(70dvh, 38rem, var(--workbench-max-height, 38rem));
   padding: 0 16px 16px; border-radius: var(--radius-popover); z-index: 60; overscroll-behavior: contain;
 }
 .route-edit-scope { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-block: 4px 12px; }
@@ -73,9 +74,11 @@ h1, h2, h3 { overflow-wrap: anywhere; }
 .management-actions .sub-model-check-group > :last-child svg[data-console-icon] { display: inline-block; }
 .workspace .observation-table[data-compact] .column-balance { min-width: 0; }
 .workspace .observation-table[data-compact] .status-pill { white-space: normal; }
-@media (min-width: 560px) and (max-width: 1180px) {
+/* Keep essential row actions visible even when a wide table needs horizontal scrolling. */
+@media (min-width: 560px) {
   .workspace .sub-table :is(th,td).management-actions-cell { position: sticky; right: 0; z-index: 2; background: var(--surface); }
   .workspace .sub-table th.management-actions-cell { background: var(--subtle); }
+  .workspace .sub-table .sub-management-row:is(:hover,:focus-visible) td.management-actions-cell { background: var(--subtle); }
 }
 .workbench-disclosure > .workbench-popover .workbench-popover-heading {
   position: sticky; inset-block-start: 0; z-index: 1; padding-block: 8px;
@@ -147,9 +150,6 @@ h1, h2, h3 { overflow-wrap: anywhere; }
 .site-row-menu > summary { inline-size: 44px; overflow: hidden; white-space: nowrap; font-size: 0; }
 .site-row-menu > summary::before { content: "…"; font-size: 18px; }
 .site-row-menu > summary svg { display:none; }
-@media (hover:hover) and (pointer:fine) and (min-width: 1001px) {
-  .workspace .sub-management-row:not(:hover):not(:focus-within) .sub-row-actions .button:not([aria-busy="true"]) { opacity: 0; }
-}
 @media (max-width: 1000px) {
   .workspace .sub-table[data-columns="operations"] { min-width: 100%; table-layout: fixed; }
   .workspace .sub-table[data-columns="operations"] [data-column]:not(:is([data-column="availability"],[data-column="latency"])) { display: none; }

@@ -1781,7 +1781,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 }}
               />
             </label>
-            <WorkbenchDisclosure className="management-filters" label="筛选">
+            <WorkbenchDisclosure className="management-filters" label="筛选" align="start">
             <WorkbenchTabs label="渠道管理筛选面板" value={filterTab} onChange={setFilterTab} tabs={[["conditions","条件"],["columns","数据列"]]} />
             <section hidden={filterTab !== "conditions"}>
             <div className="management-filter-reset">

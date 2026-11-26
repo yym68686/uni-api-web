@@ -548,7 +548,7 @@ it("waits for the live account task and automatically restores add without losin
   expect(writes[0].model_mappings).toEqual({ "public-alias": "gpt-6-sol" });
 }, 12000);
 
-it("preselects only a verified tier beside compaction and saves its explicit opt-out", async () => {
+it.each([false, true])("preselects Fast and submits it with the correct evidence scope (site-only: %s)", async (siteOnly) => {
   let resolveOptions!: (response: Response) => void;
   const writes: unknown[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -586,14 +586,23 @@ it("preselects only a verified tier beside compaction and saves its explicit opt
   const add = screen.getByRole("button", {name: "添加到渠道"});
   await waitFor(() => expect(resolveOptions).toBeTypeOf("function"));
   expect(add).toBeDisabled();
-  resolveOptions(Response.json({verified: {fast: 1}, total: 1}));
+  resolveOptions(Response.json({
+    verified: siteOnly ? {} : {fast: 1},
+    site_supported: {fast: 1},
+    total: 1,
+  }));
   await waitFor(() => expect(fast).toBeChecked());
   expect(ultra).not.toBeChecked();
   expect(ultra).toBeDisabled();
-  await user.click(fast);
+  expect(group.getByText(siteOnly ? "站点支持 · 业务 Key 待验证" : "已验证 1/1")).toBeVisible();
+  if (!siteOnly) await user.click(fast);
   await user.click(add);
   await waitFor(() => expect(writes).toHaveLength(1));
-  expect(writes[0]).toMatchObject({service_tier_enabled: {fast: false}, models: [model]});
+  expect(writes[0]).toMatchObject({
+    service_tier_enabled: siteOnly ? {} : {fast: false},
+    service_tier_site_choices: siteOnly ? {fast: true} : {},
+    models: [model],
+  });
 });
 
 it("keeps addition blocked when account state cannot be read and permits an explicit retry", async () => {

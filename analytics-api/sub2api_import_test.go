@@ -69,7 +69,12 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 		t.Fatal(e)
 	}
 	store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,encrypted_key) VALUES($1,7,'group','openai',1,$2)`, account, testkey)
-	raw, _ := json.Marshal(subResult{Model: checkModel, Availability: subProbe{Status: "success", Protocol: "responses"}})
+	now := time.Now().Unix()
+	raw, _ := json.Marshal(subResult{Model: checkModel, Availability: subProbe{Status: "success", Protocol: "responses"},
+		ServiceTiers: map[string]subTierProbe{
+			"fast":      {Status: "supported", Observed: "priority", CheckedAt: now},
+			"ultrafast": {Status: "supported", Observed: "ultrafast", CheckedAt: now - serviceTierTTL},
+		}})
 	store.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,7,$2,'done',$3)`, account, checkModel, string(raw))
 	remoteKey := subRemoteKey{}
 	groupMissing := false
@@ -152,7 +157,8 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	session, _ := store.newSession(context.Background(), owner)
 	foreign, _ := store.newSession(context.Background(), owner+"-foreign")
 	requestContext := func(ctx context.Context, models []string, rev, cookie string) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(subImportInput{AccountID: account, GroupID: 7, SourceID: sourceID, KeyID: sourceID + "::key-" + strings.Repeat("a", 64), Revision: rev, Models: models, Position: 1})
+		body, _ := json.Marshal(subImportInput{AccountID: account, GroupID: 7, SourceID: sourceID, KeyID: sourceID + "::key-" + strings.Repeat("a", 64), Revision: rev, Models: models, Position: 1,
+			ServiceTierSiteChoices: map[string]bool{"fast": true}})
 		r := httptest.NewRequest("POST", "/v1/sub2api/channels", strings.NewReader(string(body))).WithContext(ctx)
 		r.Header.Set("Content-Type", "application/json")
 		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
@@ -162,6 +168,23 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	}
 	request := func(models []string, rev, cookie string) *httptest.ResponseRecorder {
 		return requestContext(context.Background(), models, rev, cookie)
+	}
+	previewBody := mustJSON(subImportInput{AccountID: account, GroupID: 7, SourceID: sourceID,
+		KeyID: sourceID + "::key-" + strings.Repeat("a", 64), Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}})
+	preview := httptest.NewRequest("POST", "/v1/sub2api/channel-tier-options", strings.NewReader(previewBody))
+	preview.Header.Set("Content-Type", "application/json")
+	preview.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+	previewResponse := httptest.NewRecorder()
+	s.Handler().ServeHTTP(previewResponse, preview)
+	var options struct {
+		Verified      map[string]int
+		SiteSupported map[string]int `json:"site_supported"`
+		Total         int
+	}
+	if previewResponse.Code != 200 || json.Unmarshal(previewResponse.Body.Bytes(), &options) != nil ||
+		options.Total != 1 || options.SiteSupported["fast"] != 1 || len(options.SiteSupported) != 1 ||
+		len(options.Verified) != 0 || created != 0 || imports != 0 {
+		t.Fatal("first import preview should recommend Fast without creating a key or claiming business verification", previewResponse.Code, previewResponse.Body.String())
 	}
 	if w := request([]string{checkModel}, "boot:1", foreign); w.Code != 404 {
 		t.Fatal("foreign import allowed", w.Code)
@@ -244,6 +267,11 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	}
 	if imports != 1 || created != 1 || saved.Channels[0].Key != "business-secret" || definition["engine"] != nil || saved.Channels[0].Base != "https://site.example/v1/responses" {
 		t.Fatal("wrong business route", imports, created)
+	}
+	var preferences struct{ Set map[string]any }
+	if err := json.Unmarshal(saved.Settings[saved.Channels[0].Provider], &preferences); err != nil ||
+		len(preferences.Set) != 1 || preferences.Set["/preferences/service_tier_disabled/fast"] != false {
+		t.Fatal("expected Fast enabled without promoting a site probe to business-key evidence", preferences.Set, err)
 	}
 	if strings.Contains(w.Body.String(), "secret") {
 		t.Fatal("credential leak")

@@ -11,6 +11,46 @@ import (
 	"time"
 )
 
+// Site results recommend a preference for the selected upstream models, but
+// never become routing evidence for the separately provisioned business Key.
+func (s *Service) siteTierImportCounts(ctx context.Context, account string, group int64, models map[string]string) (map[string]int, error) {
+	counts := map[string]int{}
+	upstreams := make([]string, 0, len(models))
+	for _, upstream := range models {
+		upstreams = append(upstreams, upstream)
+	}
+	rows, err := s.control.db.QueryContext(ctx, `SELECT model,result->'service_tiers' FROM console_sub_models
+ WHERE account_id=$1 AND group_id=$2 AND model=ANY($3) AND result ? 'service_tiers'`, account, group, upstreams)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	results := map[string]map[string]subTierProbe{}
+	for rows.Next() {
+		var model string
+		var raw []byte
+		if err = rows.Scan(&model, &raw); err != nil {
+			return nil, err
+		}
+		var tiers map[string]subTierProbe
+		if json.Unmarshal(raw, &tiers) == nil {
+			results[model] = tiers
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	now := time.Now().Unix()
+	for _, upstream := range models {
+		for tier, result := range results[upstream] {
+			if isServiceTier(tier) && result.Status == "supported" && serviceTierFresh(result.CheckedAt, now) {
+				counts[tier]++
+			}
+		}
+	}
+	return counts, nil
+}
+
 type serviceTierImportBinding struct {
 	Binding       string `json:"binding"`
 	Compatibility string `json:"compatibility"`
@@ -174,23 +214,28 @@ func (s *Service) previewServiceTierImport(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	plan := serviceTierImportPlan{counts: map[string]int{}}
+	siteSupported := map[string]int{}
+	verificationUnavailable := false
 	total := 0
 	for index, part := range parts {
 		if part.Protocol != "responses" {
 			continue
 		}
 		total += len(part.Models)
+		siteSupported, err = s.siteTierImportCounts(ctx, in.AccountID, in.GroupID, part.Models)
+		if err != nil {
+			http.Error(w, "未能读取站点档位检测结果", 503)
+			return
+		}
 		name := subProviderName(in.AccountID, in.GroupID, key)
 		if index > 0 {
 			name = protocolProvider(name, part.Protocol)
 		}
 		plan, err = s.planServiceTierImport(ctx, src, name, subBindingSite(base)+part.Endpoint, secret, part.Models)
-		if err != nil {
-			http.Error(w, "未能验证档位配置", 409)
-			return
-		}
+		verificationUnavailable = err != nil
 	}
-	writeJSON(w, 200, map[string]any{"verified": plan.counts, "total": total})
+	writeJSON(w, 200, map[string]any{"verified": plan.counts, "site_supported": siteSupported,
+		"verification_unavailable": verificationUnavailable, "total": total})
 }
 
 func importTierSettings(plan serviceTierImportPlan, in subImportInput) map[string]any {

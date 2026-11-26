@@ -15,8 +15,8 @@ func subTierModel(model string) bool {
 	return subCapabilityModel(model) && subModelProtocol(model) == "responses"
 }
 
-// Site probes describe the current test credential only. They do not create
-// gateway routing evidence or auto-enable a different imported business key.
+// Site probes describe the current test credential only. They can inform a
+// channel import preference, but cannot verify a separate business key.
 type subTierProbe struct {
 	Status    string `json:"status"`
 	Observed  string `json:"observed,omitempty"`

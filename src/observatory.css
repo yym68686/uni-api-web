@@ -152,8 +152,8 @@
 .workspace .sub2api-page {margin:0;gap:6px}
 .workspace .management-page-heading {padding:9px 0 15px}
 .workspace .management-filters {flex:none;position:static}
-.workspace .management-filters .workbench-popover {left:0;right:auto;width:min(36rem,calc(100vw - 24px))}
-.workspace .management-filters .sub-filters {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;overflow:visible}
+.workspace .management-filters .workbench-popover {width:min(36rem,calc(100vw - 24px))}
+.workspace .management-filters .workbench-popover .sub-filters {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;overflow:visible}
 .workspace .management-filters .sub-filters > :is(.select-field,.search-field) {width:100%;min-width:0;max-width:none}
 .workspace .management-filters .sub-filters select {width:100%;max-width:100%;min-width:0}
 .workspace .management-filters .sub-name-exclude,.workspace .management-filters .sub-filter-reset {grid-column:1 / -1}
@@ -209,7 +209,6 @@
 @media (max-width:780px) {
   .management-query .search-field {max-width:none}
   .management-actions {flex:1 1 100%}
-  .workspace .management-filters .workbench-popover {left:12px;width:min(25rem,calc(100vw - 24px))}
 }
 .workspace .request-log-table-wrap {background:var(--surface);border-top:1px solid var(--line);max-height:none;overflow:visible}
 .workspace .request-logs-panel[data-columns="summary"] .request-log-table {width:100%;min-width:100%;table-layout:fixed}

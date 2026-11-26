@@ -1,7 +1,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { useWorkbenchTools, WorkbenchDisclosure } from "./Workbench";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 it("coalesces heading resizes into one frame and cancels pending work on unmount", () => {
   let notify!: () => void;
@@ -58,4 +63,25 @@ it("closes on an outside pointer, preserves inside interaction and restores focu
   fireEvent.keyDown(screen.getByLabelText("筛选内容"), {key:"Escape"});
   expect(details.open).toBe(false);
   expect(summary).toHaveFocus();
+});
+
+it("anchors a start-aligned panel to the button and clips its height below the button", () => {
+  vi.stubGlobal("innerWidth", 1400);
+  vi.stubGlobal("innerHeight", 800);
+  const {container} = render(<WorkbenchDisclosure label="筛选" align="start"><input /></WorkbenchDisclosure>);
+  const summary = container.querySelector("summary")!;
+  const panel = container.querySelector<HTMLDivElement>(".workbench-popover")!;
+  const bounds = vi.spyOn(summary, "getBoundingClientRect").mockReturnValue(new DOMRect(550, 240, 80, 40));
+  Object.defineProperties(panel, {offsetWidth: {value: 576}, offsetHeight: {value: 550}});
+  summary.closest("details")!.open = true;
+  fireEvent(window, new Event("scroll"));
+  expect(panel.style.getPropertyValue("--workbench-left")).toBe("550px");
+  expect(panel.style.getPropertyValue("--workbench-top")).toBe("288px");
+  expect(panel.style.getPropertyValue("--workbench-bottom")).toBe("auto");
+  expect(panel.style.getPropertyValue("--workbench-max-height")).toBe("500px");
+  bounds.mockReturnValue(new DOMRect(1140, 680, 80, 40));
+  fireEvent(window, new Event("resize"));
+  expect(panel.style.getPropertyValue("--workbench-left")).toBe("812px");
+  expect(panel.style.getPropertyValue("--workbench-top")).toBe("auto");
+  expect(panel.style.getPropertyValue("--workbench-bottom")).toBe("128px");
 });
