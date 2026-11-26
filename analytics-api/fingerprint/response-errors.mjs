@@ -5,6 +5,7 @@ const terminalMessages = new Map([
   ['group_not_allowed', '上游不再允许采样 Key 的用户使用此分组。'],
   ['insufficient_balance', '上游报告采样 Key 的账户余额不足。'],
   ['model_not_found', '上游报告此分组或接口不支持该模型。'],
+  ['upstream_model_unavailable', '上游报告该模型在此分组暂时没有可用渠道。'],
   ['route_temporarily_disabled', '网关临时停用了匹配渠道，未派发到上游。'],
   ['endpoint_gone', '采样请求返回 HTTP 410；无法据此确定被撤下的是接口还是分组。'],
   ['reference_effort_unsupported', unsupportedEffortMessage],
@@ -61,6 +62,7 @@ export async function fingerprintResponse(response, config) {
   const fingerprintCode = temporarilyDisabled ? 'route_temporarily_disabled'
     : status === 403 ? forbiddenCodes.get(code)
     : status === 404 && (code === 'model_not_found' || data?.error?.type === 'model_not_found') ? 'model_not_found'
+    : status === 503 && data?.error?.type === 'new_api_error' && data.error.code === 'model_not_found' ? 'upstream_model_unavailable'
     : effort && rejectsReferenceEffort(data) ? 'reference_effort_unsupported' : undefined;
   // The error body was consumed for classification. Preserve only the status,
   // as the collector deliberately does not persist arbitrary provider messages.

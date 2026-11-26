@@ -8,6 +8,7 @@ const rejectionDetails = {
   group_not_allowed: [403, "分组无权限", "上游不再允许采样 Key 的用户使用此分组。"],
   insufficient_balance: [403, "上游余额不足", "上游因采样 Key 关联的账户余额不足而拒绝请求。"],
   model_not_found: [404, "模型不支持", "上游报告此分组或接口不支持该模型。"],
+  upstream_model_unavailable: [503, "上游模型不可用", "上游报告该模型在此分组暂时没有可用渠道。可在上游恢复后手动复检。"],
   route_temporarily_disabled: [503, "渠道临时停用", "网关未派发采样请求，因为匹配渠道被临时停用。"],
   endpoint_gone: [410, "HTTP 410", "采样请求返回 HTTP 410；无法据此确定被撤下的是接口还是分组。"],
   reference_effort_unsupported: [400, "采样参数不支持", "上游 Responses 兼容接口不支持指纹所需的 reasoning.effort=low；本轮已停止，未降低采样要求或切换协议。"],

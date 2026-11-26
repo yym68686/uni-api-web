@@ -34,6 +34,15 @@ it("shows requested-class probability below mismatch with the same quality color
  expect(screen.getByText("检测失败")).toBeInTheDocument();expect(screen.getByText("—")).toHaveClass("quality-unknown");
  expect(fingerprintProbabilityClass(1)).toBe("quality-perfect");expect(fingerprintProbabilityClass(.9)).toBe("quality-partial");expect(fingerprintProbabilityClass(.899)).toBe("quality-poor");
 });
+it("explains an upstream model-specific 503 without claiming that the whole group is disabled",()=>{
+ const failed:FingerprintRecord={...record,model:"gemini-4-neon",result:{...record.result!,model:"gemini-4-neon",status:"error",probability:null,used_outputs:0,candidates:[],samples:[{request_id:"failed",state:"error",http_status:503,error_code:"upstream_model_unavailable"}]}};
+ const view=mount(<FingerprintStatus record={failed}/>);
+ expect(screen.getByText("上游模型不可用")).toBeVisible();
+ expect(screen.getByText("—")).toBeVisible();
+ expect(screen.queryByText("分组已停用")).not.toBeInTheDocument();
+ view.rerender(<Tooltip.Provider><FingerprintStatus record={{...failed,result:{...failed.result!,samples:[{request_id:"other",state:"error",http_status:503}]}}}/></Tooltip.Provider>);
+ expect(screen.getByText("HTTP 503")).toBeVisible();
+});
 it("keeps the single-model provisional fingerprint details in a compact tooltip", async () => {
  const partial: FingerprintRecord = {...record, result: {...record.result!, status:"insufficient", decision:"partial", used_outputs:1, probability:null,
   candidates:[{model:"claude-haiku-4.5",display_name:"Claude Haiku 4.5",probability:null}]}};

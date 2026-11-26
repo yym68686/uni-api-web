@@ -108,6 +108,8 @@ group access or insufficient balance, a structured 404 for an unsupported
 model, HTTP 410, or the targeted gateway's explicit temporary-disable 503
 ends the round after checkpointing the failed sample. Generic 403/404/503,
 429, 502 and incomplete streams still allow the next independent challenge.
+New API's structured 503 (`new_api_error` / `model_not_found`) also ends the
+round. It describes only this model on this route, not a disabled group.
 The table and drawer expose safe reasons and HTTP status, not arbitrary provider
 messages. HTTP 410 does not prove whether the endpoint or a group was withdrawn.
 

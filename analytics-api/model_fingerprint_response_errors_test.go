@@ -77,6 +77,7 @@ func TestFingerprintTargetedBridgeStopsOnGroupAndGatewayRejection(t *testing.T) 
 	}{
 		{403, `{"code":"GROUP_DELETED","message":"private details"}`, "group_deleted"},
 		{503, "All matching channels are temporarily disabled", "route_temporarily_disabled"},
+		{503, `{"error":{"type":"new_api_error","code":"model_not_found","message":"private details"}}`, "upstream_model_unavailable"},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
 			var calls atomic.Int32
@@ -84,6 +85,10 @@ func TestFingerprintTargetedBridgeStopsOnGroupAndGatewayRejection(t *testing.T) 
 				calls.Add(1)
 				if r.URL.Path != "/v1/chat/completions" || r.Header.Get("X-Uni-API-Provider") != "exact-provider" {
 					t.Error("lost targeted Chat protocol")
+				}
+				var payload map[string]any
+				if json.NewDecoder(r.Body).Decode(&payload) != nil || payload["reasoning_effort"] != "low" || payload["stream"] != true {
+					t.Error("changed Chat sampling conditions")
 				}
 				writeJSON(w, tc.status, map[string]any{"error": map[string]string{"message": tc.message}})
 			}))

@@ -79,6 +79,8 @@ test('explicit upstream and targeted gateway refusals stop after one request in 
     [403, {code:'GROUP_NOT_ALLOWED'}, 'group_not_allowed'],
     [403, {error:{code:'INSUFFICIENT_BALANCE'}}, 'insufficient_balance'],
     [404, wrapped({error:{type:'model_not_found'}}), 'model_not_found'],
+    [503, {error:{type:'new_api_error',code:'model_not_found',message:'private upstream text'}}, 'upstream_model_unavailable'],
+    [503, wrapped({error:{type:'new_api_error',code:'model_not_found',message:'private upstream text'}}), 'upstream_model_unavailable'],
     [503, {error:{message:'All matching channels are temporarily disabled'}}, 'route_temporarily_disabled', true],
     [410, {error:{message:'private upstream text'}}, 'endpoint_gone'],
   ]) for (const format of ['openai','gemini','responses','anthropic']) {
@@ -100,6 +102,8 @@ test('unstructured refusals, non-targeted 503, rate limits and broken streams ar
     [403,{error:{message:JSON.stringify({error:{message:JSON.stringify({code:'GROUP_DELETED'})}})}}],
     [404,{error:{message:'model_not_found'}}],
     [503,{error:{code:'GROUP_DELETED'}}],
+    [503,{error:{type:'new_api_error',message:'model_not_found'}}],
+    [503,{error:{type:'other_error',code:'model_not_found'}}],
     [503,{error:{message:'All matching channels are temporarily disabled'}}],
     [502,{error:{code:'GROUP_DELETED'}}],
     [429,{error:{code:'GROUP_DELETED'}}],
