@@ -163,6 +163,20 @@ const plugin = {
       if (path.endsWith('/channel-management/checks')) return json({data:fixtureChecks});
       if (path.endsWith('/channel-management')) return json({data:scope(managed),unavailable_sources:[]});
       if (path.endsWith('/sub2api/accounts')) return json({data:[testAccount]});
+      if (path.endsWith('/sub2api/channels')) {
+        const model_billing = {};
+        for (const [index, channel] of channels.slice(0, 6).entries()) {
+          const rate = [0.04000000000000001, 0.12345678, null, 0, 0.13, 0.1][index];
+          (model_billing[channel.source_id] ??= {})[channel.provider] = {
+            [channel.upstream_model]: {
+              name: channel.provider + '-' + (rate ?? '未知倍率'),
+              rate,
+              rate_source: index === 1 ? 'advertised' : 'observed',
+            },
+          };
+        }
+        return json({data:[],labels:{},model_billing,unavailable_sources:[]});
+      }
       if (path.endsWith('/sub2api/accounts/progress')) return json({data:[]});
       if (path.endsWith('/accounts/wallet-fixture/balance')) {
         await delay();

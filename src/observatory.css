@@ -391,11 +391,14 @@
 .workspace .channel-browser .table-scroll {overscroll-behavior-inline:contain}
 .workspace .observation-table[data-columns="run"] {min-width:100%;table-layout:fixed}
 .workspace .observation-table .channel-identity {width:clamp(9rem,21vw,17rem);min-width:8.5rem;max-width:17rem}
-.workspace .observation-table[data-compact] .channel-identity {width:43%}
-.workspace .observation-table[data-compact] .observation-status {width:23%}
+.workspace .observation-table .observation-multiplier {width:112px}
+.workspace .observation-table .observation-multiplier > span {display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workspace .observation-table[data-columns="run"][data-compact] {min-width:max(100%,440px)}
+.workspace .observation-table[data-columns="run"][data-compact][data-editing] {min-width:max(100%,512px)}
+.workspace .observation-table[data-compact] .observation-status {width:72px}
+.workspace .observation-table[data-compact] .observation-multiplier {width:84px;font-size:11px}
 .workspace .observation-table[data-compact] :is(th,td):not(.channel-identity) {white-space:normal}
 .workspace .observation-table[data-compact] :is(th,td).rank {width:27px;font-size:10px;padding-inline:5px}
-.workspace .observation-table[data-compact][data-ranked] .channel-identity {width:37%}
 .workspace .observation-table[data-compact]:not([data-editing]) .channel-identity {min-width:0}
 .workspace .observation-table .column-balance .balance-values {align-items:flex-end}
 .wallet-status-info {margin-inline-start:4px;vertical-align:-2px;color:var(--muted)}

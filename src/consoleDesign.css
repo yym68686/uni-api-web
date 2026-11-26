@@ -39,8 +39,9 @@ h1, h2, h3 { overflow-wrap: anywhere; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .workspace .observation-table .channel-link small { margin-top: 4px; }
-.workspace .observation-table[data-compact] .channel-identity { width: 40%; }
-.workspace .observation-table[data-compact][data-ranked] .channel-identity { width: 33%; }
+.workspace .observation-table[data-compact] .channel-identity { width: 28%; }
+.workspace .observation-table[data-compact][data-ranked] .channel-identity { width: 22%; }
+.workspace .observation-table[data-compact][data-editing] .channel-identity { width: 156px; }
 @media (min-width: 781px) {
   .workspace .observation-table[data-preview][data-ranked] .channel-identity { inset-inline-start: 68px; }
 }

@@ -26,6 +26,14 @@ it("shows and refreshes channel statistics independently of slow or failed billi
     if (u.pathname.endsWith("/sources")) return Response.json({ data: [{ id: "primary", name: "Fugue", base: "https://gateway.test", has_storage: true }] });
     if (u.pathname.endsWith("/api-keys")) return Response.json({ can_inspect_all: true, data: [{ key_id: "primary::caller", source_id: "primary", position: 1, prefix: "masked" }] });
     if (u.pathname.endsWith("/model-channels") || u.pathname.endsWith("/channel-metrics")) return Response.json({ data: channels });
+    if (u.pathname.endsWith("/sub2api/channels")) return Response.json({
+      data: [], labels: {primary: {"test-channel": "渠道-2026-0.04"}},
+      model_billing: {primary: {"test-channel": {
+        "gpt-6-luna": {name: "渠道-2026-0.04", rate: 0.04, rate_source: "advertised"},
+        "gpt-6-astra": {name: "渠道-2026-未知倍率", rate: null},
+      }}},
+      unavailable_sources: [],
+    });
     if (u.pathname.endsWith("/channel-controls")) return Response.json({ revision: "r1", instance_id: "gateway", rules: [] });
     if (u.pathname.endsWith("/analytics")) {
       // The former combined request cannot finish while billing is pending.
@@ -49,6 +57,10 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   await user.click(document.querySelector<HTMLElement>(".channel-browser .workbench-disclosure:last-child summary")!);
   await user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
   const table = await screen.findByRole("table");
+  const rateColumn = within(table).getByRole("columnheader", { name: "倍率" }) as HTMLTableCellElement;
+  const channelRow = (await within(table).findByRole("button", { name: "查看 渠道-2026 gpt-6-luna 详情" })).closest("tr")!;
+  expect(within(channelRow).getAllByRole("cell")[rateColumn.cellIndex]).toHaveTextContent(/^0\.04$/);
+  expect(within(channelRow).queryByText("渠道-2026-0.04")).not.toBeInTheDocument();
   expect(within(table).getByText("90.0%")).toBeVisible();
   await waitFor(() => expect(bills).toHaveLength(1));
   expect(metricsModels).toEqual(["gpt-6-luna"]);
@@ -71,6 +83,8 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   await user.selectOptions(screen.getByLabelText("模型筛选"), "gpt-6-astra");
   await waitFor(() => expect(bills).toHaveLength(3));
   expect(metricsReads).toBe(3);
+  const unknownRow = (await screen.findByRole("button", { name: "查看 渠道-2026 gpt-6-astra 详情" })).closest("tr")!;
+  expect(within(unknownRow).getAllByRole("cell")[rateColumn.cellIndex]).toHaveTextContent(/^—$/);
   expect(metricsModels).toEqual(["gpt-6-luna", "gpt-6-luna", "gpt-6-astra"]);
   expect(bills[2].url.searchParams.get("model")).toBe("gpt-6-astra");
   expect(bills[2].url.searchParams.get("to")).toBe("203");

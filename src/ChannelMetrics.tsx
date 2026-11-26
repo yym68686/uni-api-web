@@ -25,6 +25,9 @@ import { salePercent } from "./modelPrices";
 import { ChannelProfit, channelProfitCost } from "./ChannelProfit";
 import { groupRejectionDetail, type GroupRejection } from "./fingerprintRejections";
 import { observationPreset, type ChannelMetricLayout, type ObservationColumn, type DetectionColumn } from "./observationColumns";
+import { channelBillingHint } from "./channelBilling";
+
+const observationMultiplierFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
 type MetricColumnsProps = {
   layout?: ChannelMetricLayout;
   compact?: boolean;
@@ -197,6 +200,7 @@ export function ChannelMetricHeaders({
 }) {
   function header(id: ObservationColumn) {
     switch (id) {
+      case "multiplier": return <th scope="col" className="observation-multiplier">倍率</th>;
       case "status": return <th className="observation-status">路由状态</th>;
       case "inflight": return <th className="column-run observation-inflight">
         <Tip text="当前正在请求此渠道的全部 API key 的尝试数，不受历史时间窗口或 API key 用量筛选影响。">
@@ -271,6 +275,15 @@ export function ChannelMetricCells({
 }) {
   function cell(id: ObservationColumn) {
     switch (id) {
+      case "multiplier": {
+        const value = row.billing_multiplier;
+        return <td className="observation-multiplier mono">
+          {value == null ? <span className="muted">—</span> :
+            <span title={channelBillingHint(row) ?? String(value)}>
+              {value > 0 && value < 1e-8 ? value.toExponential(2) : observationMultiplierFormat.format(value)}
+            </span>}
+        </td>;
+      }
       case "status": return <td className="observation-status"><Status row={row} upstreamGroup={upstreamGroup} /></td>;
       case "inflight": return <td className="mono column-run observation-inflight">{inflight == null ? "—" : inflight}</td>;
       case "success": {

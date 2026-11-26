@@ -56,6 +56,7 @@ export interface Stats {
 export interface Channel {
   billing_multiplier?: number | null;
   billing_multiplier_source?: "observed" | "advertised";
+  observation_name?: string;
   provider_name?: string;
   history_configured?: boolean;
   source_id?: string;

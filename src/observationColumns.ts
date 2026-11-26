@@ -1,4 +1,5 @@
 export const observationColumns = [
+  { id: "multiplier", label: "倍率", className: "observation-multiplier" },
   { id: "status", label: "路由状态", className: "" },
   { id: "inflight", label: "当前并发", className: "column-run observation-inflight" },
   { id: "success", label: "尝试成功率", className: "column-run column-success" },
@@ -23,10 +24,10 @@ export const observationColumnClass = Object.fromEntries(observationColumns.map(
 export type ChannelMetricLayout = "run" | "quality" | "finance" | "all";
 
 export function observationPreset(layout: ChannelMetricLayout, compact = false, account = false): ObservationColumn[] {
-  if (compact && layout === "run") return ["status", "success", "balance"];
+  if (compact && layout === "run") return ["multiplier", "status", "success", "balance"];
   const detection: ObservationColumn[] = account && (layout === "quality" || layout === "all") ? ["quality", "fingerprint"] : [];
-  return [...detection, ...observationColumns.filter(({ id, className }) =>
-    id !== "quality" && id !== "fingerprint" && ((id === "fast" || id === "ultrafast") ? layout === "all" && account :
+  return ["multiplier", ...detection, ...observationColumns.filter(({ id, className }) =>
+    id !== "multiplier" && id !== "quality" && id !== "fingerprint" && ((id === "fast" || id === "ultrafast") ? layout === "all" && account :
       layout === "all" || id === "status" || id === "balance" || className.startsWith(`column-${layout}`)),
   ).map(({ id }) => id)];
 }

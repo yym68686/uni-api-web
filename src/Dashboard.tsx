@@ -88,7 +88,7 @@ import type { GroupRejection } from "./fingerprintRejections";
 import type { ChannelTimeseriesProps } from "./channelTimeseries";
 import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
-import { channelBilling, channelBillingHint } from "./channelBilling";
+import { channelBilling, channelObservationName } from "./channelBilling";
 import { useConsoleSources } from "./consoleSources";
 import {
   defaultFilters,
@@ -502,7 +502,7 @@ function Detail({
   if (!row) return null;
   const hasControls = !!row.source_id && trend.connection.account;
   return (
-    <DetailDrawer key={rowId(row)} title={<SiteLink base={site} provider={row.provider}>{channelName(row)}</SiteLink>}
+    <DetailDrawer key={rowId(row)} title={<SiteLink base={site} provider={row.provider}>{channelObservationName(row)}</SiteLink>}
       context={[row.source_name || row.source_id, row.upstream_model && row.upstream_model !== row.model ? `${row.upstream_model} → ${row.model}` : row.model].filter(Boolean).join(" · ")}
       close={onClose} closeLabel="关闭详情"
       actions={<><Status row={row} upstreamGroup={upstreamGroup} /><button type="button" className="button small" onClick={() => onLogs(row)}>查看相关日志</button></>}
@@ -754,7 +754,8 @@ export default function Dashboard({
 
   const [auto, setAuto] = useState(false);
   const [columnView, setColumnView] = useState<ChannelMetricLayout>("run");
-  const [customColumns, setCustomColumns] = useTableColumns("uni-console:channel-columns:v1", observationColumns);
+  const [customColumns, setCustomColumns] = useTableColumns("uni-console:channel-columns:v2", observationColumns,
+    { key: "uni-console:channel-columns:v1", append: ["multiplier"] });
   const compactViewport = useCompactWorkbench();
   const compactObservation = compactViewport && !customColumns && columnView === "run";
   const columnChoices = baseConnection.account ? observationColumns : observationColumns.filter(({ id }) => id !== "quality" && id !== "fingerprint" && !isServiceTier(id));
@@ -2002,7 +2003,8 @@ export default function Dashboard({
                         const historicalCost = historicalCostMap.get(providerId(row));
                         const control = adjustingChannels ? controls.info(row) : null;
                         const routeDisabled = previewingSort || routingSort.busy || !control?.ready || control.pending || control.stale;
-                        const routeLabel = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`.trim();
+                        const displayName = channelObservationName(row);
+                        const routeLabel = `${row.source_name || row.source_id || ""} ${displayName} ${row.model}`.trim();
                         const upstreamGroup = fingerprints.groupRejections.get(providerId(row));
                         return (
                           <tr key={rowId(row)} data-route-row={!routeDisabled ? rowId(row) : undefined}
@@ -2026,11 +2028,11 @@ export default function Dashboard({
                                 }}><GripVertical size={16} aria-hidden="true" /></button>}
                               <button
                                 className="channel-link"
-                                aria-label={`查看 ${channelName(row)} ${row.model} 详情`}
+                                aria-label={`查看 ${displayName} ${row.model} 详情`}
                                 onClick={() => openDetail(rowId(row))}
                               >
                                 <span>
-                                  <strong title={[channelName(row), channelBillingHint(row)].filter(Boolean).join(" · ")}>{channelName(row)}</strong>
+                                  <strong title={displayName}>{displayName}</strong>
                                   {(!model || row.source_name && !selectedSourceId) && <small>{!model && row.model}{!model && row.source_name && !selectedSourceId && " · "}{!selectedSourceId && row.source_name && <span className="source-label">{row.source_name}</span>}</small>}
                                 </span>
                               </button>

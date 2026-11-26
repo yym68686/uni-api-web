@@ -67,13 +67,15 @@ it("only colors first-response p50, not p95 or dispatch waiting", () => {
 });
 
 it("mounts only compact observation metrics and keeps counts aligned", () => {
-  const row = { provider: "channel", eligible: true, stats: { ...emptyStats(), success: 9, failed: 1, success_rate: .9, success_rate_denominator: 10 } } as Channel;
+  const row = { provider: "channel", eligible: true, billing_multiplier: 0, stats: { ...emptyStats(), success: 9, failed: 1, success_rate: .9, success_rate_denominator: 10 } } as Channel;
   render(<Tooltip.Provider><table>
     <thead><tr><ChannelMetricHeaders layout="run" compact /></tr></thead>
     <tbody><tr><ChannelMetricCells row={row} actualRange={{supported:false}} layout="run" compact /></tr></tbody>
   </table></Tooltip.Provider>);
-  expect(screen.getAllByRole("columnheader")).toHaveLength(3);
-  expect(screen.getAllByRole("cell")).toHaveLength(3);
+  expect(screen.getAllByRole("columnheader")).toHaveLength(4);
+  expect(screen.getAllByRole("cell")).toHaveLength(4);
+  expect(screen.getAllByRole("columnheader")[0]).toHaveTextContent("倍率");
+  expect(screen.getAllByRole("cell")[0]).toHaveTextContent(/^0$/);
   expect(screen.getByText("90.0%")).toBeVisible();
   expect(screen.getByText("9/10")).toBeVisible();
   expect(screen.queryByText("估算消费")).not.toBeInTheDocument();
