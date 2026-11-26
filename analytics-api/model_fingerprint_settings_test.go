@@ -24,11 +24,13 @@ func TestFingerprintSettingsRequireOptInForNewProfiles(t *testing.T) {
 	extended.models = maps.Clone(base.models)
 	extended.models[added] = base.models[checkModel]
 	extended.names = append(slices.Clone(base.names), added)
+	extended.deferred = map[string]string{"fixture-held": "offline_score"}
 	publishedFingerprintCatalog.Store(&extended)
 	t.Cleanup(func() { publishedFingerprintCatalog.Store(nil) })
 	request := func(owner, method, body string, want int) (out struct {
 		fingerprintPreferences
-		Supported []string `json:"supported_models"`
+		Supported []string          `json:"supported_models"`
+		Deferred  map[string]string `json:"deferred_models"`
 	}) {
 		t.Helper()
 		r := httptest.NewRequest(method, "/v1/model-fingerprints/settings", strings.NewReader(body))
@@ -56,6 +58,9 @@ func TestFingerprintSettingsRequireOptInForNewProfiles(t *testing.T) {
 	defaults := request(account.Owner, "GET", "", 200)
 	if !slices.Contains(defaults.Supported, added) || !slices.Contains(defaults.Models, checkModel) || slices.Contains(defaults.Models, added) {
 		t.Fatal("newly supported model should be visible but not enabled by default", defaults)
+	}
+	if defaults.Deferred["fixture-held"] != "offline_score" || slices.Contains(defaults.Supported, "fixture-held") {
+		t.Fatal("deferred references must be explained but not selectable", defaults)
 	}
 	count := func(tgt fingerprintTarget, want int) {
 		t.Helper()

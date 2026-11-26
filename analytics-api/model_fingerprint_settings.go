@@ -67,7 +67,8 @@ func (s *Service) fingerprintSettings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, struct {
 		fingerprintPreferences
-		Supported []string `json:"supported_models"`
-		Commit    string   `json:"reference_commit"`
-	}{prefs, catalog.names, catalog.commit})
+		Supported []string          `json:"supported_models"`
+		Commit    string            `json:"reference_commit"`
+		Deferred  map[string]string `json:"deferred_models,omitempty"`
+	}{prefs, catalog.names, catalog.commit, catalog.deferred})
 }

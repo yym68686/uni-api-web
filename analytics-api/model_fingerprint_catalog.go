@@ -27,7 +27,7 @@ import (
 // either the updater or the analytics service.
 const fingerprintCatalogURL = "https://raw.githubusercontent.com/yym68686/uni-api-web/fingerprint-data-v1/bundle.json"
 const fingerprintCatalogLimit = 16 << 20
-const fingerprintCatalogBuilderVersion = 2
+const fingerprintCatalogBuilderVersion = 3
 
 //go:embed fingerprint/publisher.pub
 var fingerprintPublisherKey string
@@ -35,6 +35,7 @@ var fingerprintPublisherKey string
 type fingerprintCatalog struct {
 	models               map[string]fingerprintReference
 	protocols            map[string]string
+	deferred             map[string]string
 	names                []string
 	commit, referenceKey string
 	builderVersion       int
@@ -101,6 +102,7 @@ func parseFingerprintBundle(raw []byte) (fingerprintBundle, *fingerprintCatalog,
 		Commit                string
 		CatalogBuilderVersion int `json:"catalog_builder_version"`
 		Files                 map[string]string
+		Deferred              map[string]string `json:"deferred"`
 	}
 	if json.Unmarshal(bundle.Files["manifest.json"], &manifest) != nil || !fingerprintCommit.MatchString(manifest.Commit) ||
 		manifest.CatalogBuilderVersion < 0 ||
@@ -111,8 +113,8 @@ func parseFingerprintBundle(raw []byte) (fingerprintBundle, *fingerprintCatalog,
 	for model, ref := range catalog.models {
 		protocol := catalog.protocols[model]
 		if !fingerprintID.MatchString(model) || !fingerprintID.MatchString(ref.ClassID) ||
-			(protocol != "responses" && protocol != "chat" && protocol != "gemini") ||
-			(ref.Effort != "low" && ref.Effort != "default") {
+			!validFingerprintContract(protocol, ref.Effort) ||
+			(ref.MaxTokens != 0 && (ref.MaxTokens < 1024 || ref.MaxTokens > 32768)) {
 			return fail()
 		}
 		if old, exists := fingerprintModels[model]; exists && (ref != old || protocol != fingerprintProtocols[model]) {
@@ -125,6 +127,16 @@ func parseFingerprintBundle(raw []byte) (fingerprintBundle, *fingerprintCatalog,
 			return fail()
 		}
 	}
+	if len(manifest.Deferred) > 512 {
+		return fail()
+	}
+	for model, reason := range manifest.Deferred {
+		if !fingerprintID.MatchString(model) || catalog.models[model].ClassID != "" ||
+			(reason != "request_contract" && reason != "reference_samples" && reason != "offline_score") {
+			return fail()
+		}
+	}
+	catalog.deferred = manifest.Deferred
 	sort.Strings(catalog.names)
 	catalog.commit, catalog.sequence, catalog.builderVersion = manifest.Commit, bundle.Sequence, manifest.CatalogBuilderVersion
 	catalog.referenceKey = makeFingerprintReferenceKey(bundle.Files["models.json"], bundle.Files["manifest.json"])

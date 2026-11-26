@@ -50,12 +50,24 @@ func deriveUpstreamFingerprintBundle(ctx context.Context, commit string, sequenc
 	}
 	defer os.RemoveAll(dir)
 	output := filepath.Join(dir, "catalog.json")
+	priorPath := filepath.Join(dir, "prior.json")
+	current := currentFingerprintCatalog()
+	prior, err := json.Marshal(struct {
+		Models    map[string]fingerprintReference `json:"models"`
+		Protocols map[string]string               `json:"protocols"`
+	}{current.models, current.protocols})
+	if err != nil {
+		return nil, err
+	}
+	if err = os.WriteFile(priorPath, prior, 0o600); err != nil {
+		return nil, err
+	}
 	scripts := os.Getenv("MODEL_FINGERPRINT_DIR")
 	if scripts == "" {
 		scripts = "fingerprint"
 	}
 	cmd := exec.CommandContext(ctx, "node", "--max-old-space-size=192", "--max-semi-space-size=4",
-		filepath.Join(scripts, "publish-catalog.mjs"), "--derive", commit, output)
+		filepath.Join(scripts, "publish-catalog.mjs"), "--derive", commit, output, priorPath)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "NODE_NO_WARNINGS=1"}
 	if err = cmd.Run(); err != nil {
 		return nil, fmt.Errorf("offline upstream validation failed at %s: %w", commit, err)

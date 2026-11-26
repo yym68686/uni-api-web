@@ -23,6 +23,7 @@ test('every enabled profile scores three references and emits its exact request 
       if (protocol==='gemini') {
         assert.equal(path,`/v1beta/models/${model}:streamGenerateContent`);
         assert.equal(body.generationConfig.thinkingConfig?.thinkingLevel,effort);
+        assert.equal(body.generationConfig.maxOutputTokens,profile.max_tokens ?? 8192);
         assert.equal(body.reasoning,undefined);
         return Response.json({candidates:[{content:{parts:[{text}]},finishReason:'STOP'}]});
       }
@@ -30,10 +31,22 @@ test('every enabled profile scores three references and emits its exact request 
       assert.equal(body.stream,true);
       if (protocol==='chat') {
         assert.equal(path,'/v1/chat/completions');
-        assert.equal(body.reasoning_effort,effort);
+        assert.equal(body.max_tokens,profile.max_tokens ?? 8192);
+        if (/^openpangu-/i.test(model) && effort==='none') {
+          assert.deepEqual(body.chat_template_kwargs,{thinking:false});
+          assert.equal(body.reasoning_effort,undefined);
+        } else assert.equal(body.reasoning_effort,effort);
         return Response.json({choices:[{message:{content:text},finish_reason:'stop'}]});
       }
+      if (protocol==='messages') {
+        assert.equal(path,'/v1/messages');
+        assert.equal(body.max_tokens,profile.max_tokens ?? 8192);
+        assert.equal(body.thinking?.type,effort==='none' ? 'disabled' : effort ? 'adaptive' : undefined);
+        assert.equal(body.output_config?.effort,effort==='none' ? undefined : effort);
+        return Response.json({type:'message',content:[{type:'text',text}],stop_reason:'end_turn'});
+      }
       assert.equal(path,'/v1/responses');
+      assert.equal(body.max_output_tokens,profile.max_tokens ?? 8192);
       assert.equal(body.reasoning?.effort,effort);
       return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text}]}]});
     });

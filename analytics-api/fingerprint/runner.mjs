@@ -94,7 +94,7 @@ function resumable(config, format) {
 export async function collect(config, transport, signal, checkpoint) {
   if (!models.includes(config.model)) throw Error('unsupported_model');
   const protocol = protocols[config.model];
-  const format = config.format || (protocol === 'chat' ? 'openai' : protocol);
+  const format = config.format || ({chat:'openai',messages:'anthropic'}[protocol] ?? protocol);
   if (!['responses', 'anthropic', 'openai', 'gemini'].includes(format)) throw Error('unsupported_protocol');
   // Non-Responses targeting requires Go's authenticated gateway capability check.
   if (config.provider && format !== 'responses') throw Error('targeted_bridge_required');
@@ -115,7 +115,8 @@ export async function collect(config, transport, signal, checkpoint) {
     let stopRound = false;
     let responseStatus;
     try {
-      const cfg = {baseUrl: base.href, apiKey: config.key, model: config.model, format, effort: modelClasses[config.model].effort, stream: true, targeted: config.targeted === true || !!config.provider};
+      const {effort,max_tokens} = modelClasses[config.model];
+      const cfg = {baseUrl: base.href, apiKey: config.key, model: config.model, format, effort, stream: true, targeted: config.targeted === true || !!config.provider};
       const send = transport || (async (url, cfg, body, requestSignal) => {
         const destination = new URL(url); destination.protocol = scheme;
         const response = await fetch(destination, { method: 'POST', redirect: 'error', signal: signal ? AbortSignal.any([signal, requestSignal]) : requestSignal,
@@ -125,8 +126,12 @@ export async function collect(config, transport, signal, checkpoint) {
           body: JSON.stringify(body) });
         return response;
       });
-      const boundedSend = async (...args) => {
-        const response = await send(...args);
+      const boundedSend = async (url, config, body, requestSignal) => {
+        if (max_tokens !== undefined) {
+          if (format === 'gemini') body.generationConfig.maxOutputTokens = max_tokens;
+          else body[format === 'responses' ? 'max_output_tokens' : 'max_tokens'] = max_tokens;
+        }
+        const response = await send(url, config, body, requestSignal);
         responseStatus = response.status;
         return fingerprintResponse(bounded(response), cfg);
       };

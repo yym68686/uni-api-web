@@ -63,8 +63,38 @@ var fingerprintProtocols = func() map[string]string {
 }()
 
 type fingerprintReference struct {
-	ClassID string `json:"class_id"`
-	Effort  string `json:"effort"`
+	ClassID   string `json:"class_id"`
+	Effort    string `json:"effort"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
+}
+
+func fingerprintWireFormat(protocol string) string {
+	switch protocol {
+	case "responses", "gemini":
+		return protocol
+	case "chat":
+		return "openai"
+	case "messages":
+		return "anthropic"
+	default:
+		return ""
+	}
+}
+
+func validFingerprintContract(protocol, effort string) bool {
+	if fingerprintWireFormat(protocol) == "" {
+		return false
+	}
+	switch effort {
+	case "default", "low":
+		return true
+	case "none":
+		return protocol == "chat" || protocol == "messages"
+	case "minimal":
+		return protocol == "chat"
+	default:
+		return false
+	}
 }
 
 var fingerprintModels = func() map[string]fingerprintReference {
@@ -258,7 +288,7 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 	}
 	catalog := currentFingerprintCatalog()
 	protocol := catalog.protocols[t.Model]
-	format := map[string]string{"responses": "responses", "gemini": "gemini", "chat": "openai"}[protocol]
+	format := fingerprintWireFormat(protocol)
 	if format == "" {
 		return plan, errors.New("模型未配置指纹采样协议")
 	}
@@ -336,9 +366,12 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 		targetProtocol, allowUnconfigured := "", caps.Unconfigured
 		if explicit {
 			protocol = savedFingerprintProtocol(endpoint.Base)
-			format = map[string]string{"responses": "responses", "gemini": "gemini", "chat": "openai", "messages": "anthropic"}[protocol]
+			format = fingerprintWireFormat(protocol)
 			if format == "" {
 				return plan, errors.New("已配置的模型端点不支持文本指纹采样")
+			}
+			if !validFingerprintContract(protocol, catalog.models[t.Model].Effort) {
+				return plan, errors.New("已配置的模型端点不支持参考采样力度")
 			}
 			if protocol != "responses" {
 				if !caps.Upstream {
@@ -353,6 +386,8 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 			allowUnconfigured = false
 			plan.site = fingerprintSite(endpoint.Base)
 			plan.sampleKey = tokenHash(revision + "\n" + format + "\n" + endpoint.Base + "\n" + endpoint.Upstream)
+		} else if protocol == "messages" && caps.Upstream {
+			targetProtocol = "endpoint-messages"
 		} else if protocol != "responses" {
 			if !slices.Contains(caps.Fingerprints, protocol) {
 				return plan, errors.New("来源网关不支持此模型的定向指纹协议（" + protocol + "），请更新网关")

@@ -11,7 +11,8 @@ it("saves only selected fingerprint models and never selects a catalog addition 
       if (rejectSave) return new Response("设置暂不可用", { status: 503 });
       enabled = JSON.parse(String(init.body)).enabled_models;
     }
-    return Response.json({ supported_models: supported, enabled_models: enabled, reference_commit: "a".repeat(40) });
+    return Response.json({ supported_models: supported, enabled_models: enabled, reference_commit: "a".repeat(40),
+      deferred_models: { "fixture-held": "offline_score" } });
   });
   vi.stubGlobal("fetch", fetcher);
   const client = new QueryClient();
@@ -23,6 +24,9 @@ it("saves only selected fingerprint models and never selects a catalog addition 
     const gemini = screen.getByRole("checkbox", { name: "gemini-4-argon" });
     expect(gpt).toBeChecked();
     expect(gemini).not.toBeChecked();
+    fireEvent.click(screen.getByText("暂不支持的参考模型 · 1"));
+    expect(screen.getByText("fixture-held").parentElement).toHaveTextContent("未通过离线识别验证");
+    expect(screen.queryByRole("checkbox", { name: "fixture-held" })).toBeNull();
     fireEvent.click(gpt);
     fireEvent.click(gemini);
     supported = [...supported, "gpt-new"];

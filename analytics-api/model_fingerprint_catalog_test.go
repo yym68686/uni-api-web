@@ -46,6 +46,55 @@ func signedFingerprintFixture(t *testing.T, key ed25519.PrivateKey, sequence int
 	return raw
 }
 
+func TestFingerprintBundleChecksExpandedSamplingProfiles(t *testing.T) {
+	pub, key, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := verifyFingerprintBundle(signedFingerprintFixture(t, key, 42, false), pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, protocol, effort, deferred string
+		max                              int
+		ok                               bool
+	}{
+		{"messages with output cap", "messages", "default", "request_contract", 4096, true},
+		{"chat minimal", "chat", "minimal", "offline_score", 0, true},
+		{"gemini cannot use none", "gemini", "none", "request_contract", 0, false},
+		{"unbounded output", "chat", "low", "request_contract", 32769, false},
+		{"unrecognized deferred reason", "chat", "none", "untrusted diagnostic", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var models map[string]fingerprintReference
+			var protocols map[string]string
+			var manifest map[string]json.RawMessage
+			files := map[string][]byte{}
+			for k, v := range base.Files {
+				files[k] = v
+			}
+			for name, out := range map[string]any{"models.json": &models, "protocols.json": &protocols, "manifest.json": &manifest} {
+				if err := json.Unmarshal(files[name], out); err != nil {
+					t.Fatal(err)
+				}
+			}
+			const fixture = "fixture-new-model"
+			protocols[fixture] = tc.protocol
+			models[fixture] = fingerprintReference{ClassID: fingerprintModels["gpt-6-astra"].ClassID, Effort: tc.effort, MaxTokens: tc.max}
+			manifest["deferred"] = json.RawMessage(mustJSON(map[string]string{"fixture-deferred": tc.deferred}))
+			files["models.json"], files["protocols.json"], files["manifest.json"] = []byte(mustJSON(models)), []byte(mustJSON(protocols)), []byte(mustJSON(manifest))
+			_, catalog, err := parseFingerprintBundle([]byte(mustJSON(fingerprintBundle{Schema: base.Schema, Sequence: base.Sequence, Files: files})))
+			if (err == nil) != tc.ok {
+				t.Fatalf("unexpected bundle validation result: %v", err)
+			}
+			if tc.ok && (catalog.models[fixture] != models[fixture] || catalog.deferred["fixture-deferred"] != tc.deferred) {
+				t.Fatal("sampling contract or deferred diagnostic was lost")
+			}
+		})
+	}
+}
+
 func TestFingerprintCatalogPersistsOnlyVerifiedAndValidatedGenerations(t *testing.T) {
 	s, account, source := bindingFixture(t, "https://example.test")
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)

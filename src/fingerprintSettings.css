@@ -21,3 +21,10 @@
 }
 .fingerprint-settings-models input { accent-color: var(--accent); }
 .fingerprint-settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.fingerprint-deferred { margin-block-start: 16px; }
+.fingerprint-deferred ul {
+  max-height: 18rem;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding-inline-start: 22px;
+}

@@ -199,12 +199,27 @@ old checks. Manual fingerprint checks and jobs already submitted are unaffected.
 The analytics service checks lm-detector at startup and every 15 minutes
 (`FINGERPRINT_CATALOG_SYNC=1`). It reads data at an immutable upstream commit
 and runs the bundled validator against the pinned scorer and request logic.
-New exact IDs need consistent metadata for a supported request format and
-effort, and three complete samples that pass offline scoring and transport
-tests. The upstream `chat_completions` label maps only to the existing Chat
-Completions adapter; Gemini's `google/` alias is accepted there only when the
-source declares the exact requested ID as a response model. Incompatible new
-profiles stay out of the list. Invalid candidates, missing existing profiles,
+New IDs need a supported streaming request contract and three independently
+scorable reference examples from that contract. The builder prefers three
+explicitly complete examples, but can verify three historical `unknown`
+examples offline, just like bundled legacy fixtures. It does not relabel them
+as complete or accept incomplete/unknown live responses. It never combines
+examples from different request contracts. Existing models keep their
+published contract when still usable. Invalid examples for a new model do not
+block other models, and settings explain deferred reference classes separately
+from selectable models.
+
+The importer recognizes the Chat Completions, Responses, native Gemini and
+Messages adapters. It recognizes explicit publisher namespaces such as
+`z-ai/` only when the reference declares that exact requested ID as a response
+model. An empty effort string is the upstream serializer's default (omitted on
+the wire); null is unknown. The sampler preserves supported effort values and
+bounded explicit output token limits. Unexpected parameters, non-default
+tiers and non-null temperature are not silently dropped. A Messages probe
+for a configured channel also requires gateway support for the exact endpoint.
+Declared and explicitly reviewed console aliases use the same scoring class
+while preserving the requested model name on the wire.
+Invalid candidates, missing existing profiles,
 changes to an existing request contract, and
 upstream outages leave the last known good catalog in use. Changing the scorer
 or supporting a new request format requires a reviewed code change.

@@ -7,13 +7,23 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { decodeDetector } from './upstream/detector-codec.ts';
+import { analyzeSharedOutputs } from './upstream/shared-detector.ts';
 
 const here = name => new URL(name, import.meta.url);
 const read = name => JSON.parse(readFileSync(here(name)));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const id = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-const catalogBuilderVersion = 2; // Keep in sync with fingerprintCatalogBuilderVersion in Go.
-const knownFormats = {responses:'responses',openai:'chat',chat_completions:'chat',gemini:'gemini'};
+const catalogBuilderVersion = 3; // Keep in sync with fingerprintCatalogBuilderVersion in Go.
+const knownFormats = {responses:'responses',openai:'chat',chat_completions:'chat',gemini:'gemini',messages:'messages',anthropic:'messages'};
+const publisher = {gpt:'openai', gemini:'google', glm:'z-ai', claude:'anthropic', grok:'x-ai', kimi:'moonshotai',
+  hunyuan:'tencent', mimo:'xiaomi', muse:'meta', seed:'bytedance-seed'};
+// These exact public IDs are pinned by model_catalog.json. This maps the
+// scoring class only; the sampler still requests the configured public ID.
+const consoleAliases = new Map([
+  ['claude-fable-5.2','claude-fable-5-2'], ['claude-haiku-5.5','claude-haiku-5-5'],
+  ['claude-opus-5.5','claude-opus-5-5'], ['claude-sonnet-5.5','claude-sonnet-5-5'],
+]);
+const requestFields = new Set(['model','format','stream','reasoning_effort','response_models','service_tier','max_tokens','temperature']);
 const baseModels = read('models.json'), baseProtocols = read('protocols.json');
 
 async function upstream(commit, path, limit) {
@@ -31,43 +41,93 @@ async function upstream(commit, path, limit) {
 
 function profile(run, model) {
   const r = run.request;
-  if (!r || !Object.hasOwn(knownFormats,r.format) || !['low','default'].includes(r.reasoning_effort) || r.stream !== true) return;
-  // New modes, tiers, or provider-specific options require an intentional adapter.
-  if (Object.keys(r).some(k=>!['model','format','stream','reasoning_effort','response_models','service_tier'].includes(k)) ||
+  if (!r || !Object.hasOwn(knownFormats,r.format) || r.stream !== true || typeof r.model !== 'string') return;
+  const protocol = knownFormats[r.format];
+  // The upstream serializer omits the effort field for both "" and "default".
+  // An unknown (null/missing) effort is not evidence of the default contract.
+  const effort = r.reasoning_effort === '' ? 'default' : r.reasoning_effort;
+  if (!['low','default'].includes(effort) &&
+      !(effort === 'none' && (protocol === 'chat' || protocol === 'messages')) &&
+      !(effort === 'minimal' && protocol === 'chat')) return;
+  if (Object.keys(r).some(k=>!requestFields.has(k)) || r.temperature != null ||
       (r.service_tier != null && r.service_tier !== 'default')) return;
-  if (typeof r.model !== 'string') return;
+  const max = r.max_tokens ?? 8192;
+  if (!Number.isSafeInteger(max) || max < 1024 || max > 32768) return;
   const canonical = [model.id,`${model.family === 'gpt' ? 'openai' : model.family}/${model.id}`];
-  // OpenRouter's Google namespace differs from the bank's Gemini family.
-  // Require the exact model and declared response identity, not a version or provider guess.
-  const googleAlias = model.family === 'gemini' && knownFormats[r.format] === 'chat' &&
-    r.model === `google/${model.id}` && Array.isArray(r.response_models) && r.response_models.includes(r.model);
-  if (!canonical.includes(r.model) && !googleAlias) return;
-  return {protocol:knownFormats[r.format],effort:r.reasoning_effort};
+  const vendor = Object.hasOwn(publisher,model.family) ? publisher[model.family] : '';
+  const upstreamId = model.id === 'seed-2.1-turbo' ? 'seed-2-1-turbo' : model.id;
+  // New namespaces must declare the exact request model as a response model.
+  // Never strip an arbitrary namespace or infer an alias from a prefix alone.
+  const vendorAlias = vendor && r.model === `${vendor}/${upstreamId}` &&
+    Array.isArray(r.response_models) && r.response_models.includes(r.model);
+  if (!canonical.includes(r.model) && !vendorAlias) return;
+  return {protocol,effort,...(max === 8192 ? {} : {max_tokens:max})};
 }
 
-export function deriveCatalog(bank, detector, runs) {
+function sampleFixtures(runs, completion) {
+  const samples = runs.flatMap(r=>r.samples ?? []).filter(s=>s.completion===completion &&
+    Number.isSafeInteger(s.expected_count) && s.expected_count>=292 && s.expected_count<=332 &&
+    typeof s.text==='string' && s.text.length<=65536);
+  return [...new Map(samples.map(s=>[s.expected_count,s])).values()].slice(0,3);
+}
+
+function declaredAlias(model, runs) {
+  if (model.family !== 'claude' || !model.id.includes('.')) return '';
+  if (consoleAliases.has(model.id)) return consoleAliases.get(model.id);
+  const alias = model.id.replaceAll('.', '-');
+  return runs.some(r=>Array.isArray(r.request.response_models) && r.request.response_models.includes(alias)) ? alias : '';
+}
+
+export function deriveCatalog(bank, detector, runs, validate, previous) {
   if (bank.models.length !== detector.model_ids.length || bank.models.some((m,i)=>m.id!==detector.model_ids[i] || m.response_count!==detector.response_counts[i])) throw Error('bank and detector disagree');
-  const models = {...baseModels}, protocols = {...baseProtocols}, fixtures = read('reference-fixture.json'), held = [];
+  const models = {...baseModels}, protocols = {...baseProtocols}, fixtures = read('reference-fixture.json'), held = [], deferred = {};
+  const classes = new Set(detector.model_ids);
+  const defer = (model, reason) => { held.push(model.id); deferred[model.id] = reason; };
   for (const v of Object.values(models)) if (!detector.model_ids.includes(v.class_id)) throw Error(`existing class is absent: ${v.class_id}`);
   for (const model of bank.models) {
     if (!id.test(model.id) || Object.hasOwn(models,model.id) || Object.values(baseModels).some(v=>v.class_id===model.id)) continue;
     const relevant = runs.filter(r=>r.model?.id===model.id && Object.hasOwn(model.sources ?? {},r.source?.channel));
-    const profiles = relevant.map(r=>profile(r,model));
-    const contract = profiles[0];
-    if (!contract || profiles.some(p=>!p || p.protocol!==contract.protocol || p.effort!==contract.effort)) {
-      held.push(model.id);
-      continue;
+    const groups = new Map();
+    for (const run of relevant) {
+      const contract = profile(run,model);
+      if (!contract) continue;
+      const key = JSON.stringify(contract);
+      const group = groups.get(key) ?? {contract,runs:[]};
+      group.runs.push(run);
+      groups.set(key,group);
     }
-    const samples = relevant.flatMap(r=>r.samples ?? []).filter(sample=>sample.completion==='complete' &&
-      Number.isSafeInteger(sample.expected_count) && sample.expected_count>=292 && sample.expected_count<=332 &&
-      typeof sample.text==='string' && sample.text.length<=65536);
-    const usable = [...new Map(samples.map(s=>[s.expected_count,s])).values()].slice(0,3);
-    if (usable.length<3) { held.push(model.id); continue; }
-    models[model.id] = {class_id:model.id,class_name:model.display_name || model.id,effort:contract.effort};
-    protocols[model.id] = contract.protocol;
-    fixtures[model.id] = usable.map(({text,expected_count})=>({text,expected_count}));
+    if (!groups.size) { defer(model,'request_contract'); continue; }
+    const candidates = [...groups.values()].map(group => {
+      const complete = sampleFixtures(group.runs,'complete');
+      // Historical "unknown" is offline scoring evidence only. Never accept
+      // it as a live sample, or use truncated/rejected/undeclared records.
+      return {...group,modern:complete.length===3,
+        examples:complete.length===3 ? complete : sampleFixtures(group.runs,'unknown')};
+    }).filter(g=>g.examples.length===3);
+    if (!candidates.length) { defer(model,'reference_samples'); continue; }
+    const existing = previous?.models[model.id];
+    const matchesExisting = ({contract}) => !!existing && existing.class_id === model.id &&
+      existing.effort === contract.effort && existing.max_tokens === contract.max_tokens &&
+      previous.protocols[model.id] === contract.protocol;
+    // Prefer explicit complete evidence; prefer the old builder's exact
+    // default token contract when both variants are present. Do not mix them.
+    candidates.sort((a,b)=>Number(matchesExisting(b))-Number(matchesExisting(a)) || Number(b.modern)-Number(a.modern) ||
+      Number(!!a.contract.max_tokens)-Number(!!b.contract.max_tokens));
+    const pick = candidates[0];
+    const usable = pick.examples.map(({text,expected_count})=>({text,expected_count}));
+    if (validate && !validate(model.id,usable)) { defer(model,'offline_score'); continue; }
+    const {protocol,...request} = pick.contract;
+    const entry = {class_id:model.id,class_name:model.display_name || model.id,...request};
+    models[model.id] = entry;
+    protocols[model.id] = protocol;
+    fixtures[model.id] = usable;
+    const alias = declaredAlias(model,pick.runs);
+    if (alias && id.test(alias) && !classes.has(alias) && !Object.hasOwn(models,alias)) {
+      models[alias] = entry;
+      protocols[alias] = protocol;
+    }
   }
-  return {models,protocols,fixtures,held};
+  return {models,protocols,fixtures,held,deferred};
 }
 
 function previousBundle(path) {
@@ -101,19 +161,26 @@ async function buildCatalog(commit, previous) {
   const bank = JSON.parse(bankBytes), detector = decodeDetector(detectorBytes);
   if (bank.reference_sha256!==sha(refBytes)) throw Error('reference provenance digest mismatch');
   const runs = refBytes.toString().trimEnd().split('\n').map(line=>JSON.parse(line));
-  const {models,protocols,fixtures,held} = deriveCatalog(bank,detector,runs);
-  if (previous) {
-    const priorModels = JSON.parse(Buffer.from(previous.files['models.json'],'base64'));
-    const priorProtocols = JSON.parse(Buffer.from(previous.files['protocols.json'],'base64'));
-    for (const [model,ref] of Object.entries(priorModels)) {
-      if (models[model]?.class_id!==ref.class_id || models[model]?.effort!==ref.effort || protocols[model]!==priorProtocols[model]) throw Error(`published model contract changed: ${model}`);
+  const existing = previous?.files ? {
+    models:JSON.parse(Buffer.from(previous.files['models.json'],'base64')),
+    protocols:JSON.parse(Buffer.from(previous.files['protocols.json'],'base64')),
+  } : previous;
+  const {models,protocols,fixtures,held,deferred} = deriveCatalog(bank,detector,runs,(classId,examples)=>{
+    const scored = analyzeSharedOutputs(examples,bank,detector,{allowPartial:true});
+    const decision = scored.decision ?? (scored.results.length ? 'scored' : 'unscorable');
+    return scored.used_outputs===3 && decision==='scored' && scored.prediction===classId;
+  },existing);
+  if (existing) {
+    for (const [model,ref] of Object.entries(existing.models)) {
+      if (models[model]?.class_id!==ref.class_id || models[model]?.effort!==ref.effort ||
+          models[model]?.max_tokens!==ref.max_tokens || protocols[model]!==existing.protocols[model]) throw Error(`published model contract changed: ${model}`);
     }
   }
-  console.log('Awaiting compatible sampling metadata:',held.join(', ') || 'none');
+  console.log('Deferred fingerprint reference classes:',held.length ? JSON.stringify(deferred) : 'none');
   const files = {
     'models.json':Buffer.from(JSON.stringify(models)),
     'protocols.json':Buffer.from(JSON.stringify(protocols)),
-    'manifest.json':Buffer.from(JSON.stringify({repository:'https://github.com/Ikaleio/lm-detector',commit,catalog_builder_version:catalogBuilderVersion,files:{
+    'manifest.json':Buffer.from(JSON.stringify({repository:'https://github.com/Ikaleio/lm-detector',commit,catalog_builder_version:catalogBuilderVersion,deferred,files:{
       ...sourceFiles,'data/unified_bank.json':sha(bankBytes),'data/shared_detector.bin':sha(detectorBytes),
     }})),
     'data/unified_bank.json.gz':gzipSync(bankBytes),
@@ -142,10 +209,10 @@ async function publish(commit, output, keyPath, previousPath) {
   writeBundle(output,keyPath,await buildCatalog(commit,previous),previous);
 }
 
-async function derive(commit, output) {
-  if (!output) throw Error('usage: node publish-catalog.mjs --derive <commit> <output>');
+async function derive(commit, output, prior) {
+  if (!output) throw Error('usage: node publish-catalog.mjs --derive <commit> <output> [current-contracts.json]');
   // This file is private IPC with the Go updater, not an externally accepted bundle.
-  const payload = JSON.stringify({schema:1,files:await buildCatalog(commit)});
+  const payload = JSON.stringify({schema:1,files:await buildCatalog(commit,prior ? JSON.parse(readFileSync(prior)) : undefined)});
   if (Buffer.byteLength(payload)>(16<<20)) throw Error('fingerprint bundle exceeds runtime bound');
   writeFileSync(output,payload,{flag:'wx',mode:0o600});
 }
@@ -153,7 +220,7 @@ async function derive(commit, output) {
 if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   const [commit,output,key,prev,restore] = process.argv.slice(2);
   if (commit==='--derive') {
-    await derive(output,key);
+    await derive(output,key,prev);
   } else if (commit==='--restore') {
     const current = previousBundle(prev), target = previousBundle(restore);
     if (!current || !target || target.schema!==1 || target.sequence>=current.sequence) throw Error('restore requires an older verified generation');

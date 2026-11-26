@@ -8,10 +8,16 @@ type Settings = {
   supported_models: string[];
   enabled_models: string[];
   reference_commit: string;
+  deferred_models?: Record<string, string>;
 };
 
 const path = "/v1/model-fingerprints/settings";
 const queryKey = ["fingerprint-settings"];
+const deferredReasons: Readonly<Record<string, string>> = {
+  request_contract: "参考采样协议或参数暂不兼容",
+  reference_samples: "可用于离线验证的参考样本不足",
+  offline_score: "未通过离线识别验证",
+};
 
 export function FingerprintSettings() {
   const client = useQueryClient();
@@ -30,6 +36,7 @@ export function FingerprintSettings() {
   const selection = settings?.supported_models.filter((model) => enabled.has(model)) ?? [];
   const changed = !!settings && (selection.length !== settings.enabled_models.length ||
     selection.some((model) => !settings.enabled_models.includes(model)));
+  const deferred = Object.entries(settings?.deferred_models ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
   async function save() {
     if (!changed || saving || query.isError) return;
@@ -81,5 +88,14 @@ export function FingerprintSettings() {
       <button className="button small primary" disabled={!changed || saving || query.isError} onClick={() => void save()}>{saving ? "保存中…" : "保存勾选"}</button>
       <button className="button small" disabled={saving || query.isFetching} onClick={() => void query.refetch()}>重新读取列表</button>
     </div>
+    {deferred.length > 0 && <details className="fingerprint-reference fingerprint-deferred">
+      <summary>暂不支持的参考模型 · {deferred.length}</summary>
+      <p className="muted">这些模型已有参考数据，但目前还不能用于指纹检测。</p>
+      <ul>
+        {deferred.map(([model, reason]) => <li key={model}>
+          <span className="mono">{model}</span>{" — "}{Object.hasOwn(deferredReasons, reason) ? deferredReasons[reason] : "尚未通过目录验证"}
+        </li>)}
+      </ul>
+    </details>}
   </section>;
 }
