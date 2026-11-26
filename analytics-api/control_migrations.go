@@ -163,6 +163,9 @@ var siteCheckTierProjectionSQL string
 //go:embed migrations/0041_management_tier_signals.sql
 var managementTierSignalsSQL string
 
+//go:embed migrations/0042_site_tier_group_evidence.sql
+var siteTierGroupEvidenceSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -215,6 +218,7 @@ func controlMigrations() []controlMigration {
 		{"0039_configured_check_suite", configuredCheckSuiteSQL, []string{"console_configured_checks"}},
 		{"0040_site_check_tier_projection", siteCheckTierProjectionSQL, []string{"console_sub_models", "console_sub_targets"}},
 		{"0041_management_tier_signals", managementTierSignalsSQL, []string{"console_management_model_signal", "console_sub_models"}},
+		{"0042_site_tier_group_evidence", siteTierGroupEvidenceSQL, []string{"console_sub_targets"}},
 	}
 }
 

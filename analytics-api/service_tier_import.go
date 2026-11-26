@@ -106,6 +106,28 @@ func validTierChoices(v map[string]bool) bool {
 	return true
 }
 
+func verifyImportedTiers(ctx context.Context, src controlSource, provider string, in subImportInput) error {
+	const guidance = "请刷新后在该渠道的请求规则核对，勿重复添加。"
+	providers, err := effectiveProviders(ctx, src, true)
+	if err != nil {
+		return errors.New("渠道已添加，但未能读取 Fast / Ultrafast 的实际开关。" + guidance)
+	}
+	for _, live := range providers {
+		if live.Provider != provider || !live.Temporary || live.IdentityChanged {
+			continue
+		}
+		for _, tier := range []struct{ key, label string }{{"fast", "Fast"}, {"ultrafast", "Ultrafast"}} {
+			enabled := in.ServiceTierEnabled[tier.key] || in.ServiceTierSiteChoices[tier.key]
+			state := live.ServiceTierRouting[tier.key]
+			if enabled && state != "enabled" || !enabled && state != "disabled" && state != "disabled_verified" {
+				return errors.New("渠道已添加，但网关未按选择应用 " + tier.label + "。" + guidance)
+			}
+		}
+		return nil
+	}
+	return errors.New("渠道已添加，但未能确认网关中的新渠道。" + guidance)
+}
+
 // No upstream access: the gateway compiles the prospective channel in memory
 // and returns only credential-bound digests. The business key never leaves
 // the console/gateway trust boundary. This is not a billable probe.

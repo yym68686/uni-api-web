@@ -98,7 +98,7 @@ func TestManagementTierSignalRepairRestoresColdAvailabilityPage(t *testing.T) {
 	}
 }
 
-func TestManagementTierSignalsRejectMalformedValuesAndClearOnCredentialChange(t *testing.T) {
+func TestManagementTierSignalsRejectMalformedValuesAndFollowGroupIdentity(t *testing.T) {
 	s := managementHydrationFixture(t)
 	ctx := context.Background()
 	db := s.control.db
@@ -119,8 +119,15 @@ func TestManagementTierSignalsRejectMalformedValuesAndClearOnCredentialChange(t 
 	}
 	exec(`UPDATE console_sub_models SET result=jsonb_set(result,'{service_tiers,fast,checked_at}','123') WHERE group_id=1 AND model='gpt-5.5';
  UPDATE console_sub_targets SET remote_key_id=999 WHERE group_id=1 AND account_id='a'`)
-	var valid, cleared bool
-	if err := db.QueryRow(`SELECT valid,service_tiers IS NULL FROM console_management_model_signal WHERE group_id=1 AND model='gpt-5.5'`).Scan(&valid, &cleared); err != nil || !valid || !cleared {
-		t.Fatal("rotated credential kept tier evidence", valid, cleared, err)
+	var valid, retained bool
+	if err := db.QueryRow(`SELECT valid,COALESCE(service_tiers#>>'{fast,status}'='supported',false)
+ FROM console_management_model_signal WHERE account_id='a' AND group_id=1 AND model='gpt-5.5'`).Scan(&valid, &retained); err != nil || !valid || !retained {
+		t.Fatal("rotating the same group's detection key removed its tier evidence", valid, retained, err)
+	}
+	exec(`UPDATE console_sub_targets SET platform='anthropic' WHERE group_id=1 AND account_id='a'`)
+	var cleared bool
+	if err := db.QueryRow(`SELECT valid,service_tiers IS NULL FROM console_management_model_signal
+ WHERE account_id='a' AND group_id=1 AND model='gpt-5.5'`).Scan(&valid, &cleared); err != nil || !valid || !cleared {
+		t.Fatal("changed platform kept former tier evidence", valid, cleared, err)
 	}
 }

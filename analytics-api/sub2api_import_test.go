@@ -91,6 +91,8 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	startSyncOnRead := false
 	changedIdentity := false
 	exposeInstalled := false
+	tierReadback := false
+	routingDrift := false
 	var last map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		success := func(data any) { writeJSON(w, 200, map[string]any{"code": 0, "data": data}) }
@@ -157,10 +159,18 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 				checkModel: {Binding: strings.Repeat("b", 64)},
 			}})
 		case "/v1/channel-settings/providers":
+			routing := map[string]string{"fast": "unconfigured", "ultrafast": "unconfigured"}
+			if tierReadback {
+				tierReadback = false
+				routing = map[string]string{"fast": "enabled", "ultrafast": "disabled"}
+				if routingDrift {
+					routing["fast"] = "unconfigured"
+				}
+			}
 			writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{
 				Provider: provider, Base: "https://site.example/v1/responses", Temporary: true,
 				IdentityChanged: changedIdentity, ServiceTierScope: rawScope,
-				ServiceTierRouting: map[string]string{"fast": "unconfigured", "ultrafast": "unconfigured"},
+				ServiceTierRouting: routing,
 			}, {Provider: otherProvider, Base: "https://site.example/v1/responses", Temporary: true, ServiceTierScope: rawScope}}})
 		case "/v1/channel-controls":
 			if startSyncOnRead {
@@ -193,6 +203,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 				return
 			}
 			revision = "boot:2"
+			tierReadback = true
 			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision})
 		default:
 			http.NotFound(w, r)
@@ -424,9 +435,11 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	if imports != 1 {
 		t.Fatal("stale request reached mutation")
 	}
+	routingDrift = true
 	w = request([]string{checkModel}, "boot:2", session)
-	if w.Code != 200 || created != 1 || imports != 2 {
-		t.Fatal("duplicate key created", w.Code, w.Body.String())
+	if w.Code != 502 || !strings.Contains(w.Body.String(), "渠道已添加，但网关未按选择应用 Fast") ||
+		!strings.Contains(w.Body.String(), "勿重复添加") || created != 1 || imports != 2 {
+		t.Fatal("expected warning after the gateway accepted the import but did not enable Fast", w.Code, w.Body.String(), created, imports)
 	}
 	groupMissing = true
 	if w = request([]string{checkModel}, "boot:2", session); w.Code != 409 || !strings.Contains(w.Body.String(), "站点已停用") {

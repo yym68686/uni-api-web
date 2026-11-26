@@ -401,12 +401,16 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	provider := subProviderName(in.AccountID, in.GroupID, key)
 	applied, status, err := s.subImportCompactionChannel(ctx, src, state, in, key, provider, base, routeKey.Key)
+	if applied != nil {
+		// The restore may have succeeded even if its tier readback failed.
+		// Persist the live import and tell the user to check it, not to retry.
+		if e := s.saveLiveControls(ctx, src, applied); e != nil {
+			retentionFailure(w, e)
+			return
+		}
+	}
 	if err != nil {
 		http.Error(w, err.Error(), status)
-		return
-	}
-	if e := s.saveLiveControls(ctx, src, applied); e != nil {
-		retentionFailure(w, e)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"provider": provider, "models": publicModels, "position": in.Position, "message": fmt.Sprintf("已临时添加至第 %d 位", in.Position)})
@@ -449,6 +453,7 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 	}
 	document := map[string]any{"provider": provider, "base_url": base, "api": []string{upstreamKey}, "exclude_request_types": excluded}
 	appliedTiers := map[string]bool{}
+	var tierProvider string
 	for index, part := range parts {
 		name := provider
 		if index > 0 {
@@ -468,6 +473,7 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 			return nil, code, err
 		}
 		if part.Protocol == "responses" {
+			tierProvider = name
 			// These are opt-outs at the gateway. Omitting an unchecked tier
 			// would silently leave it on after import, even without evidence.
 			set := map[string]any{
@@ -483,7 +489,9 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 					set[path] = value
 				}
 				for tier, count := range plan.counts {
-					appliedTiers[tier] = count > 0
+					if in.ServiceTierEnabled[tier] && count > 0 {
+						appliedTiers[tier] = true
+					}
 				}
 			}
 			if in.ServiceTierSiteChoices["fast"] || in.ServiceTierSiteChoices["ultrafast"] {
@@ -521,7 +529,21 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 	if src.ConfigKey != "" {
 		admin.Key = src.ConfigKey
 	}
-	return subGateway(ctx, admin, "POST", "/v1/channel-controls/restore", map[string]any{"revision": in.Revision, "snapshot": snapshot})
+	applied, code, err := subGateway(ctx, admin, "POST", "/v1/channel-controls/restore", map[string]any{"revision": in.Revision, "snapshot": snapshot})
+	if err != nil {
+		return nil, code, err
+	}
+	if appliedTiers["fast"] || appliedTiers["ultrafast"] {
+		// Verify after the gateway activates the restored configuration (and
+		// after its managed-config round trip). A stored patch is not proof
+		// the receipt still qualifies against the effective provider.
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := verifyImportedTiers(readCtx, src, tierProvider, in); err != nil {
+			return applied, http.StatusBadGateway, err
+		}
+	}
+	return applied, code, nil
 }
 
 func (s *Service) importSnapshot(ctx context.Context, src controlSource, state map[string]any, revision string) (retainedSnapshot, int, error) {

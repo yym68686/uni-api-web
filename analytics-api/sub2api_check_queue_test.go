@@ -249,12 +249,19 @@ func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 					group.ToolUse == nil || len(group.ToolUse.Models) != 1 || group.ToolUse.Models[0].Model != "gpt-6.2-sol" {
 					t.Fatal("compaction and Tool use must both target only the selected model", w.Body.String())
 				}
-				if _, err := store.db.Exec(`UPDATE console_sub_targets SET remote_key_id=43 WHERE account_id=$1 AND group_id=3`, id); err != nil {
+				if _, err := store.db.Exec(`UPDATE console_sub_targets SET remote_key_id=43,encrypted_key='rotated' WHERE account_id=$1 AND group_id=3`, id); err != nil {
+					t.Fatal(err)
+				}
+				var stillFast bool
+				if err := store.db.QueryRow(`SELECT result#>>'{service_tiers,fast,status}'='supported' FROM console_sub_models WHERE account_id=$1 AND group_id=3 AND model='gpt-6.2-sol'`, id).Scan(&stillFast); err != nil || !stillFast {
+					t.Fatal("rotating the key of the same group lost Fast evidence", stillFast, err)
+				}
+				if _, err := store.db.Exec(`UPDATE console_sub_targets SET platform='anthropic' WHERE account_id=$1 AND group_id=3`, id); err != nil {
 					t.Fatal(err)
 				}
 				var hasStaleTier bool
 				if err := store.db.QueryRow(`SELECT result ? 'service_tiers' FROM console_sub_models WHERE account_id=$1 AND group_id=3 AND model='gpt-6.2-sol'`, id).Scan(&hasStaleTier); err != nil || hasStaleTier {
-					t.Fatal("site credential rotation must invalidate its tier evidence", hasStaleTier, err)
+					t.Fatal("changing the group's platform must invalidate its tier evidence", hasStaleTier, err)
 				}
 			}
 			store.db.QueryRow(`SELECT state FROM console_sub_accounts WHERE id=$1`, id).Scan(&state)
