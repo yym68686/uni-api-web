@@ -9,13 +9,13 @@ export function parseTableColumns<K extends string>(value: unknown, choices: rea
   return [...new Set(value.filter((id): id is K => typeof id === "string" && valid.has(id as K)))];
 }
 
-export function useTableColumns<K extends string>(key: string, choices: readonly TableColumn<K>[], migrate?: {key: string; append: readonly K[]}) {
+export function useTableColumns<K extends string>(key: string, choices: readonly TableColumn<K>[], migrate?: {key: string; prepend?: readonly K[]; append?: readonly K[]}) {
   const [selection, setSelection] = useState<K[] | null>(() => {
     try {
       const current = localStorage.getItem(key);
       if (current !== null) return parseTableColumns(JSON.parse(current), choices);
       const previous = migrate && parseTableColumns(JSON.parse(localStorage.getItem(migrate.key) || "null"), choices);
-      return previous && migrate ? [...new Set([...previous,...migrate.append])] : null;
+      return previous && migrate ? [...new Set([...(migrate.prepend ?? []), ...previous, ...(migrate.append ?? [])])] : null;
     }
     catch { return null; }
   });

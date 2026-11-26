@@ -9,6 +9,7 @@ import { emptyStats } from "./analytics";
 import { defaultFilters, saveFilters } from "./preferences";
 
 it("shows and refreshes channel statistics independently of slow or failed billing", async () => {
+  localStorage.setItem("uni-console:channel-columns:v1", JSON.stringify(["success", "balance"]));
   saveFilters(JSON.stringify([location.origin, "billing-test"]), { ...defaultFilters, window: "24h", model: "gpt-6-luna", keyId: "primary::caller" });
   const channels = ["gpt-6-luna", "gpt-6-astra"].map(model => ({
     source_id: "primary", source_name: "Fugue", provider: "test-channel", model, upstream_model: model,
@@ -54,6 +55,10 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   const app = render(<QueryClientProvider client={client}><MotionConfig reducedMotion="always"><LazyMotion features={domAnimation}><Tooltip.Provider><App /></Tooltip.Provider></LazyMotion></MotionConfig></QueryClientProvider>);
   const user = userEvent.setup();
   await screen.findByRole("heading",{name:"渠道观测"},{timeout:5000});
+  const migratedTable = await screen.findByRole("table");
+  expect(within(migratedTable).getAllByRole("columnheader").map(cell => cell.textContent))
+    .toEqual(["渠道", "倍率", "尝试成功率", "站点余额"]);
+  localStorage.removeItem("uni-console:channel-columns:v1");
   await user.click(document.querySelector<HTMLElement>(".channel-browser .workbench-disclosure:last-child summary")!);
   await user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
   const table = await screen.findByRole("table");
@@ -61,6 +66,7 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   const channelRow = (await within(table).findByRole("button", { name: "查看 渠道-2026 gpt-6-luna 详情" })).closest("tr")!;
   expect(within(channelRow).getAllByRole("cell")[rateColumn.cellIndex]).toHaveTextContent(/^0\.04$/);
   expect(within(channelRow).queryByText("渠道-2026-0.04")).not.toBeInTheDocument();
+  expect(within(channelRow).queryByText("Fugue")).not.toBeInTheDocument();
   expect(within(table).getByText("90.0%")).toBeVisible();
   await waitFor(() => expect(bills).toHaveLength(1));
   expect(metricsModels).toEqual(["gpt-6-luna"]);
@@ -96,10 +102,14 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   client.clear();
 });
 
-it("limits billing to the searched provider and restores the broad scope when search is cleared", async () => {
-  saveFilters(JSON.stringify([location.origin, "provider-scope-test"]), { ...defaultFilters, window: "24h", model: "gpt-6-luna", keyId: "primary::caller", search: "needle-channel" });
-  const channels = ["needle-channel", "unrelated-channel"].map(provider => ({
-    source_id: "primary", source_name: "Fugue", provider, model: "gpt-6-luna", upstream_model: "gpt-6-luna",
+it("limits billing and source labels to the filtered scope", async () => {
+  saveFilters(JSON.stringify([location.origin, "provider-scope-test"]), { ...defaultFilters, window: "24h", model: "gpt-6-luna", search: "needle-channel" });
+  const sources = [
+    { id: "primary", name: "Fugue", base: "https://gateway.test", has_storage: true },
+    { id: "backup", name: "备用", base: "https://backup.test", has_storage: true },
+  ];
+  const channels = ["needle-channel", "unrelated-channel"].map((provider, index) => ({
+    source_id: sources[index].id, source_name: sources[index].name, provider, model: "gpt-6-luna", upstream_model: "gpt-6-luna",
     eligible: true, reason: "eligible", endpoint: "all", stream: null,
     stats: { ...emptyStats(), success: 9, failed: 1, success_rate_denominator: 10, success_rate: .9 },
   }));
@@ -107,7 +117,7 @@ it("limits billing to the searched provider and restores the broad scope when se
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {
     const u = new URL(input, location.origin);
     if (u.pathname.endsWith("/auth/me")) return Response.json({ enabled: true, authenticated: true, username: "provider-scope-test" });
-    if (u.pathname.endsWith("/sources")) return Response.json({ data: [{ id: "primary", name: "Fugue", base: "https://gateway.test", has_storage: true }] });
+    if (u.pathname.endsWith("/sources")) return Response.json({ data: sources });
     if (u.pathname.endsWith("/api-keys")) return Response.json({ can_inspect_all: true, data: [{ key_id: "primary::caller", source_id: "primary", position: 1, prefix: "masked" }] });
     if (u.pathname.endsWith("/model-channels") || u.pathname.endsWith("/channel-metrics")) return Response.json({ data: channels });
     if (u.pathname.endsWith("/channel-controls")) return Response.json({ revision: "r1", instance_id: "gateway", rules: [] });
@@ -127,10 +137,14 @@ it("limits billing to the searched provider and restores the broad scope when se
   await waitFor(() => expect(bills).toHaveLength(1));
   expect(bills[0].searchParams.get("provider")).toBe("needle-channel");
   expect(await screen.findByText("$1.00")).toBeVisible();
+  const table = within(screen.getByRole("table"));
+  expect(table.queryByText("Fugue")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "清除搜索" }));
   await waitFor(() => expect(bills).toHaveLength(2));
   expect(bills[1].searchParams.has("provider")).toBe(false);
   expect(await screen.findByText("$2.00")).toBeVisible();
+  expect(table.getByText("Fugue")).toBeVisible();
+  expect(table.getByText("备用")).toBeVisible();
   const reads = bills.length;
   await user.type(screen.getByRole("textbox", { name: "搜索渠道或模型" }), "nonexistent-provider");
   await screen.findByText("没有匹配的渠道");

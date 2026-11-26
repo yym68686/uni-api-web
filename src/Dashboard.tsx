@@ -755,7 +755,7 @@ export default function Dashboard({
   const [auto, setAuto] = useState(false);
   const [columnView, setColumnView] = useState<ChannelMetricLayout>("run");
   const [customColumns, setCustomColumns] = useTableColumns("uni-console:channel-columns:v2", observationColumns,
-    { key: "uni-console:channel-columns:v1", append: ["multiplier"] });
+    { key: "uni-console:channel-columns:v1", prepend: ["multiplier"] });
   const compactViewport = useCompactWorkbench();
   const compactObservation = compactViewport && !customColumns && columnView === "run";
   const columnChoices = baseConnection.account ? observationColumns : observationColumns.filter(({ id }) => id !== "quality" && id !== "fingerprint" && !isServiceTier(id));
@@ -1112,6 +1112,9 @@ export default function Dashboard({
     const result = balanceMap.get(providerId(row));
     return balanceIsLow(result?.data);
   }) : candidateRows;
+  const firstSource = filtered[0]?.source_id || filtered[0]?.source_name;
+  const showObservationSources = channelView && !selectedSourceId &&
+    filtered.some(row => (row.source_id || row.source_name) !== firstSource);
   const firstProviders = useMemo(() => {
     const index = (items: Channel[]) => {
       const result = new Map<string, Channel>();
@@ -2004,6 +2007,7 @@ export default function Dashboard({
                         const control = adjustingChannels ? controls.info(row) : null;
                         const routeDisabled = previewingSort || routingSort.busy || !control?.ready || control.pending || control.stale;
                         const displayName = channelObservationName(row);
+                        const rowSource = showObservationSources ? row.source_name : undefined;
                         const routeLabel = `${row.source_name || row.source_id || ""} ${displayName} ${row.model}`.trim();
                         const upstreamGroup = fingerprints.groupRejections.get(providerId(row));
                         return (
@@ -2033,7 +2037,7 @@ export default function Dashboard({
                               >
                                 <span>
                                   <strong title={displayName}>{displayName}</strong>
-                                  {(!model || row.source_name && !selectedSourceId) && <small>{!model && row.model}{!model && row.source_name && !selectedSourceId && " · "}{!selectedSourceId && row.source_name && <span className="source-label">{row.source_name}</span>}</small>}
+                                  {(!model || rowSource) && <small>{!model && row.model}{!model && rowSource && " · "}{rowSource && <span className="source-label">{rowSource}</span>}</small>}
                                 </span>
                               </button>
                               {control && <ChannelRowActions row={row} controls={controls} state={control} disabled={routeDisabled} />}
