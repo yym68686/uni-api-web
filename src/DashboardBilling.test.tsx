@@ -7,6 +7,7 @@ import { LazyMotion, domAnimation, MotionConfig } from "motion/react";
 import App from "./App";
 import { emptyStats } from "./analytics";
 import { defaultFilters, saveFilters } from "./preferences";
+import { readWorkspace, workspaceHash } from "./workspaceLocation";
 
 it("shows and refreshes channel statistics independently of slow or failed billing", async () => {
   localStorage.setItem("uni-console:channel-columns:v1", JSON.stringify(["success", "balance"]));
@@ -151,4 +152,69 @@ it("limits billing and source labels to the filtered scope", async () => {
   expect(bills).toHaveLength(reads);
   app.unmount();
   client.clear();
+});
+
+it("opens the exact source, channel and model from the profit rankings", async () => {
+  const overview = { ...defaultFilters, keyId: "primary::caller", window: "7d", endpoint: "/v1/responses", stream: "true" };
+  history.replaceState(null, "", workspaceHash("overview", overview));
+  saveFilters(JSON.stringify([location.origin, "profit-ranking-test"]), { ...defaultFilters, search: "old unrelated search" });
+  const makeChannel = (provider: string, model: string, source_id = "primary") => ({
+    provider, model, source_id, source_name: source_id === "primary" ? "Fugue" : "备用",
+    upstream_model: model, eligible: true, reason: "eligible", endpoint: "all", stream: null,
+    stats: { ...emptyStats(), started: 1, requests: 1, usage_samples: 1, priced_samples: 1,
+      estimated_cost_usd: 100, sale_percent: 10 },
+  });
+  const a = makeChannel("target", "gpt-a"), b = makeChannel("target", "gpt-b");
+  const similarlyNamed = makeChannel("target-backup", "gpt-b");
+  const otherSource = makeChannel("target", "gpt-b", "backup");
+  const historical = makeChannel("retired", "gpt-retired");
+  const catalog = [a, b, similarlyNamed, otherSource];
+  const historyRows = [a, b, similarlyNamed, historical];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const url = new URL(input, location.origin);
+    const { pathname, searchParams } = url;
+    if (pathname.endsWith("/auth/me")) return Response.json({ enabled: true, authenticated: true, username: "profit-ranking-test" });
+    if (pathname.endsWith("/sources")) return Response.json({ data: ["primary", "backup"].map(id => ({id, name:id, base:`https://${id}.test`, has_storage:true})) });
+    if (pathname.endsWith("/api-keys")) return Response.json({ can_inspect_all: true, data: [{ key_id: "primary::caller", source_id: "primary", position: 1, prefix: "masked" }] });
+    if (pathname.endsWith("/model-channels") || pathname.endsWith("/channel-metrics")) return Response.json({ data: catalog });
+    if (pathname.endsWith("/analytics")) return Response.json({ data: historyRows.filter(row => !searchParams.get("model") || row.model === searchParams.get("model")),
+      total: { ...emptyStats(), requests: 4 }, from: 100, to: 200, coverage: "full" });
+    if (pathname.endsWith("/channel-spend")) return Response.json({ data: historyRows.map((row, i) => ({ ...row,
+      status: "complete", scope: "matched_requests", actual_cost_usd: i === 2 ? 19 : 100 + i, from: 100, to: 200 })) });
+    return Response.json({ data: [], unavailable_sources: [] });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const app = render(<QueryClientProvider client={client}><MotionConfig reducedMotion="always"><LazyMotion features={domAnimation}><Tooltip.Provider><App /></Tooltip.Provider></LazyMotion></MotionConfig></QueryClientProvider>);
+  const user = userEvent.setup();
+  try {
+    const losses = within(await screen.findByRole("region", { name: "亏损渠道 TOP 8" }));
+    expect(await losses.findByRole("button", {name: "在渠道观测筛选 target · gpt-a"})).toBeVisible();
+    await user.click(losses.getByRole("button", {name: "在渠道观测筛选 target · gpt-b"}));
+    const expected = { ...overview, sourceId: "primary", provider: "target", model: "gpt-b" };
+    expect(readWorkspace(location.hash, true)).toMatchObject({ view: "channels", detail: null, filters: expected });
+    const table = within(await screen.findByRole("region", { name: "渠道观测表" }));
+    expect(table.getAllByRole("row")).toHaveLength(2);
+    expect(table.getByRole("button", { name: "查看 target gpt-b 详情" })).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "清除渠道筛选" }));
+    expect(table.getByRole("button", { name: "查看 target-backup gpt-b 详情" })).toBeVisible();
+    expect(readWorkspace(location.hash,true).filters).toEqual({ ...expected, provider: "" });
+
+    await act(async () => history.back());
+    const returned = await screen.findByRole("button", { name: "在渠道观测筛选 retired · gpt-retired" });
+    expect(readWorkspace(location.hash, true).filters).toEqual(overview);
+    await user.click(returned);
+    expect(await screen.findByText(/当前配置或所选 API Key 中没有此渠道与模型/)).toBeVisible();
+    expect(screen.queryByRole("region", {name: "渠道观测表"})).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "清除渠道筛选"})).toHaveTextContent("retired · gpt-retired");
+    await act(async () => history.back());
+    await screen.findByRole("heading", { name: "总览" });
+    await act(async () => history.forward());
+    await screen.findByText(/当前配置或所选 API Key 中没有此渠道与模型/);
+    expect(readWorkspace(location.hash,true).filters).toMatchObject({ sourceId: "primary", provider: "retired", model: "gpt-retired" });
+  } finally {
+    app.unmount();
+    client.clear();
+    history.replaceState(null, "", "/");
+  }
 });

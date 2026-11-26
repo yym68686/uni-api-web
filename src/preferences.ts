@@ -4,6 +4,7 @@ export const defaultFilters = {
   keyId: "",
   sourceId: "",
   model: "",
+  provider: "",
   window: "15m",
   balanceFilter: "",
   balanceTopN: "",
@@ -70,6 +71,7 @@ export function validateFilters(value: unknown): Filters {
     keyId: field("keyId"),
     sourceId: field("sourceId"),
     model: field("model"),
+    provider: field("provider"),
     window: field(
       "window",
       ranges.map(([value]) => value),

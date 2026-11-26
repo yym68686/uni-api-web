@@ -6,7 +6,8 @@ const shared: (keyof Filters)[] = [
   "sourceId", "keyId", "model", "window", "statusFilter", "failureReason",
   "endpoint", "stream", "balanceFilter", "balanceTopN", "balanceThreshold",
 ];
-const fields = (view: View) => view === "requests" ? [...shared, "sort" as const] : shared;
+const fields = (view: View) => view === "requests" ? [...shared, "sort" as const]
+  : view === "channels" ? [...shared, "provider" as const] : shared;
 export const hasChannelScope = (view: View): view is "channels" | "routing" | "balances" | "overview" =>
   view === "channels" || view === "routing" || view === "balances" || view === "overview";
 

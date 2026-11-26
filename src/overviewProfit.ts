@@ -24,7 +24,7 @@ export function summarizeOverviewProfit(
   spend: ReadonlyMap<string, SubChannelSpendResult>,
   historyIncomplete: boolean,
 ) {
-  const groups = new Map<string, OverviewChannelProfit & { incomplete: boolean }>();
+  const models = new Map<string, OverviewChannelProfit & { incomplete: boolean }>();
   const seen = new Set<string>();
   let pending = false;
   let failed = false;
@@ -38,9 +38,11 @@ export function summarizeOverviewProfit(
     if (!(stats.started > 0 || (stats.requests ?? 0) > 0 ||
       (stats.usage_samples ?? 0) > 0 || stats.estimated_cost_usd != null ||
       (bill && bill.status !== "no_records"))) continue;
-    const id = providerId(row);
-    const group = groups.get(id) ?? { id, row, amount: 0, provisional: false, incomplete: false };
-    groups.set(id, group);
+    // A public model can have multiple historical upstream mappings. Combine
+    // those mappings, but never combine distinct models or sources on the list.
+    const id = JSON.stringify([row.source_id || "", row.provider, row.model]);
+    const group = models.get(id) ?? { id, row, amount: 0, provisional: false, incomplete: false };
+    models.set(id, group);
     pending ||= !!(query?.isPending || bill?.refreshing || bill?.status === "pending");
     failed ||= !!(query?.isError || bill?.sync_error || bill?.status === "error");
     const cost = channelProfitCost(bill);
@@ -56,14 +58,28 @@ export function summarizeOverviewProfit(
       group.provisional ||= !!cost?.provisional;
     }
   }
-  const usable = [...groups.values()].filter(group => !group.incomplete && Number.isFinite(group.amount));
-  const total = usable.reduce((sum, group) => sum + group.amount, 0);
-  const provisional = historyIncomplete || usable.some(group => group.provisional);
-  const omitted = groups.size - usable.length;
-  const ranked = usable.map(group => ({ ...group, amount: normalize(group.amount) }));
+  // Preserve the total's channel-level coverage: do not present a partially
+  // reconciled channel as fully counted even if one of its models can rank.
+  const channels = new Map<string, { amount: number; incomplete: boolean; provisional: boolean }>();
+  const ranked: OverviewChannelProfit[] = [];
+  for (const group of models.values()) {
+    const id = providerId(group.row);
+    const channel = channels.get(id) ?? { amount: 0, incomplete: false, provisional: false };
+    channels.set(id, channel);
+    const complete = !group.incomplete && Number.isFinite(group.amount);
+    channel.incomplete ||= !complete;
+    if (!complete) continue;
+    channel.amount += group.amount;
+    channel.provisional ||= group.provisional;
+    ranked.push({ ...group, amount: normalize(group.amount) });
+  }
+  const usable = [...channels.values()].filter(channel => !channel.incomplete && Number.isFinite(channel.amount));
+  const total = usable.reduce((sum, channel) => sum + channel.amount, 0);
+  const provisional = historyIncomplete || usable.some(channel => channel.provisional);
+  const omitted = channels.size - usable.length;
   const stable = (a: OverviewChannelProfit, b: OverviewChannelProfit) => a.id.localeCompare(b.id);
   return {
-    amount: Number.isFinite(total) && (usable.length || (!groups.size && !historyIncomplete)) ? normalize(total) : null,
+    amount: Number.isFinite(total) && (usable.length || (!channels.size && !historyIncomplete)) ? normalize(total) : null,
     counted: usable.length,
     omitted,
     pending,

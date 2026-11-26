@@ -69,7 +69,12 @@
 .overview-profit-panels {grid-template-columns:repeat(2,minmax(0,1fr))}
 .overview-profit-table :is(th,td):first-child {width:58%}
 .overview-profit-table td {white-space:normal;overflow-wrap:anywhere}
-.overview-profit-source,.overview-profit-basis {display:block;color:var(--muted);font-size:11px}
+.overview-profit-link > :is(span,small) {display:block;overflow:hidden;text-overflow:ellipsis}
+.overview-profit-link > small,.overview-profit-basis {display:block;color:var(--muted);font-size:11px}
+.observation-provider-scope {display:flex;min-width:0;margin:0 0 10px}
+.observation-provider-scope .button {min-width:0;max-width:100%;color:var(--accent)}
+.observation-provider-scope .button > span {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.observation-provider-scope .button > svg {flex:none}
 .overview-grid .metric-card .overview-profit-basis {margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .overview-profit-table .overview-empty {text-align:start}
 @media (max-width:1319px) {

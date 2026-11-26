@@ -169,6 +169,7 @@ function Overview({
   showProfitSources,
   onLogs,
   onChannel,
+  onProfitChannel,
 }: {
   metrics?: Metrics;
   rows: Channel[];
@@ -181,6 +182,7 @@ function Overview({
   showProfitSources: boolean;
   onLogs: (model?: string, failed?: boolean) => void;
   onChannel: (row: Channel) => void;
+  onProfitChannel: (row: Channel) => void;
 }) {
   const total = metrics?.total;
   const models = (metrics?.models || []).filter((item): item is {
@@ -228,7 +230,6 @@ function Overview({
   const [showAllModels, setShowAllModels] = useState(false);
   const [showAllChannels, setShowAllChannels] = useState(false);
   const previewCount = 8;
-  const currentChannels = new Map(rows.map(row => [providerId(row), row]));
   const profitCoverage = profit?.omitted ? ` · ${profit.counted}/${profit.counted + profit.omitted} 渠道` : "";
   const profitBasis = !profit
     ? undefined
@@ -239,7 +240,7 @@ function Overview({
       : "经营参考") + profitCoverage;
   const emptyProfit = profit?.failed ? "账单读取不完整，暂无可排名结果。"
     : profit?.pending ? "正在核对账单…"
-    : profit?.omitted || profit?.provisional ? "当前可计算的数据中没有该类渠道。" : undefined;
+    : profit?.omitted || profit?.provisional ? "当前可计算的数据中没有该类渠道与模型。" : undefined;
   return (
     <section className="overview-content">
       <section className="overview-grid" data-profit={profit ? "" : undefined} aria-label="概览指标">
@@ -266,7 +267,7 @@ function Overview({
         label="利润总额"
         value={profit.amount == null ? "—" : overviewProfitAmount(profit.amount)}
         note={profitBasis}
-        help={`按所选范围逐请求核对消费，与渠道观测的利润参考使用同一公式。未定价或消费无法核对的渠道不计入，缺失账单不按零处理。${profit.omitted ? "当前金额仅为可计算渠道的小计。" : ""}${profit.provisional ? "含历史暂计数据，可能调整。" : ""}仅供经营参考，不用于结算。`}
+        help={`按所选范围逐请求核对消费，与渠道观测的利润参考使用同一公式。未定价或消费无法核对的渠道不计入总额，缺失账单不按零处理；榜单按渠道与模型分别核对。${profit.omitted ? "当前金额仅为可计算渠道的小计。" : ""}${profit.provisional ? "含历史暂计数据，可能调整。" : ""}仅供经营参考，不用于结算。`}
       />}
       <MetricCard
         label="渠道总并发"
@@ -329,11 +330,11 @@ function Overview({
       </div>
       {profit && <div className="overview-panels overview-profit-panels">
         <OverviewProfitTable title="盈利渠道 TOP 8" entries={profit.gains}
-          empty={emptyProfit ?? "当前筛选范围内没有盈利渠道。"}
-          showSource={showProfitSources} current={currentChannels} onChannel={onChannel} />
+          empty={emptyProfit ?? "当前筛选范围内没有盈利的渠道与模型。"}
+          showSource={showProfitSources} onChannel={onProfitChannel} />
         <OverviewProfitTable title="亏损渠道 TOP 8" entries={profit.losses}
-          empty={emptyProfit ?? "当前筛选范围内没有亏损渠道。"}
-          showSource={showProfitSources} current={currentChannels} onChannel={onChannel} />
+          empty={emptyProfit ?? "当前筛选范围内没有亏损的渠道与模型。"}
+          showSource={showProfitSources} onChannel={onProfitChannel} />
       </div>}
     </section>
   );
@@ -694,7 +695,7 @@ export default function Dashboard({
   const initialFilters = (scope: "channels" | "routing" | "balances" | "overview") => {
     const saved = loadFilters(preferenceScope, scope);
     return incoming.view === scope && incoming.filters
-      ? {...incoming.filters, search: history.state?.workspaceOwner === preferenceScope ? saved.search : ""}
+      ? {...incoming.filters, search: !incoming.filters.provider && history.state?.workspaceOwner === preferenceScope ? saved.search : ""}
       : saved;
   };
   const [pageFilters, setPageFilters] = useState(() => ({
@@ -747,6 +748,7 @@ export default function Dashboard({
   const {
     keyId,
     model,
+    provider,
     window,
     balanceFilter,
     balanceTopN,
@@ -777,7 +779,8 @@ export default function Dashboard({
   useEffect(() => saveChannelSortPreferences(sortStorageScope, sortPreferences), [sortStorageScope, sortPreferences]);
   const activeFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).filter(
     (key) =>
-      ((channelView && ["keyId", "sourceId", "model", "window", "search", "balanceFilter", "statusFilter", "failureReason", "endpoint", "stream", "sort", "sortRules"].includes(key)) ||
+      ((view === "channels" && key === "provider") ||
+        (channelView && ["keyId", "sourceId", "model", "window", "search", "balanceFilter", "statusFilter", "failureReason", "endpoint", "stream", "sort", "sortRules"].includes(key)) ||
         (view === "balances" && ["keyId", "sourceId", "model", "window", "search", "balanceTopN", "balanceThreshold"].includes(key))) &&
       !["sort", "sortRules", "window"].includes(key) && filters[key] !== defaultFilters[key],
   );
@@ -993,7 +996,7 @@ export default function Dashboard({
     (sourceRemoved ? "所选来源已移除，请重新选择。" : "") ||
     (keyRemoved
       ? "所选 API key 已移除，请重新选择。"
-      : modelRemoved
+      : modelRemoved && !(view === "channels" && provider)
         ? "当前 API key 未配置所选模型，请重新选择模型。"
         : keys.error?.message ||
           (historyInitializing ? undefined : metrics.error?.message) ||
@@ -1030,6 +1033,11 @@ export default function Dashboard({
     [tableRows],
   );
   const text = deferredSearch.toLowerCase();
+  const exactProvider = view === "channels" ? provider : "";
+  const matchesProvider = (row: Channel) => row.provider === exactProvider && (!selectedSourceId || row.source_id === selectedSourceId);
+  const configuredTarget = exactProvider ? catalog.data?.data.find(row => matchesProvider(row) && (!model || row.model === model)) : undefined;
+  const targetRow = configuredTarget ?? (exactProvider ? metrics.data?.data.find(row => matchesProvider(row) && (!model || row.model === model)) : undefined);
+  const providerLabel = targetRow ? channelObservationName(channelBilling(targetRow, imported.data)) : exactProvider;
   const knownFailures = useMemo(() => {
     const kinds = new Set(["compaction_invalid_output", "compaction_stream_failed", "compaction_unsupported"]);
     if (!channelView) return kinds;
@@ -1046,6 +1054,7 @@ export default function Dashboard({
     return kinds;
   }, [channelView, tableRows, failureReason]);
   const candidateRows = tableRows.filter(row =>
+    (!exactProvider || matchesProvider(row)) &&
     (!text || `${channelName(row)} ${row.provider} ${row.model} ${row.upstream_model}`.toLowerCase().includes(text)) &&
     (!channelView || !statusFilter || (statusFilter === "eligible") === (row.eligible && !fingerprints.groupRejections.has(providerId(row)))) &&
     (!channelView || !failureReason || (() => {
@@ -1060,7 +1069,7 @@ export default function Dashboard({
   const balanceCatalog = balanceRanks?.providers || [...new Set(candidateRows.map(providerId))];
   const pageBounds = (n: number) => Math.min(page,Math.max(0,Math.ceil(n/25)-1))*25;
   const actualRange = useMemo(() => actualCostRange(window), [window]);
-  const auditScope = JSON.stringify([view, preferenceScope, selectedSourceId, keyId, model, window, endpoint, stream, search, statusFilter, failureReason, balanceFilter, balanceTopN, balanceThreshold, actualRange.startDate, actualRange.endDate]);
+  const auditScope = JSON.stringify([view, preferenceScope, selectedSourceId, keyId, model, exactProvider, window, endpoint, stream, search, statusFilter, failureReason, balanceFilter, balanceTopN, balanceThreshold, actualRange.startDate, actualRange.endDate]);
   const [balanceAudit, setBalanceAudit] = useState<{ scope: string; targets: string[] } | null>(null);
   const activeAudit = balanceAudit?.scope === auditScope ? balanceAudit : null;
   useEffect(() => setBalanceAudit(previous => previous?.scope === auditScope ? previous : null), [auditScope]);
@@ -1294,7 +1303,7 @@ export default function Dashboard({
     setPage(0);
     setPageFilters((current) => ({
       ...current,
-      [filterScope]: { ...current[filterScope], [name]: value },
+      [filterScope]: { ...current[filterScope], ...(name === "sourceId" && current[filterScope].sourceId !== value ? {provider:""} : {}), [name]: value },
     }));
   }
   function reload() {
@@ -1365,9 +1374,9 @@ export default function Dashboard({
       刷新数据
     </button>
   );
-  function selectView(next: View) {
+  function selectView(next: View, scope?: Filters) {
     if (view !== next) {
-      history.pushState({workspaceOwner:preferenceScope}, "", workspaceHash(next, hasChannelScope(next) ? pageFilters[next] : undefined));
+      history.pushState({workspaceOwner:preferenceScope}, "", workspaceHash(next, scope ?? (hasChannelScope(next) ? pageFilters[next] : undefined)));
       setDetailId(null);
       setLocatedChannel(null);
       setBalanceAudit(null);
@@ -1390,6 +1399,15 @@ export default function Dashboard({
     setLocatedChannel(null);
     setMenu(false);
     focusWorkspace.current = true;
+  }
+  function openProfitChannel(row: Channel) {
+    const sourceId = row.source_id || selectedSourceId;
+    const carryKey = sourceId === selectedSourceId || !selectedSourceId && (!keyId.includes("::") || keyId.split("::")[0] === sourceId);
+    const next = { ...defaultFilters, sourceId, keyId: carryKey ? keyId : "", provider: row.provider,
+      model: row.model, window, endpoint, stream };
+    setPageFilters(current => ({...current, channels: next}));
+    setEditingRoutes(null);
+    selectView("channels", next);
   }
   function openDetail(id: string) {
     detailOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1435,7 +1453,7 @@ export default function Dashboard({
       setBalanceAudit(null);
       if (next.filters && hasChannelScope(scope)) {
         const sharedFilters = next.filters;
-        setPageFilters(current => ({...current, [scope]: {...sharedFilters, search:current[scope].search}}));
+        setPageFilters(current => ({...current, [scope]: {...sharedFilters, search:sharedFilters.provider ? "" : current[scope].search}}));
       }
       setPage(0);
       setMenu(false);
@@ -1680,6 +1698,7 @@ export default function Dashboard({
               profit={overviewProfit}
               showProfitSources={!selectedSourceId && sourceList.length > 1 && !keyId}
               onLogs={openRelatedLogs}
+              onProfitChannel={openProfitChannel}
               onChannel={row => {
                 const next = {...filters};
                 setPageFilters(current => ({...current, channels:next}));
@@ -1906,6 +1925,7 @@ export default function Dashboard({
                     routeApplyDisabled={loadingScope||!!error||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
                     scopeLabel={[
                       model || "全部模型",
+                      ...(exactProvider ? [`渠道：${providerLabel}`] : []),
                       sourceList.find(s=>s.id===selectedSourceId)?.name || "全部来源",
                       keyId ? [keys.data?.data.find(k=>k.key_id===keyId)?.source_name, `Key ${keys.data?.data.find(k=>k.key_id===keyId)?.position || "（已选）"}`].filter(Boolean).join(" · ") : "全部 API key",
                       ranges.find(([value])=>value===window)?.[1] || window,
@@ -1991,6 +2011,12 @@ export default function Dashboard({
                   </WorkbenchDisclosure>
                 </div>
               </div>
+              {exactProvider && <div className="observation-provider-scope">
+                <button type="button" className="button small" aria-label="清除渠道筛选"
+                  title={[providerLabel, model].filter(Boolean).join(" · ")} onClick={() => setFilter("provider", "")}>
+                  <span>{`渠道：${[providerLabel, model].filter(Boolean).join(" · ")}`}</span><X size={12} aria-hidden="true" />
+                </button>
+              </div>}
               {canEditRoutes && <div className="channel-sort-preview-actions" ref={setSortPreviewActions} />}
               {adjustingChannels && pendingRouteScopes.length > 0 && <div className="route-edit-scope">
                 <details>
@@ -2043,7 +2069,9 @@ export default function Dashboard({
                 pendingBalances && (channelView ? balanceFilter : balanceThreshold)
                   ? <LoadingIndicator size="panel" label="确认渠道余额" />
                   : <Empty title="没有匹配的渠道" icon={<Search size={26} />}>
-                    尝试调整模型、优先级或余额条件，或清除搜索条件。
+                    {exactProvider && !configuredTarget && !catalog.data?.unavailable_sources?.length
+                      ? "当前配置或所选 API Key 中没有此渠道与模型。可清除渠道筛选后查看其他渠道。"
+                      : "尝试调整模型、优先级或余额条件，或清除搜索条件。"}
                   </Empty>
               ) : channelView ? (
                 <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道观测表">

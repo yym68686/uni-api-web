@@ -34,6 +34,7 @@ export function channelSortScope(filters: Filters) {
   ];
   // Preserve existing saved scopes when the new filter is unused.
   if (filters.failureReason) scope.push(filters.failureReason);
+  if (filters.provider) scope.push(`provider:${filters.provider}`);
   return JSON.stringify(scope);
 }
 export const defaultChannelSort = (): ScopedSort => ({
@@ -74,7 +75,7 @@ function validate(value: unknown): ChannelSortPreferences {
         const parsed = JSON.parse(scope);
         if (
           !Array.isArray(parsed) ||
-          ![9, 10].includes(parsed.length) ||
+          ![9, 10, 11].includes(parsed.length) ||
           !parsed.every((v) => typeof v === "string")
         )
           return [];

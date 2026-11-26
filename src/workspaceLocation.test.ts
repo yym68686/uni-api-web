@@ -3,12 +3,13 @@ import { defaultFilters } from "./preferences";
 import { readWorkspace, requestLocation, workspaceHash } from "./workspaceLocation";
 
 it("round trips shareable workspace context without free-text diagnostic input or credentials", () => {
-  const filters = {...defaultFilters, sourceId:"source-a", keyId:"source-a::opaque", model:"model-a",
+  const filters = {...defaultFilters, sourceId:"source-a", keyId:"source-a::opaque", model:"model-a", provider:"channel-a",
     balanceThreshold:"3.25", search:"private free text", failureReason:"upstream_http_429"};
   const hash = workspaceHash("channels",filters,"channel-model-id");
   expect(hash).not.toContain("private");
   expect(readWorkspace(hash,true)).toMatchObject({view:"channels",detail:"channel-model-id",
-    filters:{sourceId:"source-a",keyId:"source-a::opaque",model:"model-a",search:"",balanceThreshold:"3.25",failureReason:"upstream_http_429"}});
+    filters:{sourceId:"source-a",keyId:"source-a::opaque",model:"model-a",provider:"channel-a",search:"",balanceThreshold:"3.25",failureReason:"upstream_http_429"}});
+  expect(workspaceHash("overview", filters)).not.toContain("provider");
   expect(readWorkspace("#view=sources", false).view).toBeUndefined();
 });
 

@@ -2,7 +2,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { emptyStats } from "./analytics";
-import { providerId, rowId } from "./format";
+import { rowId } from "./format";
 import { OverviewProfitTable } from "./OverviewProfitTable";
 import { summarizeOverviewProfit } from "./overviewProfit";
 import type { SubChannelSpend, SubChannelSpendResult } from "./SubChannelSpend";
@@ -24,7 +24,7 @@ function bill(actual: number | null, data: Partial<SubChannelSpend> = {}): SubCh
   } };
 }
 
-it("nets all model rows per source and provider before calculating the total and top eight on each side", () => {
+it("nets the total by channel but ranks the top eight channel and model pairs on each side", () => {
   const gains = Array.from({ length: 10 }, (_, i) => row(`gain-${i}`));
   const losses = Array.from({ length: 10 }, (_, i) => row(`loss-${i}`));
   const anotherModel = row("gain-0", "a", "claude-opus", { sale_percent: 15 });
@@ -40,10 +40,29 @@ it("nets all model rows per source and provider before calculating the total and
   expect(profit).toMatchObject({ amount: 63, counted: 21, omitted: 0, provisional: false });
   expect(profit.gains.map(entry => entry.row.provider)).toEqual(["gain-0","gain-9","gain-8","gain-7","gain-6","gain-5","gain-4","gain-3"]);
   expect(profit.losses.map(entry => entry.row.provider)).toEqual(["gain-0","loss-9","loss-8","loss-7","loss-6","loss-5","loss-4","loss-3"]);
+  expect(profit.gains[0].row).toBe(anotherModel);
+  expect(profit.losses[0].row).toBe(anotherSource);
   expect(profit.gains[0].id).not.toEqual(profit.losses[0].id);
 });
 
-it("keeps historical temporary amounts, omits uncertain channels entirely and keeps proven no-revenue losses", () => {
+it("ranks sibling models separately, combining only historical mappings of the same model in the same source", () => {
+  const original = row("same", "a", "public-a");
+  const alias = { ...original, upstream_model: "older-upstream" };
+  const sibling = row("same", "a", "public-b");
+  const otherSource = row("same", "b", "public-a");
+  const rows = [original, alias, sibling, otherSource, alias];
+  const spend = new Map([
+    [rowId(original), bill(75)], [rowId(alias), bill(73)],
+    [rowId(sibling), bill(89)], [rowId(otherSource), bill(72)],
+  ]);
+  const profit = summarizeOverviewProfit(rows, spend, false);
+  expect(profit).toMatchObject({ amount: -33, counted: 2, omitted: 0, gains: [] });
+  expect(profit.losses).toMatchObject([
+    { row: sibling, amount: -20 }, { row: original, amount: -10 }, { row: otherSource, amount: -3 },
+  ]);
+});
+
+it("ranks reconciled models, omits uncertain channels from the total and keeps proven no-revenue losses", () => {
   const history = row("history");
   const unknown = row("unknown");
   const unknownSibling = row("unknown", "a", "gpt-7");
@@ -65,7 +84,7 @@ it("keeps historical temporary amounts, omits uncertain channels entirely and ke
   ]);
   const total = summarizeOverviewProfit([history, unknown, unknownSibling, unpriced, failedAttempt, account, noActivity], spend, false);
   expect(total).toMatchObject({ amount: 23, counted: 2, omitted: 3, provisional: true, pending: true });
-  expect(total.gains).toMatchObject([{ row: history, amount: 30, provisional: true }]);
+  expect(total.gains).toMatchObject([{ row: unknown, amount: 64 }, { row: history, amount: 30, provisional: true }]);
   expect(total.losses).toMatchObject([{ row: failedAttempt, amount: -7 }]);
   expect(summarizeOverviewProfit([unknown], new Map([[rowId(unknown), { data: undefined, isPending: false, isError: true }]]), false))
     .toMatchObject({ amount: null, failed: true, omitted: 1 });
@@ -73,7 +92,7 @@ it("keeps historical temporary amounts, omits uncertain channels entirely and ke
   expect(summarizeOverviewProfit([], new Map(), false).amount).toBe(0);
 });
 
-it("lists removed channels without a broken link and marks provisional results", () => {
+it("shows the exact model and source on each link and marks provisional results", () => {
   const current = row("current"), removed = row("removed", "b");
   const spend = new Map([
     [rowId(current), bill(59)],
@@ -82,12 +101,13 @@ it("lists removed channels without a broken link and marks provisional results",
   const { gains } = summarizeOverviewProfit([current, removed], spend, false);
   const onChannel = vi.fn();
   render(<OverviewProfitTable title="盈利渠道 TOP 8" entries={gains} empty="无数据"
-    showSource current={new Map([[providerId(current), current]])} onChannel={onChannel} />);
+    showSource onChannel={onChannel} />);
   const table = within(screen.getByRole("region", { name: "盈利渠道 TOP 8" }));
   expect(table.getByText("removed")).toBeTruthy();
-  expect(table.getByText("来源 b")).toBeTruthy();
+  expect(table.getByText("gpt-6 · 来源 b")).toBeTruthy();
   expect(table.getByText("暂计")).toBeTruthy();
-  expect(table.queryByRole("button", { name: "removed" })).toBeNull();
-  table.getByRole("button", { name: "current" }).click();
+  table.getByRole("button", { name: "在渠道观测筛选 current · gpt-6 · 来源 a" }).click();
   expect(onChannel).toHaveBeenCalledWith(current);
+  table.getByRole("button", { name: "在渠道观测筛选 removed · gpt-6 · 来源 b" }).click();
+  expect(onChannel).toHaveBeenLastCalledWith(removed);
 });
