@@ -22,10 +22,12 @@ export interface Distribution {
   p95_ms: number | null;
 }
 export interface Stats {
+  requests?: number;
   failure_reasons?: Record<string, number> | null;
   input_tokens?: number;
   output_tokens?: number;
   usage_samples?: number;
+  priced_samples?: number;
   cache_rate?: number | null;
   cache_read_tokens?: number;
   cache_samples?: number;

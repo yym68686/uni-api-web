@@ -3,6 +3,10 @@
 :root { --radius-control: 8px; --radius-popover: 12px; --radius-dialog: 24px; }
 svg[data-console-icon] { inline-size: 24px !important; block-size: 24px !important; flex: none; }
 svg[data-console-icon] > svg { inline-size: 18px !important; block-size: 18px !important; }
+.select-field > svg[data-console-icon],
+.workbench-disclosure > summary > svg[data-console-icon] { inline-size: 16px !important; block-size: 16px !important; }
+.select-field > svg[data-console-icon] > svg,
+.workbench-disclosure > summary > svg[data-console-icon] > svg { inline-size: 16px !important; block-size: 16px !important; }
 body { font-size: 14px; }
 h1, h2, h3 { overflow-wrap: anywhere; }
 .button, .app-shell .observatory-nav button, .icon-button, .locate-trigger { border-radius: var(--radius-control); }
@@ -180,4 +184,7 @@ h1, h2, h3 { overflow-wrap: anywhere; }
   .workspace .management-actions .secondary-actions > summary { padding-inline: 4px; }
   .workspace .management-actions .sub-model-check-group .icon-button { min-width: 36px; }
   .workspace .management-actions .sub-model-check-group .icon-button svg[data-console-icon] { display: inline-block; }
+}
+@media (max-width: 360px) {
+  .workspace .management-actions { flex-wrap: wrap; }
 }

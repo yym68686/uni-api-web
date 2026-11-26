@@ -68,6 +68,12 @@ const plugin = {
         res.setHeader('Set-Cookie', 'visual_audit_mode='+mode+'; Path=/; SameSite=Strict');
         return json({mode});
       }
+      if (path === '/_audit/metrics-mode') {
+        const mode = url.searchParams.get('mode');
+        if (!['normal','slow','fail'].includes(mode)) return json({message:'无效的统计场景'},400);
+        res.setHeader('Set-Cookie', 'visual_audit_metrics='+mode+'; Path=/; SameSite=Strict');
+        return json({mode});
+      }
       const mode = /(?:^|; *)visual_audit_mode=(success|failure|uncertain|long)(?:;|$)/.exec(req.headers.cookie || '')?.[1] ?? 'success';
       const fail = () => json({message:mode==='long'?longError:mode==='uncertain'?'模拟网关未回执，请核对原操作':'模拟配置版本冲突'},mode==='uncertain'?502:409);
       if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -152,7 +158,26 @@ const plugin = {
       }
       if (path.endsWith('/automations/audit')) return json({data:[{id:1,task_id:'fixture-task',task_name:'模拟路由排序',run_at:new Date(at).toISOString(),status:'suggested',source_id:'source-1',model:models[0],reason:'样本达到阈值，建议检查顺序。',before_order:[longName,'渠道-13'],after_order:['渠道-13',longName],changes:[],policy:{},metrics:{comparisons:['按最近一小时的成功率比较']}}]});
       if (path.endsWith('/model-channels') || path.endsWith('/channel-metrics')) return json({data:scope(channels),snapshot_revision:'r1',generated_at:Math.floor(at/1000)});
-      if (path.endsWith('/analytics')) return json({data:scope(channels),total:{requests:25391,attempts:33011,success:31740,failed:1271,input_tokens:32901122,output_tokens:3918242,cache_read_tokens:23045018,estimated_cost_usd:431.289}, models:[],from:Math.floor(at/1000)-86400,to:Math.floor(at/1000),generated_at:Math.floor(at/1000),coverage:'full',source_freshness:sources.map(s=>({source_id:s.id,latest_fact_at:Math.floor(at/1000)-5,last_exporter_seen_at:Math.floor(at/1000)-4}))});
+      if (path.endsWith('/analytics')) {
+        const mode = /(?:^|; *)visual_audit_metrics=(slow|fail)(?:;|$)/.exec(req.headers.cookie || '')?.[1];
+        if (mode) await delay();
+        if (mode === 'fail') return json({message:'模拟统计读取失败'},500);
+        return json({data:scope(channels).filter(c => !url.searchParams.get('model') || c.model === url.searchParams.get('model')),total:{requests:25391,attempts:33011,success:31740,failed:1271,input_tokens:32901122,output_tokens:3918242,cache_read_tokens:23045018,estimated_cost_usd:431.289}, models:[],from:Math.floor(at/1000)-(url.searchParams.get('range') === '1h' ? 3600 : 86400),to:Math.floor(at/1000),generated_at:Math.floor(at/1000),coverage:'full',source_freshness:sources.map(s=>({source_id:s.id,latest_fact_at:Math.floor(at/1000)-5,last_exporter_seen_at:Math.floor(at/1000)-4}))});
+      }
+      if (path.endsWith('/channel-spend')) {
+        await delay();
+        if (mode === 'failure' || mode === 'long') return fail();
+        const selected = scope(channels).filter(c =>
+          (!url.searchParams.get('model') || c.model === url.searchParams.get('model')) &&
+          (!url.searchParams.get('provider') || c.provider === url.searchParams.get('provider')));
+        return json({data:selected.map((c, i) => ({
+          source_id:c.source_id, provider:c.provider, model:c.model, upstream_model:c.upstream_model,
+          scope:'matched_requests', from:Number(url.searchParams.get('from')), to:Number(url.searchParams.get('to')),
+          ...(mode === 'uncertain' && i % 3 === 0
+            ? {status:'history_limited', actual_cost_usd:null, matched_attempts:4, observed_cost_usd:1}
+            : {status:'complete', actual_cost_usd: i % 2 ? 1 : 15}),
+        }))});
+      }
       if (path.endsWith('/channel-tier-tps')) {
         await delay();
         if (mode !== 'success') return fail();

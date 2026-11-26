@@ -261,7 +261,7 @@
 .workbench-tools .time-select {min-width:0;min-height:32px}
 .workbench-tools .time-select select {min-width:0;font-size:12px}
 .workbench-disclosure {position:relative}
-.workbench-disclosure > summary {list-style:none;cursor:pointer;gap:5px}
+.workbench-disclosure > summary {list-style:none;cursor:pointer;gap:8px}
 .workbench-disclosure > summary::-webkit-details-marker {display:none}
 .workbench-disclosure[open] > summary {background:var(--selection);color:var(--accent)}
 .workbench-disclosure[open] > .workbench-popover {display:block}

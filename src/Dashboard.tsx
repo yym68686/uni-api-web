@@ -133,6 +133,8 @@ import { TableColumns, useTableColumns } from "./TableColumns";
 import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
 import { balanceSpend } from "./balanceSpend";
+import { OverviewProfitTable } from "./OverviewProfitTable";
+import { overviewProfitAmount, summarizeOverviewProfit } from "./overviewProfit";
 import { useChannelAccountBalances, walletGroups, type SiteBalanceResult } from "./ChannelAccountBalances";
 import { balanceSite, scheduleBalance } from "./balanceRequests";
 import { balanceThresholdState, rankBalanceProviders } from "./balanceFilters";
@@ -163,6 +165,8 @@ function Overview({
   livePending,
   catalogReady,
   historyError,
+  profit,
+  showProfitSources,
   onLogs,
   onChannel,
 }: {
@@ -173,6 +177,8 @@ function Overview({
   livePending: boolean;
   catalogReady: boolean;
   historyError?: string;
+  profit?: ReturnType<typeof summarizeOverviewProfit>;
+  showProfitSources: boolean;
   onLogs: (model?: string, failed?: boolean) => void;
   onChannel: (row: Channel) => void;
 }) {
@@ -222,9 +228,21 @@ function Overview({
   const [showAllModels, setShowAllModels] = useState(false);
   const [showAllChannels, setShowAllChannels] = useState(false);
   const previewCount = 8;
+  const currentChannels = new Map(rows.map(row => [providerId(row), row]));
+  const profitCoverage = profit?.omitted ? ` · ${profit.counted}/${profit.counted + profit.omitted} 渠道` : "";
+  const profitBasis = !profit
+    ? undefined
+    : (profit.failed ? "读取不完整"
+      : profit.pending ? "账单核对中"
+      : profit.provisional ? "暂计参考"
+      : profit.omitted ? "部分渠道小计"
+      : "经营参考") + profitCoverage;
+  const emptyProfit = profit?.failed ? "账单读取不完整，暂无可排名结果。"
+    : profit?.pending ? "正在核对账单…"
+    : profit?.omitted || profit?.provisional ? "当前可计算的数据中没有该类渠道。" : undefined;
   return (
     <section className="overview-content">
-      <section className="overview-grid" aria-label="概览指标">
+      <section className="overview-grid" data-profit={profit ? "" : undefined} aria-label="概览指标">
       <MetricCard
         label="请求数量"
         value={countKnown(total?.requests)}
@@ -244,6 +262,12 @@ function Overview({
         value={money(total?.estimated_cost_usd)}
         help="按当前模型价格估算。"
       />
+      {profit && <MetricCard
+        label="利润总额"
+        value={profit.amount == null ? "—" : overviewProfitAmount(profit.amount)}
+        note={profitBasis}
+        help={`按所选范围逐请求核对消费，与渠道观测的利润参考使用同一公式。未定价或消费无法核对的渠道不计入，缺失账单不按零处理。${profit.omitted ? "当前金额仅为可计算渠道的小计。" : ""}${profit.provisional ? "含历史暂计数据，可能调整。" : ""}仅供经营参考，不用于结算。`}
+      />}
       <MetricCard
         label="渠道总并发"
         value={currentConcurrency == null ? "—" : count(currentConcurrency)}
@@ -303,6 +327,14 @@ function Overview({
           </button>}
         </section>
       </div>
+      {profit && <div className="overview-panels overview-profit-panels">
+        <OverviewProfitTable title="盈利渠道 TOP 8" entries={profit.gains}
+          empty={emptyProfit ?? "当前筛选范围内没有盈利渠道。"}
+          showSource={showProfitSources} current={currentChannels} onChannel={onChannel} />
+        <OverviewProfitTable title="亏损渠道 TOP 8" entries={profit.losses}
+          empty={emptyProfit ?? "当前筛选范围内没有亏损渠道。"}
+          showSource={showProfitSources} current={currentChannels} onChannel={onChannel} />
+      </div>}
     </section>
   );
 }
@@ -318,10 +350,12 @@ function MetricCard({
   label,
   value,
   help,
+  note,
 }: {
   label: string;
   help?: ReactNode;
   value: string;
+  note?: string;
 }) {
   return (
     <div className="metric-card">
@@ -330,6 +364,7 @@ function MetricCard({
         {help ? <Tip text={help}><span className="overview-metric-info" aria-label={`${label}说明`}><CircleHelp /></span></Tip> : null}
       </div>
       <div className="metric-card-number" title={value}>{value}</div>
+      {note && <p className="overview-profit-basis" title={note}>{note}</p>}
     </div>
   );
 }
@@ -1139,7 +1174,16 @@ export default function Dashboard({
     if (state === "unknown") thresholdUnknown++;
     return state === "below";
   });
-  const channelSpend = useScopedChannelSpend({ rows: filtered, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (view === "balances" && balanceView === "channels" && balanceDetails || channelView && showSpendColumn) && !!baseConnection.account });
+  // The routing catalog drops removed channels and may include the same model
+  // under multiple routes. Finance follows historical facts, not that catalog.
+  const overviewRows = useMemo(() => {
+    if (view !== "overview" || !metrics.data || sourceRemoved || keyRemoved) return [];
+    const names = new Map(sourceQuery.data?.data.map(source => [source.id, source.name]));
+    return metrics.data.data.map(row => channelBilling({
+      ...row, source_name: row.source_name || names.get(row.source_id || ""),
+    }, imported.data));
+  }, [view, metrics.data, imported.data, sourceRemoved, keyRemoved, sourceQuery.data]);
+  const channelSpend = useScopedChannelSpend({ rows: view === "overview" ? overviewRows : filtered, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (view === "overview" || view === "balances" && balanceView === "channels" && balanceDetails || channelView && showSpendColumn) && !!baseConnection.account });
   const balanceFinance = useMemo(() => {
     const result = new Map<
       string,
@@ -1278,6 +1322,7 @@ export default function Dashboard({
         void metrics.refetch();
         void liveMetrics.refetch();
       }
+      setRefresh(value => value + 1);
       return;
     }
     if (channelView && baseConnection.account && !controls.pending) {
@@ -1417,6 +1462,10 @@ export default function Dashboard({
       (historyImport.error_class ? `采集异常：${historyImport.error_class}` : historyImport.audit_complete === false ? "来源上报尚未追平或存在记录缺口。" : "正在接收请求记录，统计尚不完整。"),
     metrics.data?.coverage === "partial" && "当前筛选范围的历史记录不完整。",
   ];
+  const overviewProfit = view === "overview" && baseConnection.account
+    ? summarizeOverviewProfit(overviewRows, channelSpend,
+      !metrics.data || !!error || historyMessages.some(Boolean) || !!metrics.data.unavailable_sources?.length)
+    : undefined;
   const observationMessages = [
     ...historyMessages,
     previewingSort && "排序预览 · 未应用到路由",
@@ -1466,7 +1515,7 @@ export default function Dashboard({
   const routeIssues = adjustingChannels && !controls.pending && controls.draftIssues.length ?
     `未应用的修改已保留：${controls.draftIssues.map(issue =>
       `${sourceList.find(source => source.id === issue.source)?.name || issue.source}：${issue.message}`).join("；")}` : "";
-  const apiKeyFilter = <div className="select-field key-select">
+  const apiKeyFilter = <label className="select-field key-select">
     <KeyRound size={15} aria-hidden="true" />
     <select aria-label="API key 筛选" value={keyId} onChange={e => setFilter("keyId", e.target.value)}>
       <option value="">全部 API Key</option>
@@ -1476,8 +1525,8 @@ export default function Dashboard({
       </option>)}
     </select>
     <ChevronDown size={13} aria-hidden="true" />
-  </div>;
-  const modelFilter = <div className="select-field model-select">
+  </label>;
+  const modelFilter = <label className="select-field model-select">
     <Layers3 size={15} aria-hidden="true" />
     <select aria-label="模型筛选" value={model} onChange={e => setFilter("model", e.target.value)}>
       <option value="">全部模型</option>
@@ -1485,7 +1534,7 @@ export default function Dashboard({
       {models.map(name => <option key={name}>{name}</option>)}
     </select>
     <ChevronDown size={13} aria-hidden="true" />
-  </div>;
+  </label>;
   const routeScopeLabel = (source: string, rawKey: string, target: string) => {
     const key = keys.data?.data.find(item => item.key_id === rawKey || item.key_id === `${source}::${rawKey}`);
     return [sourceList.find(item => item.id === source)?.name || source, key ? `Key ${key.position} · ${key.prefix}` : rawKey ? "所选调用 Key" : "全部调用 Key", target || "全部模型"].join(" · ");
@@ -1539,24 +1588,24 @@ export default function Dashboard({
         />
         <main className="workspace" aria-label="工作区" tabIndex={-1} ref={mainRef}><PageBoundary key={view}><Suspense fallback={<PageLoading view={view} />}>
           {view === "overview" && !noSources && <header className="data-heading overview-heading" aria-label="总览统计范围">
-            <div className="data-title"><h2>总览</h2><WorkbenchNotice messages={[...historyMessages, error && `读取不完整：${error}`]} /></div>
+            <div className="data-title"><h2>总览</h2><span className="overview-notice-slot"><WorkbenchNotice messages={[...historyMessages, error && `读取不完整：${error}`]} /></span></div>
             <div className="overview-tools">
-              <label className="overview-select"><Clock3 size={14} aria-hidden="true" /><select aria-label="总览时间范围" value={window} onChange={event => setFilter("window",event.target.value)}>
+              <label className="select-field overview-select"><Clock3 size={14} aria-hidden="true" /><select aria-label="总览时间范围" value={window} onChange={event => setFilter("window",event.target.value)}>
                 {ranges.map(([value,label]) => <option value={value} key={value}>{label}</option>)}
               </select><ChevronDown size={12} aria-hidden="true" /></label>
-              {baseConnection.account && <label className="overview-select"><Server size={14} aria-hidden="true" /><select aria-label="总览来源" value={selectedSourceId} onChange={event => {
+              {baseConnection.account && <label className="select-field overview-select overview-select-wide"><Server size={14} aria-hidden="true" /><select aria-label="总览来源" value={selectedSourceId} onChange={event => {
                 setFilter("sourceId",event.target.value); setFilter("keyId","");
               }}>
                 <option value="">全部来源</option>
                 {sourceRemoved && <option value={selectedSourceId}>来源已移除</option>}
                 {sourceList.map(source => <option value={source.id} key={source.id}>{source.name}</option>)}
               </select><ChevronDown size={12} aria-hidden="true" /></label>}
-              <label className="overview-select"><KeyRound size={14} aria-hidden="true" /><select aria-label="总览调用 Key" value={keyId} onChange={event => setFilter("keyId",event.target.value)}>
+              <label className="select-field overview-select overview-select-wide"><KeyRound size={14} aria-hidden="true" /><select aria-label="总览调用 Key" value={keyId} onChange={event => setFilter("keyId",event.target.value)}>
                 <option value="">全部 Key</option>
                 {keyRemoved && <option value={keyId}>Key 已移除</option>}
                 {keys.data?.data.map(key => <option value={key.key_id} key={key.key_id}>{key.source_name ? key.source_name + " · " : ""}Key {key.position} · {key.prefix}</option>)}
               </select><ChevronDown size={12} aria-hidden="true" /></label>
-              <label className="overview-select"><Layers3 size={14} aria-hidden="true" /><select aria-label="总览模型" value={model} onChange={event => setFilter("model",event.target.value)}>
+              <label className="select-field overview-select overview-select-wide"><Layers3 size={14} aria-hidden="true" /><select aria-label="总览模型" value={model} onChange={event => setFilter("model",event.target.value)}>
                 <option value="">全部模型</option>
                 {model && !models.includes(model) && <option value={model}>{model}（当前目录未确认）</option>}
                 {models.map(value => <option value={value} key={value}>{value}</option>)}
@@ -1628,6 +1677,8 @@ export default function Dashboard({
               livePending={liveMetrics.isPending}
               catalogReady={!!catalog.data && !catalog.isError && !catalog.data.unavailable_sources?.length}
               historyError={metrics.error?.message}
+              profit={overviewProfit}
+              showProfitSources={!selectedSourceId && sourceList.length > 1 && !keyId}
               onLogs={openRelatedLogs}
               onChannel={row => {
                 const next = {...filters};

@@ -189,9 +189,8 @@
 .request-log-window label, .request-log-window input { min-width: 0; max-width: 100%; }
 .workspace .request-log-filters .key-select {
   width: min(100%, 25rem);
-  padding-right: 26px;
 }
-.request-log-filters .key-select select { flex: 1; width: 0; padding-right: 0; }
+.request-log-filters .key-select select { flex: 1; width: 0; }
 .log-filter-accessory {
   flex: 0 1 auto;
   min-width: 0;

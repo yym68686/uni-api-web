@@ -29,7 +29,6 @@ td:has(> .loading-indicator--inline:only-child) { text-align: center; }
 }
 .loading-indicator--section { min-block-size: 120px; }
 .loading-indicator--panel { min-block-size: min(260px, 45dvh); }
-.workspace:has(> .page-loading) { display: grid; }
 .page-loading { min-block-size: min(240px, 40dvh); }
 .loading-indicator--fill { flex: 1 1 0; min-block-size: 0; }
 @media (prefers-reduced-motion: reduce) {

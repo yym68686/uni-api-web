@@ -1008,13 +1008,14 @@ nav > button.active > svg {
   display: flex;
   align-items: center;
   position: relative;
-  gap: 7px;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0 9px;
   height: 35px;
   color: var(--muted);
   max-width: 240px;
+  min-width: 0;
 }
 .select-field select,
 .inline-select select {
@@ -1027,16 +1028,14 @@ nav > button.active > svg {
   cursor: pointer;
   min-width: 0;
   max-width: 100%;
-  padding: 0 15px 0 0;
+  padding: 0;
   height: 100%;
+  text-overflow: ellipsis;
 }
-.select-field > svg:last-child {
-  position: absolute;
-  right: 7px;
+.select-field > select { flex: 1 1 auto; }
+.select-field > svg {
+  flex: none;
   pointer-events: none;
-}
-.select-field > svg:first-child {
-  width: 14px;
 }
 .model-select {
   max-width: 210px;
