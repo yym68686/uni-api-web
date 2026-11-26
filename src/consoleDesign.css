@@ -148,9 +148,9 @@ h1, h2, h3 { overflow-wrap: anywhere; }
 .management-sites .sub-account-status-slot { block-size: 24px; }
 .management-sites .sub-account-message { display: block; max-inline-size: 100%; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; text-align: start; text-decoration: underline; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
 .account-diagnostic { display: grid; gap: 12px; overflow-wrap: anywhere; }
-.site-row-menu > summary { inline-size: 44px; overflow: hidden; white-space: nowrap; font-size: 0; }
-.site-row-menu > summary::before { content: "…"; font-size: 18px; }
-.site-row-menu > summary svg { display:none; }
+.site-row-menu > summary.button { inline-size: 44px; padding-inline: 0; justify-content: center; }
+.workbench-trigger-icon { display: inline-flex; flex: none; }
+.settings-retry-count-hint { display: block; margin-block-start: 4px; min-block-size: 1.5em; }
 @media (max-width: 1000px) {
   .workspace .sub-table[data-columns="operations"] { min-width: 100%; table-layout: fixed; }
   .workspace .sub-table[data-columns="operations"] [data-column]:not(:is([data-column="availability"],[data-column="latency"])) { display: none; }

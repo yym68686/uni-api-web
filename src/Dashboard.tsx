@@ -1486,8 +1486,6 @@ export default function Dashboard({
     </select>
     <ChevronDown size={13} aria-hidden="true" />
   </div>;
-  const currentRouteKey = keys.data?.data.find(key => key.key_id === keyId);
-  const routeKeyLabel = currentRouteKey ? `Key ${currentRouteKey.position} · ${currentRouteKey.prefix}` : keyId ? "所选调用 Key" : "全部调用 Key";
   const routeScopeLabel = (source: string, rawKey: string, target: string) => {
     const key = keys.data?.data.find(item => item.key_id === rawKey || item.key_id === `${source}::${rawKey}`);
     return [sourceList.find(item => item.id === source)?.name || source, key ? `Key ${key.position} · ${key.prefix}` : rawKey ? "所选调用 Key" : "全部调用 Key", target || "全部模型"].join(" · ");
@@ -1943,12 +1941,11 @@ export default function Dashboard({
                 </div>
               </div>
               {canEditRoutes && <div className="channel-sort-preview-actions" ref={setSortPreviewActions} />}
-              {adjustingChannels && <div className="route-edit-scope">
-                {pendingRouteScopes.length ? <details>
+              {adjustingChannels && pendingRouteScopes.length > 0 && <div className="route-edit-scope">
+                <details>
                   <summary>草稿范围 · {pendingRouteScopes.length} 项</summary>
                   <ul>{pendingRouteScopes.map(scope => <li key={scope}>{scope}</li>)}</ul>
-                </details> : <span>{selectedSourceId ? routeScopeLabel(selectedSourceId, currentRouteKey?.key_id.split("::").at(-1) || keyId, model) : `各来源独立 · ${routeKeyLabel} · ${model || "全部模型"}`}</span>}
-                <span>拖动仅调整本页顺位，应用保存各范围的完整顺序。</span>
+                </details>
               </div>}
               {adjustingChannels && <span id={routeHelpId} className="sr-only">在当前页的同一来源内拖动渠道。键盘可用上下方向键移动，Home 置顶。同一渠道的所有模型一起移动。</span>}
               {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","关联渠道"]]} />}

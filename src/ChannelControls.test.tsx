@@ -455,9 +455,13 @@ it("stages source-specific controls inline and retains hidden channels and draft
   openFilter();
   await enterRoute(app);
   await screen.findByLabelText("临时停用 One visible-first m");
+  expect(screen.queryByText(/各来源独立|拖动仅调整本页顺位|应用保存各范围的完整顺序/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/草稿范围/)).not.toBeInTheDocument();
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
   move("One visible-second m", "ArrowUp");
   await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
+  expect(screen.getByText("草稿范围 · 1 项")).toBeVisible();
+  expect(screen.queryByText(/拖动仅调整本页顺位|应用保存各范围的完整顺序/)).not.toBeInTheDocument();
   await app.user.selectOptions(condition("时间范围筛选"), "today");
   await app.user.click(screen.getByRole("button", { name: "余额管理" }));
   await openRouting(app);

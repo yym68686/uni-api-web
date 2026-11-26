@@ -19,6 +19,7 @@ import {
   ChevronDown,
   CircleHelp,
   ArrowRight,
+  Ellipsis,
   Globe2,
   Plus,
   RefreshCw,
@@ -1694,7 +1695,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                           </button>
                         </>
                       )}
-                      <WorkbenchDisclosure label={`更多 · ${a.name}`} title="站点账号操作" className="site-row-menu">
+                      <WorkbenchDisclosure label={`更多 · ${a.name}`} triggerIcon={<Ellipsis size={18} />} title="站点账号操作" className="site-row-menu">
                         <button className="button ghost small" aria-label={`设置站点 ${a.name}`} onClick={() => setSettingsAccount(a)}>设置</button>
                         {!pending(a.state) && <>
                           <button className="button ghost small" disabled={accountBusy(a.id)} onClick={() => setForm({ account: a })}>重新登录</button>

@@ -49,10 +49,11 @@ export function useWorkbenchTools() {
   return { observeHeading, level };
 }
 
-export function WorkbenchDisclosure({ label, children, icon, className = "", title, align = "end" }: {
+export function WorkbenchDisclosure({ label, children, icon, triggerIcon, className = "", title, align = "end" }: {
   label: string;
   children: ReactNode;
   icon?: ReactNode;
+  triggerIcon?: ReactNode;
   className?: string;
   title?: string;
   align?: "start" | "end";
@@ -105,7 +106,10 @@ export function WorkbenchDisclosure({ label, children, icon, className = "", tit
     event.currentTarget.open = false;
     event.currentTarget.querySelector("summary")?.focus();
   }}>
-    <summary className="button small" aria-controls={id} title={title}>{icon}{label}<ChevronDown size={12} aria-hidden="true" /></summary>
+    <summary className="button small" aria-controls={id} aria-label={triggerIcon ? label : undefined} title={title}>
+      {triggerIcon ? <span className="workbench-trigger-icon" aria-hidden="true">{triggerIcon}</span>
+        : <>{icon}{label}<ChevronDown size={12} aria-hidden="true" /></>}
+    </summary>
     <div ref={body} id={id} className="workbench-popover">
       <div className="workbench-popover-heading"><strong>{label}</strong><button type="button" className="icon-button" aria-label={`关闭${label}`} onClick={event => {
         const panel = event.currentTarget.closest("details");

@@ -25,9 +25,10 @@ import (
 // PostgreSQL owns mutable account/source state. Credentials remain encrypted
 // and are never returned to the browser.
 type controlStore struct {
-	db           *sql.DB
-	controlLocks *sql.DB
-	key          []byte
+	db             *sql.DB
+	controlLocks   *sql.DB
+	key            []byte
+	syncPlanWrites subSyncPlanWriteGate
 }
 type sourceView struct {
 	ID           string `json:"id"`

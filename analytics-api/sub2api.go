@@ -1200,27 +1200,23 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	return s.subFinishSyncKeys(ctx, id, job, failures)
 }
 
-func (s *Service) subDiscoverSync(ctx context.Context, id, base, job string, groups []subRemoteGroup, call subPanelCall, newAPI bool) (err error) {
-	run := ""
+func (s *Service) subDiscoverSync(ctx context.Context, id, base, job string, groups []subRemoteGroup, call subPanelCall, newAPI bool) error {
 	var discoveredLimits any
-	if plan := subPlan(ctx); plan != nil {
-		run = plan.run
-		if !newAPI {
-			var limits subProbeLimits
-			if call("GET", "/api/v1/auth/me", nil, &limits, "") == nil {
-				discoveredLimits = mustJSON(map[string]any{"declared_rpm": positiveProbeLimit(limits.RPM), "declared_concurrency": positiveProbeLimit(limits.Concurrency)})
-			}
+	if subPlan(ctx) != nil && !newAPI {
+		var limits subProbeLimits
+		if call("GET", "/api/v1/auth/me", nil, &limits, "") == nil {
+			discoveredLimits = mustJSON(map[string]any{"declared_rpm": positiveProbeLimit(limits.RPM), "declared_concurrency": positiveProbeLimit(limits.Concurrency)})
 		}
 	}
 	groupModels := map[int64][]string{}
 	if newAPI {
 		for _, g := range groups {
 			var remote string
-			if err = s.control.db.QueryRowContext(ctx, `SELECT remote_key FROM console_site_groups WHERE account_id=$1 AND id=$2`, id, g.ID).Scan(&remote); err != nil {
+			if err := s.control.db.QueryRowContext(ctx, `SELECT remote_key FROM console_site_groups WHERE account_id=$1 AND id=$2`, id, g.ID).Scan(&remote); err != nil {
 				return err
 			}
 			var models []string
-			if err = s.newAPICall(ctx, id, base, "GET", "/api/user/models?group="+url.QueryEscape(remote), nil, &models); err != nil {
+			if err := s.newAPICall(ctx, id, base, "GET", "/api/user/models?group="+url.QueryEscape(remote), nil, &models); err != nil {
 				return err
 			}
 			for _, model := range models {
@@ -1249,58 +1245,7 @@ func (s *Service) subDiscoverSync(ctx context.Context, id, base, job string, gro
 			}
 		}
 	}
-	tx, err := s.control.db.BeginTx(ctx, nil)
-	if err != nil {
-		return errors.New("分组保存失败")
-	}
-	defer tx.Rollback()
-	var activeID string
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM console_sub_accounts WHERE id=$1 AND job_id=$2 FOR UPDATE`, id, job).Scan(&activeID); err != nil {
-		return context.Canceled
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE console_sub_targets SET active=false WHERE account_id=$1`, id); err != nil {
-		return errors.New("分组保存失败")
-	}
-	for _, g := range groups {
-		if g.ID <= 0 || len(g.Name) > 512 {
-			return errors.New("站点返回了无效分组")
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_targets(account_id,group_id,name,platform,channel,rate,state,sync_run_id,sync_key_state,probe_rpm) VALUES($1,$2,$3,$4,$5,$6,'queued',$7,'preparing',$8) ON CONFLICT(account_id,group_id) DO UPDATE SET name=excluded.name,platform=excluded.platform,channel=excluded.channel,rate=excluded.rate,active=true,state='queued',message='',sync_run_id=excluded.sync_run_id,sync_key_state=excluded.sync_key_state,probe_rpm=excluded.probe_rpm`, id, g.ID, g.Name, g.Platform, labels[g.ID], g.Rate, run, positiveProbeLimit(g.RPM))
-		if err != nil {
-			return errors.New("分组保存失败")
-		}
-	}
-	if err = queueSubSyncModels(ctx, tx, id, groups, groupModels); err != nil {
-		log.Printf("sub_sync_write_failed stage=queue_models class=%s", databaseErrorClass(err))
-		return errors.New("模型保存失败")
-	}
-	if newAPI && len(groups) > 0 {
-		if err = recordNewAPIGroupObservations(ctx, tx, id); err != nil {
-			return errors.New("分组观察记录保存失败")
-		}
-		billing := make(map[string]subBilling, len(groups))
-		for _, g := range groups {
-			billing[strconv.FormatInt(g.ID, 10)] = syncGroupBilling(g, nil, true)
-		}
-		if _, err = tx.ExecContext(ctx, `UPDATE console_sub_targets t
- SET state='done',sync_key_state='not_needed',billing=b.value
- FROM jsonb_each($3::jsonb) b WHERE t.account_id=$1 AND t.active AND t.sync_run_id=$2 AND t.group_id::text=b.key
- AND NOT EXISTS(SELECT 1 FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND m.sync_run_id=$2 AND m.state='queued')`,
-			id, run, mustJSON(billing)); err != nil {
-			return errors.New("保存按需检测计划失败")
-		}
-	}
-	if plan := subPlan(ctx); plan != nil {
-		if _, err = tx.ExecContext(ctx, `UPDATE console_sub_accounts SET sync_plan_ready=true,sync_phase='preparing',
- probe_limits=CASE WHEN $3::jsonb IS NULL THEN probe_limits ELSE probe_limits||$3::jsonb END
- WHERE id=$1 AND job_id=$2`, id, job, discoveredLimits); err != nil {
-			return err
-		}
-	}
-	if err = tx.Commit(); err != nil {
-		return errors.New("分组保存失败")
-	}
-	return nil
+	return s.subSaveDiscoveredSync(ctx, id, job, groups, labels, groupModels, newAPI, discoveredLimits)
 }
 
 // Retry only a rolled-back database statement, never the upstream probe.

@@ -117,6 +117,37 @@ function mount(user: string, client = new QueryClient({ defaultOptions: { querie
   );
 }
 
+it("renders identical icon-only site menu buttons with distinct accessible names", async () => {
+  const sites = [
+    { ...account, name: "937" },
+    { ...account, id: "long", name: "有很长的站点名称用于复现操作按钮裁切" },
+  ];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const path = new URL(input).pathname;
+    if (path.endsWith("/channel-management/query")) return Response.json({ ...page(), accounts: sites });
+    if (path.endsWith("/accounts/progress") || path.endsWith("/accounts")) return Response.json({ data: sites });
+    return Response.json({ data: [] });
+  }));
+  mount("stable-site-menus");
+  const user = userEvent.setup();
+  await openSites();
+  const short = await screen.findByLabelText("更多 · 937");
+  const long = screen.getByLabelText(`更多 · ${sites[1].name}`);
+  for (const trigger of [short, long]) {
+    expect(trigger.tagName).toBe("SUMMARY");
+    expect(trigger.textContent).toBe("");
+    expect(trigger.querySelector('[aria-hidden="true"] svg')).toBeInTheDocument();
+  }
+  expect(short.innerHTML).toBe(long.innerHTML);
+  await user.click(long);
+  expect(long.closest("details")).toHaveAttribute("open");
+  expect(short.closest("details")).not.toHaveAttribute("open");
+  expect(within(long.closest("details")!).getByRole("button", { name: `设置站点 ${sites[1].name}` })).toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  expect(long.closest("details")).not.toHaveAttribute("open");
+  expect(long).toHaveFocus();
+});
+
 it.each(["idle", "interrupted", "stopped", "error"])("revalidates page two once when a running site settles as %s, without resubmitting detection", async terminal => {
   const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
   let pageReads = 0, progressReads = 0;

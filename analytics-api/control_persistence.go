@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -699,12 +700,16 @@ func (s *Service) bootstrapControls(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "saved stream mode requires a compatible gateway", 409)
 		return
 	}
-	// The persisted 0–3 field is unchanged. Let older compatible gateways
-	// restore their existing policy; the editor and writes require the new
-	// capability before claiming all-400 behavior.
-	if requiresUnknown400Retry(saved) && r.Header.Get("X-Uni-All-Upstream-400-Retries") != "1" && r.Header.Get("X-Uni-Unknown-Upstream-400-Retries") != "1" {
-		http.Error(w, "saved 400 retry policy requires a compatible gateway", 409)
-		return
+	// Preserve legacy restore behavior for 0–3. Values above that require a
+	// gateway that explicitly supports the saved count, including on rollback.
+	if count, required := savedUnknown400Retry(saved); required {
+		all := r.Header.Get("X-Uni-All-Upstream-400-Retries") == "1"
+		legacy := r.Header.Get("X-Uni-Unknown-Upstream-400-Retries") == "1"
+		limit, _ := strconv.Atoi(r.Header.Get("X-Uni-All-Upstream-400-Retries-Max"))
+		if (!all && !legacy) || (count > legacyUnknown400Max && (!all || limit < count)) {
+			http.Error(w, "saved 400 retry policy requires a compatible gateway", 409)
+			return
+		}
 	}
 	// Keep the exact encrypted version issued at boot. A later saved edit must
 	// not erase the evidence needed to recognize an unchanged older bootstrap.

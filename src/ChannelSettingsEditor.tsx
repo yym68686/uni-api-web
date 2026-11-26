@@ -46,6 +46,7 @@ import type { InstalledChannel } from "./sub2apiImports";
 import { WorkbenchNotice } from "./Workbench";
 
 type Document = Record<string, unknown>;
+const upstream400RetriesPath = "/preferences/unknown_upstream_400_retries";
 type TierRoutingView = {
   scope: string;
   routing?: InstalledChannel["service_tier_routing"];
@@ -799,9 +800,15 @@ export function Editor({
   const visibleFields = view.schema.fields.filter(
     (f) =>
       f.path !== "/model" &&
-      (f.path !== "/preferences/unknown_upstream_400_retries" ||
+      (f.path !== upstream400RetriesPath ||
         view.schema.all_upstream_400_retries === true),
   );
+  const retryField = visibleFields.find(f => f.path === upstream400RetriesPath);
+  const retryMin = retryField?.minimum ?? 0;
+  const retryMax = retryField?.maximum ?? 3;
+  const retryCount = get(draft, upstream400RetriesPath);
+  const invalidRetryCount = !!retryField && retryCount !== undefined &&
+    (typeof retryCount !== "number" || !Number.isSafeInteger(retryCount) || retryCount < retryMin || retryCount > retryMax);
   const fieldGroups = [...new Set(visibleFields.map(f => f.group))];
   const groups = [
     ...(isGlobal ? fieldGroups : [
@@ -1201,37 +1208,25 @@ export function Editor({
                           ))}
                         </select>
                       </label>
-                    ) : f.path ===
-                        "/preferences/unknown_upstream_400_retries" &&
-                      f.type === "integer" ? (
+                    ) : f.path === upstream400RetriesPath && f.type === "integer" ? (
                       <label>
                         <span className="sr-only">{label}</span>
-                        <select
+                        <input
                           aria-label={label}
+                          aria-invalid={invalidRetryCount || undefined}
+                          aria-describedby="settings-retry-count-hint"
+                          inputMode="numeric"
+                          placeholder="运行时默认值（0，关闭）"
                           value={ownValue === undefined ? "" : String(ownValue)}
-                          onChange={(e) => {
-                            const n = Number(e.target.value);
-                            if (
-                              e.target.value === "" ||
-                              (Number.isInteger(n) && n >= 0 && n <= 3)
-                            ) {
-                              edit(
-                                set(
-                                  draft,
-                                  f.path,
-                                  e.target.value === "" ? undefined : n,
-                                ),
-                              );
-                            }
+                          onChange={({ target: { value: text } }) => {
+                            const n = Number(text);
+                            edit(set(draft, f.path, text === "" ? undefined :
+                              /^\d+$/.test(text) && Number.isSafeInteger(n) ? n : text));
                           }}
-                        >
-                          <option value="">运行时默认值（0，关闭）</option>
-                          {[0, 1, 2, 3].map((n) => (
-                            <option key={n} value={n}>
-                              {n === 0 ? "0 · 关闭" : `${n} 次`}
-                            </option>
-                          ))}
-                        </select>
+                        />
+                        <small id="settings-retry-count-hint" className={`settings-retry-count-hint ${invalidRetryCount ? "negative" : "muted"}`} aria-live="polite">
+                          {invalidRetryCount ? `请输入 ${retryMin}–${retryMax} 的整数` : `${retryMin}–${retryMax} 次，0 为关闭`}
+                        </small>
                       </label>
                     ) : f.type === "number" ? (
                       <NumberField
@@ -1551,14 +1546,14 @@ export function Editor({
           </button>
           <button
             className="button"
-            disabled={busy}
+            disabled={busy || invalidRetryCount}
             onClick={() => void run(false)}
           >
             校验与预览
           </button>
           <button
             className="button primary"
-            disabled={busy || !preview || preview.status !== "validated"}
+            disabled={busy || invalidRetryCount || !preview || preview.status !== "validated"}
             onClick={() => void run(true)}
           >
             {busy ? <Spinner small /> : <CircleCheck size={16} />}保存并应用
