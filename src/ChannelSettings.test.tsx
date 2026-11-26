@@ -109,6 +109,7 @@ beforeEach(() => {
               { path: "/model", type: "models", group: "基本与模型" },
               { path: "/api", type: "keys", group: "密钥" },
               { path: "/only_request_types", type: "json", group: "请求规则" },
+              { path: "/preferences/compaction_ultrafast_only", type: "boolean", group: "请求规则" },
               {
                 path: "/exclude_request_types",
                 type: "json",
@@ -332,6 +333,29 @@ it("edits compaction request types without allowing contradictory checkboxes", a
     "/exclude_request_types": [],
     "/only_request_types": ["compaction"],
   });
+});
+it("previews and saves Ultrafast-only compaction instead of excluding all compaction", async () => {
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "请求规则" }));
+  const excluded = screen.getByRole("checkbox", { name: "排除压缩请求" });
+  const ultrafast = screen.getByRole("checkbox", { name: "仅对 Ultrafast 请求开启远程压缩" });
+  await user.click(excluded);
+  await user.click(ultrafast);
+  expect(ultrafast).toBeChecked();
+  expect(excluded).not.toBeChecked();
+  await user.click(excluded);
+  expect(ultrafast).not.toBeChecked();
+  await user.click(ultrafast);
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled());
+  await user.click(screen.getByRole("button", { name: "保存并应用" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  for (const write of writes) {
+    expect((write.changes as {set: object}[])[0].set).toMatchObject({
+      "/preferences/compaction_ultrafast_only": true,
+      "/exclude_request_types": [],
+    });
+  }
 });
 it("reset then edit applies the edited value over the base and never discards edits silently", async () => {
   const user = await mount();

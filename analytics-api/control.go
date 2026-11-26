@@ -443,6 +443,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sub2api/channel-options", s.subChannelOptions)
 	mux.HandleFunc("POST /v1/sub2api/channel-tier-options", s.previewServiceTierImport)
 	mux.HandleFunc("POST /v1/sub2api/channels", s.subImportChannel)
+	mux.HandleFunc("POST /v1/sub2api/channels/ultrafast-compaction", s.subImportChannel)
 	mux.HandleFunc("GET /v1/sub2api/channels", s.subInstalledChannels)
 	mux.HandleFunc("PATCH /v1/sub2api/channels", s.subManageChannel)
 	mux.HandleFunc("POST /v1/automations/audit/{audit}/review", s.reviewAutomationSubmission)

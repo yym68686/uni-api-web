@@ -65,6 +65,7 @@ interface Options {
   provider?: string;
   supported: boolean;
   manageable: boolean;
+  compaction_ultrafast_only?: boolean;
   revision: string;
   keys: KeyInfo[];
   channels: { provider: string; model: string }[];
@@ -332,6 +333,9 @@ function Sub2apiImportForm({
   );
   const compactionEnabled =
     compactionChoice ?? target.compaction?.status === "supported";
+  const [compactionUltrafastOnly, setCompactionUltrafastOnly] = useState(
+    initialAdd?.compactionUltrafastOnly ?? false,
+  );
   const [tierOverride, setTierOverride] = useState(() => ({
     destination: JSON.stringify([initialAdd?.source, initialAdd?.key]),
     choices: initialAdd?.serviceTierChoices || {},
@@ -388,6 +392,8 @@ function Sub2apiImportForm({
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
+  const compactionScopeUnavailable = compactionEnabled && compactionUltrafastOnly &&
+    options.data?.compaction_ultrafast_only !== true;
   const importStatus = useQuery({
     queryKey: ["sub-import-status", account.id],
     queryFn: async ({ signal }) => {
@@ -659,7 +665,7 @@ function Sub2apiImportForm({
   ) {
     if (
       busy ||
-      (action === "add" && (groupUnavailable || importBlocked || fingerprintLoading || waitingForTiers || duplicate || !options.data?.supported)) ||
+      (action === "add" && (groupUnavailable || importBlocked || fingerprintLoading || waitingForTiers || duplicate || compactionScopeUnavailable || !options.data?.supported)) ||
       (action !== "delete" &&
         (mapping.error ||
           invalidModels.length ||
@@ -672,6 +678,10 @@ function Sub2apiImportForm({
           !keyDirectory?.data?.keys.some((k) => k.key_id === key)))
     )
       return;
+    const restrictCompaction = action === "add" && compactionEnabled && compactionUltrafastOnly;
+    const path = restrictCompaction
+      ? "/v1/sub2api/channels/ultrafast-compaction"
+      : "/v1/sub2api/channels";
     const body = JSON.stringify({
       account_id: account.id,
       group_id: target.group_id,
@@ -697,10 +707,10 @@ function Sub2apiImportForm({
       if (!submitAdd({
         id: JSON.stringify(["site", account.id, target.group_id, source, key]),
         label: `${account.name} / ${target.name}`,
-        path: "/v1/sub2api/channels",
+        path,
         body,
         draft: {
-          source, key, aliases, position, perModel, modelPositions, protocols, compactionEnabled,
+          source, key, aliases, position, perModel, modelPositions, protocols, compactionEnabled, compactionUltrafastOnly,
           serviceTierChoices: tierChoices,
           modelChoices: Object.fromEntries(checks.map(check => [check.model, originals.includes(check.model)])),
         },
@@ -713,7 +723,7 @@ function Sub2apiImportForm({
     setSuccess("");
     try {
       const result = await controlRequest<{ message: string }>(
-        "/v1/sub2api/channels",
+        path,
         { method: action === "add" ? "POST" : "PATCH", signal: AbortSignal.timeout(60000), body },
       );
       setSuccess(result.message);
@@ -1322,9 +1332,21 @@ function Sub2apiImportForm({
                         type="checkbox"
                         checked={compactionEnabled}
                         disabled={busy}
-                        onChange={(e) => setCompactionChoice(e.target.checked)}
+                        onChange={(e) => {
+                          setCompactionChoice(e.target.checked);
+                          if (!e.target.checked) setCompactionUltrafastOnly(false);
+                        }}
                       />
                       开启远程压缩
+                    </label>
+                    <label className="settings-check compaction-tier-scope">
+                      <input type="checkbox" checked={compactionEnabled && compactionUltrafastOnly}
+                        disabled={busy || (!compactionUltrafastOnly && options.data?.compaction_ultrafast_only !== true)}
+                        onChange={event => {
+                          setCompactionUltrafastOnly(event.target.checked);
+                          if (event.target.checked) setCompactionChoice(true);
+                        }}/>
+                      仅对 Ultrafast 请求开启远程压缩
                     </label>
                     {serviceTiers.map(tier => <label className="settings-check" key={tier}>
                       <input type="checkbox" aria-label={`开启 ${serviceTierName[tier]}`}
@@ -1340,10 +1362,15 @@ function Sub2apiImportForm({
                     </div>
                     <CompactionStatus target={target} />
                     <small className="muted">
-                      关闭后此渠道跳过 compaction 请求，普通请求照常转发。
+                      关闭后此渠道跳过压缩请求；选择仅 Ultrafast 后，默认和 Fast 压缩也会跳过。此规则不代替档位验证，不影响非压缩请求。
                       {target.compaction?.model &&
                         ` 已验证模型：${target.compaction.model}。`}
                     </small>
+                    {options.data && options.data.compaction_ultrafast_only !== true && (
+                      <small className={compactionScopeUnavailable ? "negative" : "muted"}>
+                        此来源不支持仅 Ultrafast 压缩。{compactionScopeUnavailable && "请取消该选项或切换来源后再添加。"}
+                      </small>
+                    )}
                   </div>
                 )}
                 <ModelPositions
@@ -1443,7 +1470,7 @@ function Sub2apiImportForm({
                     form={formId}
                     disabled={
                       busy ||
-                      (!editing && (groupUnavailable || importBlocked || waitingForTiers)) ||
+                      (!editing && (groupUnavailable || importBlocked || waitingForTiers || compactionScopeUnavailable)) ||
                       !source ||
                       !key ||
                       !keyDirectory?.data?.keys.some((k) => k.key_id === key) ||

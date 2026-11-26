@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +25,14 @@ func TestCompactionImportRoutesWithRealGateway(t *testing.T) {
 		t.Skip("local uni-api binary required")
 	}
 	hits := make(chan string, 10)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits <- r.URL.Path; subSSE(w, "test") }))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits <- r.URL.Path
+		if subFixtureCompaction(r) {
+			compactSSE(w, checkModel, `[{"type":"compaction","encrypted_content":"fixture"}]`)
+			return
+		}
+		subSSE(w, "test")
+	}))
 	defer upstream.Close()
 	dir := t.TempDir()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -170,7 +179,7 @@ func TestCompactionImportRoutesWithRealGateway(t *testing.T) {
 	if found {
 		t.Fatal("gateway did not restore only the selected Fast tier")
 	}
-	probe := func(compaction bool, want string) {
+	probe := func(compaction bool, want ...string) {
 		t.Helper()
 		input := []any{map[string]string{"role": "user", "content": "test"}}
 		if compaction {
@@ -184,26 +193,34 @@ func TestCompactionImportRoutesWithRealGateway(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
+		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != 200 {
-			t.Fatal(resp.StatusCode)
+			t.Fatal(resp.StatusCode, string(body))
+		}
+		if readErr != nil || !bytes.Contains(body, []byte("response.completed")) {
+			t.Fatal("incomplete probe", readErr, string(body))
 		}
 		select {
 		case got := <-hits:
-			if got != want {
+			if !slices.Contains(want, got) {
 				t.Fatalf("compaction=%v got %s want %s", compaction, got, want)
 			}
 		case <-ctx.Done():
 			t.Fatal("no upstream request")
 		}
+		if len(hits) != 0 {
+			t.Fatal("unexpected extra upstream attempts", len(hits))
+		}
 	}
 	probe(false, "/new/v1/responses")
-	probe(true, "/regular/v1/responses")
+	probe(true, "/regular/v1/responses", "/legacy/v1/responses")
 	_, code, err = service.settingsGateway(ctx, src, "PATCH", "/v1/channel-settings", map[string]any{"revision": applied["revision"], "operation_id": "compaction-only-fixture", "changes": []any{map[string]any{"provider": "sub2api-compaction-fixture", "set": map[string]any{"/exclude_request_types": []string{}, "/only_request_types": []string{"compaction"}}}}})
 	if err != nil || code != 200 {
 		t.Fatal("setting compaction-only failed", code, err)
 	}
-	probe(false, "/regular/v1/responses")
+	// Both retained fallback providers are eligible for ordinary requests.
+	probe(false, "/regular/v1/responses", "/legacy/v1/responses")
 	probe(true, "/new/v1/responses")
 	exported, _, err := service.settingsGateway(ctx, src, "GET", "/v1/channel-settings/export", nil)
 	if err != nil {

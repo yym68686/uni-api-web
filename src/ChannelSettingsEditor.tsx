@@ -135,6 +135,7 @@ const labels: Record<string, string> = {
   exclude_endpoints: "排除端点",
   only_request_types: "仅允许请求类型",
   exclude_request_types: "排除请求类型",
+  compaction_ultrafast_only: "仅对 Ultrafast 请求开启远程压缩",
   exclude_request_rules: "条件排除规则",
   explicit_cache_guard: "显式缓存前缀重写回避",
   max_request_body_bytes: "请求体大小上限",
@@ -170,6 +171,8 @@ const categories: Record<string, typeof Settings2> = {
   变更记录: History,
 };
 const keyOf = (path: string) => path.split("/").at(-1)!;
+const ultrafastCompactionPath = "/preferences/compaction_ultrafast_only";
+const excludeRequestTypesPath = "/exclude_request_types";
 const requestTypes = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.filter((v): v is string => typeof v === "string")
@@ -1103,9 +1106,29 @@ export function Editor({
                         value={value}
                         onChange={(v) => edit(set(draft, f.path, v))}
                       />
+                    ) : f.path === ultrafastCompactionPath ? (
+                      <div>
+                        <label className="settings-check">
+                          <input
+                            type="checkbox"
+                            checked={value === true}
+                            onChange={(e) => {
+                              let next = set(draft, f.path, e.target.checked);
+                              const excluded = requestTypes(get(next, excludeRequestTypesPath));
+                              if (e.target.checked && excluded.some((v) => v.toLowerCase() === "compaction"))
+                                next = set(next, excludeRequestTypesPath, excluded.filter((v) => v.toLowerCase() !== "compaction"));
+                              edit(next);
+                            }}
+                          />
+                          {label}
+                        </label>
+                        <small className="muted">
+                          只限制压缩请求。普通请求照常转发，压缩不会在此渠道降为普通档重试。
+                        </small>
+                      </div>
                     ) : [
                         "/only_request_types",
-                        "/exclude_request_types",
+                        excludeRequestTypesPath,
                       ].includes(f.path) ? (
                       <div>
                         <label className="settings-check">
@@ -1128,7 +1151,7 @@ export function Editor({
                               if (e.target.checked) {
                                 const other =
                                   f.path === "/only_request_types"
-                                    ? "/exclude_request_types"
+                                    ? excludeRequestTypesPath
                                     : "/only_request_types";
                                 const previous = requestTypes(get(next, other));
                                 if (
@@ -1144,6 +1167,9 @@ export function Editor({
                                     ),
                                   );
                               }
+                              if (e.target.checked && f.path === excludeRequestTypesPath &&
+                                  get(next, ultrafastCompactionPath) === true)
+                                next = set(next, ultrafastCompactionPath, false);
                               edit(next);
                             }}
                           />

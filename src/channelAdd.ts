@@ -14,6 +14,7 @@ export interface SiteChannelAddDraft extends ChannelAddDraft {
   modelChoices: Record<string, boolean>;
   protocols: Record<string, string>;
   compactionEnabled: boolean;
+  compactionUltrafastOnly?: boolean;
   serviceTierChoices?: Partial<Record<"fast" | "ultrafast", boolean>>;
 }
 
@@ -28,7 +29,7 @@ export interface ChannelAddRequest<D> {
   id: string;
   action?: "save";
   label: string;
-  path: "/v1/sub2api/channels" | "/v1/channel-management";
+  path: "/v1/sub2api/channels" | "/v1/sub2api/channels/ultrafast-compaction" | "/v1/channel-management";
   body: string;
   draft: D;
   refresh: () => void;

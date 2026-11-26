@@ -10,3 +10,6 @@
   gap: .5rem;
   white-space: nowrap;
 }
+.service-tier-import-toggles .compaction-tier-scope {
+  white-space: normal;
+}

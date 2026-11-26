@@ -15,23 +15,26 @@ import (
 	"time"
 )
 
+const compactionUltrafastOnly = "compaction_ultrafast_only"
+
 type subImportInput struct {
-	Provider               string            `json:"provider,omitempty"`
-	Protocols              map[string]string `json:"protocols,omitempty"`
-	AllowUnverifiedModels  bool              `json:"allow_unverified_models,omitempty"`
-	Positions              map[string]int    `json:"positions,omitempty"`
-	ModelMappings          map[string]string `json:"model_mappings,omitempty"`
-	CompactionEnabled      *bool             `json:"compaction_enabled,omitempty"`
-	ServiceTierEnabled     map[string]bool   `json:"service_tier_enabled,omitempty"`
-	ServiceTierSiteChoices map[string]bool   `json:"service_tier_site_choices,omitempty"`
-	Action                 string            `json:"action"`
-	AccountID              string            `json:"account_id"`
-	GroupID                int64             `json:"group_id"`
-	SourceID               string            `json:"source_id"`
-	KeyID                  string            `json:"api_key_id"`
-	Revision               string            `json:"revision"`
-	Models                 []string          `json:"models"`
-	Position               int               `json:"position"`
+	Provider                string            `json:"provider,omitempty"`
+	Protocols               map[string]string `json:"protocols,omitempty"`
+	AllowUnverifiedModels   bool              `json:"allow_unverified_models,omitempty"`
+	Positions               map[string]int    `json:"positions,omitempty"`
+	ModelMappings           map[string]string `json:"model_mappings,omitempty"`
+	CompactionEnabled       *bool             `json:"compaction_enabled,omitempty"`
+	CompactionUltrafastOnly bool              `json:"compaction_ultrafast_only,omitempty"`
+	ServiceTierEnabled      map[string]bool   `json:"service_tier_enabled,omitempty"`
+	ServiceTierSiteChoices  map[string]bool   `json:"service_tier_site_choices,omitempty"`
+	Action                  string            `json:"action"`
+	AccountID               string            `json:"account_id"`
+	GroupID                 int64             `json:"group_id"`
+	SourceID                string            `json:"source_id"`
+	KeyID                   string            `json:"api_key_id"`
+	Revision                string            `json:"revision"`
+	Models                  []string          `json:"models"`
+	Position                int               `json:"position"`
 }
 
 func subProviderName(account string, group int64, key string) string {
@@ -196,6 +199,18 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	if !decodeConfiguration(w, r, &in) {
 		return
 	}
+	// Use a dedicated endpoint for this opt-in so an older analytics replica
+	// cannot silently ignore the new field and allow all compaction requests.
+	if r.URL.Path == "/v1/sub2api/channels/ultrafast-compaction" {
+		in.CompactionUltrafastOnly = true
+	} else if in.CompactionUltrafastOnly {
+		http.Error(w, "仅 Ultrafast 压缩必须通过专用入口提交", http.StatusBadRequest)
+		return
+	}
+	if in.CompactionUltrafastOnly && in.CompactionEnabled != nil && !*in.CompactionEnabled {
+		http.Error(w, "排除压缩与仅 Ultrafast 压缩不能同时开启", http.StatusBadRequest)
+		return
+	}
 	owner, _ := s.controlUser(r)
 	publicModels, modelErr := importPublicModels(in.Models, in.ModelMappings)
 	if modelErr != nil || !validTierChoices(in.ServiceTierEnabled) || !validTierChoices(in.ServiceTierSiteChoices) ||
@@ -263,6 +278,10 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	if state["automatic_engine"] != true {
 		http.Error(w, "来源尚不支持按地址自动识别引擎，请更新 uni-api", 400)
+		return
+	}
+	if in.CompactionUltrafastOnly && state[compactionUltrafastOnly] != true {
+		http.Error(w, "来源尚不支持仅 Ultrafast 压缩，请更新 uni-api", http.StatusConflict)
 		return
 	}
 	protocols, protocolErr := s.importProtocols(ctx, in.AccountID, in.GroupID, importUpstreamModels(in.Models, in.ModelMappings), in.Protocols)
@@ -426,6 +445,9 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 	if state["automatic_engine"] != true {
 		return nil, 400, errors.New("来源尚不支持按地址自动识别引擎，请更新 uni-api")
 	}
+	if in.CompactionUltrafastOnly && state[compactionUltrafastOnly] != true {
+		return nil, http.StatusConflict, errors.New("来源尚不支持仅 Ultrafast 压缩，请更新 uni-api")
+	}
 	public, err := importPublicModels(in.Models, in.ModelMappings)
 	if err != nil {
 		return nil, 400, err
@@ -452,6 +474,9 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 		return nil, 400, err
 	}
 	document := map[string]any{"provider": provider, "base_url": base, "api": []string{upstreamKey}, "exclude_request_types": excluded}
+	if in.CompactionUltrafastOnly {
+		document["preferences"] = map[string]any{compactionUltrafastOnly: true}
+	}
 	appliedTiers := map[string]bool{}
 	var tierProvider string
 	for index, part := range parts {

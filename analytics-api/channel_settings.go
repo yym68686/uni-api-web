@@ -479,7 +479,7 @@ func (s *Service) channelSettingsTemplates(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		safe := func(path string) bool {
-			for _, root := range []string{"/model", "/engine", "/tools", "/image", "/AUTO_RETRY", "/exclude_endpoints", "/only_request_types", "/exclude_request_types", "/exclude_request_rules", "/api_key_schedule_algorithm", "/api_key_rate_limit", "/preferences/model_timeout", "/preferences/timeout_policy", "/preferences/keepalive_interval", "/preferences/cooldown_period", "/preferences/api_key_cooldown_period", "/preferences/api_key_rate_limit_cooldown_period", "/preferences/api_key_quota_cooldown_period", "/preferences/api_key_rate_limit", "/preferences/api_key_schedule_algorithm", "/preferences/max_request_body_bytes", "/preferences/normalize_responses_custom_tool_call_ids", "/preferences/balance_query"} {
+			for _, root := range []string{"/model", "/engine", "/tools", "/image", "/AUTO_RETRY", "/exclude_endpoints", "/only_request_types", "/exclude_request_types", "/preferences/" + compactionUltrafastOnly, "/exclude_request_rules", "/api_key_schedule_algorithm", "/api_key_rate_limit", "/preferences/model_timeout", "/preferences/timeout_policy", "/preferences/keepalive_interval", "/preferences/cooldown_period", "/preferences/api_key_cooldown_period", "/preferences/api_key_rate_limit_cooldown_period", "/preferences/api_key_quota_cooldown_period", "/preferences/api_key_rate_limit", "/preferences/api_key_schedule_algorithm", "/preferences/max_request_body_bytes", "/preferences/normalize_responses_custom_tool_call_ids", "/preferences/balance_query"} {
 				if path == root {
 					return true
 				}

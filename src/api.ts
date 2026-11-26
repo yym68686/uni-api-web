@@ -183,7 +183,7 @@ function managementWriteImpact(path: string, method: string, backgroundChannelAd
    return "none";
  if (/^\/v1\/(?:channel-management\/checks|model-fingerprints(?:\/settings)?|sub2api\/(?:checks|quality-checks|compaction-checks|tool-use-checks)|sub2api\/accounts\/[^/]+\/(?:stop|probe-limits|settings)|sources\/[^/]+\/(?:channel-checks|channel-controls)|automations\/(?:[^/]+\/run|audit\/[^/]+\/(?:review|apply|rollback)))$/.test(endpoint) ||
      (backgroundChannelAdd && method === "POST" &&
-      (endpoint === "/v1/sub2api/channels" || endpoint === "/v1/channel-management")))
+      (endpoint === "/v1/sub2api/channels" || endpoint === "/v1/sub2api/channels/ultrafast-compaction" || endpoint === "/v1/channel-management")))
    return "background";
  return "blocking";
 }

@@ -605,6 +605,49 @@ it.each([false, true])("preselects Fast and submits it with the correct evidence
   });
 });
 
+it.each([true, false])("only offers Ultrafast compaction on a compatible destination (%s)", async (supported) => {
+  const writes: {path: string; body: unknown}[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/channel-tier-options")) return Response.json({verified: {}, total: 1});
+    if (path.endsWith("/import-status")) return Response.json({state: "idle", can_import: true});
+    if (path.endsWith("/groups/1/access")) return Response.json({available: true, status: "available"});
+    if (path.includes("channel-options")) return Response.json({
+      supported: true, manageable: true, revision: "r1", compaction_ultrafast_only: supported,
+      keys: [{key_id: "key2", position: 2, prefix: "masked-two"}], channels: [],
+    });
+    if (init?.method === "POST") {
+      writes.push({path, body: JSON.parse(String(init.body))});
+      return Response.json({message: "已添加"});
+    }
+    return Response.json({data: [], unavailable_keys: [], unavailable_sources: []});
+  }));
+  const model = "gpt-6-sol";
+  mount({...target, active: true,
+    models: [{model, state: "done", message: "", result: {model, availability: {status: "success", protocol: "responses"}}}],
+  } as SubTarget);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", {name: /新增接入/}));
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  const add = screen.getByRole("button", {name: "添加到渠道"});
+  await waitFor(() => expect(add).toBeEnabled());
+  const scope = screen.getByRole("checkbox", {name: "仅对 Ultrafast 请求开启远程压缩"});
+  if (supported) {
+    expect(screen.getByRole("checkbox", {name: "开启 Ultrafast"})).toBeDisabled();
+    await user.click(scope);
+    expect(scope).toBeChecked();
+    expect(screen.getByRole("checkbox", {name: "开启远程压缩"})).toBeChecked();
+  } else {
+    expect(scope).toBeDisabled();
+  }
+  await user.click(add);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(new URL(writes[0].path).pathname).toMatch(supported
+    ? /\/sub2api\/channels\/ultrafast-compaction$/
+    : /\/sub2api\/channels$/);
+  if (supported) expect(writes[0].body).toMatchObject({compaction_enabled: true});
+});
+
 it("keeps addition blocked when account state cannot be read and permits an explicit retry", async () => {
   let failed = true;
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {

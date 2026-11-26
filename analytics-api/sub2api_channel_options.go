@@ -73,5 +73,5 @@ func subChannelOptionsData(ctx context.Context, src controlSource, query url.Val
 			}
 		}
 	}
-	return map[string]any{"batch_revisions": true, configuredProtocolField: state.data[configuredProtocolField] == true, "revision": state.data["revision"], "supported": state.data["temporary_channel_import"] == true, "manageable": state.data["temporary_channel_management"] == true, "keys": keys.data["data"], "channels": channels, "provider": subProviderName(query.Get("account_id"), int64Param(query.Get("group_id")), strings.TrimPrefix(keyInput, src.ID+"::"))}, http.StatusOK, nil
+	return map[string]any{"batch_revisions": true, compactionUltrafastOnly: state.data[compactionUltrafastOnly] == true, configuredProtocolField: state.data[configuredProtocolField] == true, "revision": state.data["revision"], "supported": state.data["temporary_channel_import"] == true, "manageable": state.data["temporary_channel_management"] == true, "keys": keys.data["data"], "channels": channels, "provider": subProviderName(query.Get("account_id"), int64Param(query.Get("group_id")), strings.TrimPrefix(keyInput, src.ID+"::"))}, http.StatusOK, nil
 }

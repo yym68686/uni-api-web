@@ -256,6 +256,16 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	if w := request([]string{"gpt-5.6-sol"}, "boot:1", session); w.Code != 400 {
 		t.Fatal("untested model allowed", w.Code)
 	}
+	ultraBody := mustJSON(subImportInput{AccountID: account, GroupID: 7, SourceID: sourceID,
+		KeyID: sourceID + "::key-" + strings.Repeat("a", 64), Models: []string{checkModel}, Revision: "boot:1", Position: 1})
+	ultraRequest := httptest.NewRequest("POST", "/v1/sub2api/channels/ultrafast-compaction", strings.NewReader(ultraBody))
+	ultraRequest.Header.Set("Content-Type", "application/json")
+	ultraRequest.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+	ultraResponse := httptest.NewRecorder()
+	s.Handler().ServeHTTP(ultraResponse, ultraRequest)
+	if ultraResponse.Code != 409 || !strings.Contains(ultraResponse.Body.String(), "不支持仅 Ultrafast 压缩") {
+		t.Fatal("legacy gateway accepted new compaction policy", ultraResponse.Code, ultraResponse.Body.String())
+	}
 	if created != 0 || imports != 0 {
 		t.Fatal("rejected import changed upstream")
 	}

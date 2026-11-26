@@ -33,13 +33,13 @@ func subFixtureCompaction(r *http.Request) bool {
 
 func compactSSE(w http.ResponseWriter, model, output string) {
 	w.Header().Set("Content-Type", "text/event-stream")
-	fmt.Fprint(w, "event: response.created\ndata: {\"response\":{\"id\":\"resp-compact\"}}\n\n")
+	fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-compact\"}}\n\n")
 	var items []json.RawMessage
 	_ = json.Unmarshal([]byte(output), &items)
-	for _, item := range items {
-		fmt.Fprintf(w, "event: response.output_item.done\ndata: {\"item\":%s}\n\n", item)
+	for index, item := range items {
+		fmt.Fprintf(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":%d,\"item\":%s}\n\n", index, item)
 	}
-	fmt.Fprintf(w, "event: response.completed\ndata: {\"response\":{\"id\":\"resp-compact\",\"status\":\"completed\",\"model\":%q,\"output\":%s}}\n\n", model, output)
+	fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-compact\",\"status\":\"completed\",\"model\":%q,\"output\":%s}}\n\n", model, output)
 }
 
 func TestCompactionRequiresDoneEventMatchingTerminal(t *testing.T) {
@@ -246,8 +246,12 @@ func TestCompactionQueueSelectsAvailableModelsAndPreservesOtherResults(t *testin
 }
 
 func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		enabled, ultrafast bool
+	}{{"disabled", false, false}, {"all", true, false}, {"ultrafast", true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			enabled := tc.enabled
 			var applied retainedSnapshot
 			mutations := 0
 			revision := "r1"
@@ -278,7 +282,13 @@ func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
 			state := map[string]any{"temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "rules": []retainedRule{{KeyID: "key", Model: checkModel, Order: []string{"configured", "existing"}, Disabled: []string{"existing"}}, {KeyID: "other", Model: "other-model", Order: []string{"unrelated"}, Disabled: []string{}}}, "temporary_channels": []retainedChannel{{Provider: "existing", KeyID: "key", Models: []string{checkModel}}}}
 			src := controlSource{sourceView: sourceView{Base: server.URL}}
 			service := &Service{}
-			in := subImportInput{Revision: "r1", Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}, Position: 2, CompactionEnabled: &enabled}
+			in := subImportInput{Revision: "r1", Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}, Position: 2, CompactionEnabled: &enabled, CompactionUltrafastOnly: tc.ultrafast}
+			if tc.ultrafast {
+				if _, code, err := service.subImportCompactionChannel(context.Background(), src, state, in, "key", "sub2api-new", "https://new.test", "new-secret"); err == nil || code != 409 || mutations != 0 {
+					t.Fatal("old gateway must reject the import without writing", code, err, mutations)
+				}
+				state[compactionUltrafastOnly] = true
+			}
 			_, code, err := service.subImportCompactionChannel(context.Background(), src, state, in, "key", "sub2api-new", "https://new.test", "new-secret")
 			if err != nil || code != 200 || mutations != 1 {
 				t.Fatal(code, err, mutations)
@@ -305,6 +315,10 @@ func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
 			types := doc["exclude_request_types"].([]any)
 			if enabled && len(types) != 0 || !enabled && (len(types) != 1 || types[0] != "compaction") {
 				t.Fatal("incorrect compaction policy", types)
+			}
+			policy, _ := doc["preferences"].(map[string]any)
+			if (policy[compactionUltrafastOnly] == true) != tc.ultrafast {
+				t.Fatal("incorrect Ultrafast compaction policy", policy)
 			}
 			revision = "changed"
 			_, code, err = service.subImportCompactionChannel(context.Background(), src, state, in, "key", "sub2api-new", "https://new.test", "new-secret")
