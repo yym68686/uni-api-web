@@ -99,6 +99,23 @@ it("keeps Kimi K3.1 Pro unconfirmed and independent from K3 or saved operator pr
  expect(referencePrice(model,[manual])).toEqual(manual);
 });
 
+it("lists GLM-5.4 for detection and pricing without inheriting GLM-5.3 rates", () => {
+  const model = "glm-5.4";
+  const reference = displayedModelPrices([]).find((p) => p.model === model)!;
+  expect(SUB_MODELS.filter((name) => name === model)).toEqual([model]);
+  expect(reference).toMatchObject({
+    verified: false, input: 0, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0,
+  });
+  expect(canonicalPriceModel(model + "-thinking")).toBe(model);
+  expect(referencePrice(model + "-thinking", MODEL_PRICE_CATALOG)).toBeUndefined();
+  expect(referencePrice("glm-5.3", MODEL_PRICE_CATALOG)).toMatchObject({
+    input: 1.4, output: 4.4, verified: true,
+  });
+  const manual = { ...reference, input: 2, output: 5, source: "manual", verified: true };
+  expect(displayedModelPrices([manual]).find((p) => p.model === model)).toEqual(manual);
+  expect(referencePrice(model + "-thinking", [manual])).toEqual(manual);
+});
+
 it("keeps DeepSeek Flash 1017 pricing independent of the previous Flash model", () => {
   const model = "deepseek-v4.1-flash-1017";
   const reference = MODEL_PRICE_CATALOG.find(p => p.model === model)!;
@@ -126,7 +143,7 @@ it("shows exactly the detection models, preserves manual values and fills old pl
     input: 7,
     verified: false,
   });
-  expect(prices.filter((p) => !p.verified).map(p => p.model)).toEqual(["gpt-6.1-sol", "codex-auto-review", "kimi-k3.1-pro", "gemini-3.1-pro"]);
+  expect(prices.filter((p) => !p.verified).map(p => p.model)).toEqual(["gpt-6.1-sol", "codex-auto-review", "glm-5.4", "kimi-k3.1-pro", "gemini-3.1-pro"]);
   const placeholder = {
     ...base,
     input: 0,

@@ -74,6 +74,17 @@ it("can select only GPT 6.1 Terra for batch detection", async () => {
  expect(save).toHaveBeenCalledExactlyOnceWith(["gpt-6.1-terra"]);
 });
 
+it("lets operators add GLM-5.4 without reselecting GLM-5.3", async () => {
+  const save = vi.fn(), user = userEvent.setup();
+  render(<SubModelSettings models={[]} onSave={save} />);
+  await user.click(screen.getByRole("button", { name: "检测模型设置" }));
+  const dialog = within(screen.getByRole("dialog"));
+  await user.click(dialog.getByRole("checkbox", { name: "glm-5.4" }));
+  expect(dialog.getByRole("checkbox", { name: "glm-5.3" })).not.toBeChecked();
+  await user.click(dialog.getByRole("button", { name: "保存设置" }));
+  expect(save).toHaveBeenCalledExactlyOnceWith(["glm-5.4"]);
+});
+
 it("selects and clears built-in and extra models independently", async () => {
  const save=vi.fn(),user=userEvent.setup();
  render(<SubModelSettings models={[SUB_MODELS[0],"extra-a"]} extraModels={["extra-a","extra-b",SUB_MODELS[0],"extra-b"]} onSave={save}/>);

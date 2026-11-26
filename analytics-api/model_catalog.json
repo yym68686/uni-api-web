@@ -146,6 +146,18 @@
     "note": "未找到此模型的公开官方单价，暂不用于费用估算；可手动填写并确认。"
   },
   {
+    "model": "glm-5.4",
+    "input": 0,
+    "output": 0,
+    "cache_read": 0,
+    "cache_write": 0,
+    "cache_write_1h": 0,
+    "source": "https://docs.z.ai/guides/overview/pricing",
+    "verified": false,
+    "cache_write_kind": "input",
+    "note": "GLM-5.4 已上线 GLM Coding Plan；公开 API 按 token 单价待确认。暂不用于费用估算，可填写并确认实际单价。"
+  },
+  {
     "model": "glm-5.3",
     "input": 1.4,
     "output": 4.4,

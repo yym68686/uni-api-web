@@ -277,6 +277,42 @@ func TestKimi31ProCatalogRemainsIndependentAndUnpricedUntilConfirmed(t *testing.
 	}
 }
 
+func TestGLM54CatalogAndUnconfirmedCost(t *testing.T) {
+	const model = "glm-5.4"
+	if !slices.Contains(managementPageModelCatalog(managementQueryInput{}, ""), model) ||
+		!slices.Contains(managementPageDetectionModels(nil), model) {
+		t.Fatal("model missing from management or detection catalog")
+	}
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	input, output := int64(1_000_000), int64(1_000_000)
+	fact := Fact{
+		Schema: 1, EventID: "glm54-cost", Kind: "request",
+		AtMS: time.Now().Add(-time.Second).UnixMilli(), Provider: "fixture",
+		Model: "glm-5.3", UpstreamModel: model + "-thinking", Outcome: "success",
+		InputTokens: &input, OutputTokens: &output,
+	}
+	if err := e.Import(ctx, "glm54.jsonl", "v1", []Fact{fact}); err != nil {
+		t.Fatal(err)
+	}
+	checkCost := func(want any) {
+		t.Helper()
+		result, err := e.Query(ctx, QueryFilter{Range: "all"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := result.Total["estimated_cost_usd"]; got != want {
+			t.Fatalf("estimated cost = %v, want %v", got, want)
+		}
+	}
+	// No confirmed GLM 5.4 price must mean unknown, not zero or the GLM 5.3 price.
+	checkCost(nil)
+	if err := e.SavePrice(ctx, Price{Model: model, Input: 2, Output: 5, Source: "manual", Verified: true}); err != nil {
+		t.Fatal(err)
+	}
+	checkCost(float64(7))
+}
+
 func TestCatalogFallbackPreservesPersistedOperatorSettings(t *testing.T) {
 	e, err := OpenEngine(filepath.Join(t.TempDir(), "prices.duckdb"), Config{Timezone: "UTC"})
 	if err != nil {

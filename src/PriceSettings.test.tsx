@@ -124,6 +124,17 @@ it("shows Kimi K3.1 Pro as editable unconfirmed pricing without copying K3 price
  expect(screen.getByRole("dialog",{name:model})).toHaveTextContent("参考单价待确认");
 });
 
+it("shows GLM-5.4 as unpriced rather than free", () => {
+  const model = "glm-5.4";
+  render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={vi.fn()} />);
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索模型价格" }), { target: { value: model } });
+  expect(screen.getByRole("rowheader", { name: /glm-5\.4/ })).toHaveTextContent("未定价");
+  openEditor(model);
+  expect(screen.getByLabelText(model + " 输入价格")).toHaveValue(null);
+  expect(screen.getByLabelText(model + " 输出价格")).toHaveValue(null);
+  expect(screen.getByRole("button", { name: "保存价格" })).toBeDisabled();
+});
+
 it("shows DeepSeek Flash 1017 with its reference prices and upstream naming note", async () => {
   render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={vi.fn()} />);
   const model = "deepseek-v4.1-flash-1017";
