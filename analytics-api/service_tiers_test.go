@@ -125,7 +125,7 @@ func TestServiceTierSettingsChoicesRequireCurrentBoundEvidence(t *testing.T) {
 	scope := serviceTierScope(src, liveScope)
 	s := &Service{control: store}
 	in := channelSettingMutation{TierChoices: []serviceTierRoutingChoice{{Provider: "p", Scope: scope, Tier: "fast", Enabled: true}, {Provider: "p", Scope: scope, Tier: "ultrafast", Enabled: false}}}
-	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 409 {
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in, ""); err == nil || code != 409 {
 		t.Fatal("enabled unverified route", code, err)
 	}
 	now := time.Now().Unix() - 5
@@ -141,15 +141,15 @@ func TestServiceTierSettingsChoicesRequireCurrentBoundEvidence(t *testing.T) {
 	}
 	insert("other", scope, now)
 	insert("p", strings.Repeat("c", 64), now)
-	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 409 {
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in, ""); err == nil || code != 409 {
 		t.Fatal("accepted unrelated provider or scope", code, err)
 	}
 	insert("p", scope, now-serviceTierTTL)
-	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 409 {
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in, ""); err == nil || code != 409 {
 		t.Fatal("accepted expired evidence", code, err)
 	}
 	insert("p", scope, now)
-	out, code, err := s.resolveServiceTierChoices(ctx, src, in)
+	out, code, err := s.resolveServiceTierChoices(ctx, src, in, "")
 	if err != nil || len(out.Changes) != 1 || len(out.TierChoices) != 0 {
 		t.Fatal(out, code, err)
 	}
@@ -160,12 +160,12 @@ func TestServiceTierSettingsChoicesRequireCurrentBoundEvidence(t *testing.T) {
 		t.Fatal(set)
 	}
 	in.Changes = []channelSettingChange{{Provider: "p", Set: map[string]any{"/api": "new-credential"}}}
-	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 400 {
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in, ""); err == nil || code != 400 {
 		t.Fatal("accepted simultaneous credential change", code, err)
 	}
 	in.Changes = nil
 	in.TierChoices[0].Scope = strings.Repeat("d", 64)
-	if _, code, err := s.resolveServiceTierChoices(ctx, src, in); err == nil || code != 409 {
+	if _, code, err := s.resolveServiceTierChoices(ctx, src, in, ""); err == nil || code != 409 {
 		t.Fatal("accepted stale scope", code, err)
 	}
 }

@@ -114,7 +114,23 @@ func TestCompactionImportRoutesWithRealGateway(t *testing.T) {
 	}
 	enabled := false
 	service := &Service{control: store}
-	in := subImportInput{Revision: state["revision"].(string), Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}, Position: 1, CompactionEnabled: &enabled}
+	account := "tier-fixture-" + randomID()[:10]
+	defer store.db.Exec(`DELETE FROM console_sub_accounts WHERE id=$1`, account)
+	if _, err := store.db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) VALUES($1,'fixture','fixture',$2,'fixture@example.test','')`, account, upstream.URL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,encrypted_key) VALUES($1,7,'group','openai',1,'')`, account); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	result := mustJSON(subResult{Model: checkModel, ServiceTiers: map[string]subTierProbe{
+		"fast":      {Status: "supported", Observed: "priority", CheckedAt: now},
+		"ultrafast": {Status: "supported", Observed: "ultrafast", CheckedAt: now},
+	}})
+	if _, err := store.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,7,$2,'done',$3)`, account, checkModel, result); err != nil {
+		t.Fatal(err)
+	}
+	in := subImportInput{AccountID: account, GroupID: 7, Revision: state["revision"].(string), Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}, Position: 1, CompactionEnabled: &enabled, ServiceTierSiteChoices: map[string]bool{"fast": true}}
 	applied, code, err := service.subImportCompactionChannel(ctx, src, state, in, key, "sub2api-compaction-fixture", upstream.URL+"/new", "fixture-key")
 	if err != nil || code != 200 {
 		t.Fatal("atomic creation failed", code, err)
@@ -141,6 +157,18 @@ func TestCompactionImportRoutesWithRealGateway(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("imported channel not found")
+	}
+	providers, err := effectiveProviders(ctx, src, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range providers {
+		if provider.Provider == "sub2api-compaction-fixture" && provider.ServiceTierRouting["fast"] == "enabled" && provider.ServiceTierRouting["ultrafast"] == "disabled" {
+			found = false
+		}
+	}
+	if found {
+		t.Fatal("gateway did not restore only the selected Fast tier")
 	}
 	probe := func(compaction bool, want string) {
 		t.Helper()

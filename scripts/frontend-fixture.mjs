@@ -18,8 +18,15 @@ const channels = Array.from({length:30},(_,i)=>{
 const managed = channels.map(c=>({...c,name:c.provider,kind:'configured',account_id:'',group_id:0,account_ids:[],base:'https://mock-gateway.example.test/v1',api_key_id:'',key_position:0,key_prefix:'',positions:{},revision:'r1',manageable:true,models:[c.model],model_mappings:{[c.model]:c.upstream_model},probe_fingerprint:'audit-only'}));
 const tierScope = 'a'.repeat(64);
 const fixtureRouting = new Map();
-const tierRouting = provider => fixtureRouting.get(provider) || {fast:'enabled',ultrafast:'disabled_verified'};
+const tierRouting = provider => fixtureRouting.get(provider) || (provider===longName
+  ? {fast:'unconfigured',ultrafast:'unconfigured'} : {fast:'enabled',ultrafast:'disabled_verified'});
 for (const member of managed) member.service_tier_scope = tierScope;
+const groupTierResults = (provider, model) => provider === longName && model === channels[0].model ? {
+  fast:{status:'supported',observed:'priority',checked_at:Math.floor(Date.now()/1000)},
+  ultrafast:{status:'not_honored',observed:'default',checked_at:Math.floor(Date.now()/1000)},
+} : provider === channels[4].provider && model === channels[4].model ? {
+  ultrafast:{status:'supported',observed:'ultrafast',checked_at:Math.floor(Date.now()/1000)},
+} : undefined;
 const fixtureChecks = [];
 const fingerprintFixture = {
   source_id: channels[0].source_id, provider: channels[0].provider, model: channels[0].model,
@@ -116,7 +123,11 @@ const plugin = {
       if (path.endsWith('/prices')) return json({data:prices});
       if (path.endsWith('/channel-options')) return json({revision:'r1',keys:scope(keys).map(k=>({...k,key_id:'demo'})),channels:[]});
       if (path.endsWith('/channel-controls')) return json({revision:'r1',rules:[]});
-      if (path.endsWith('/service-tier-routing')) return json({scope:tierScope,routing:tierRouting(url.searchParams.get('provider'))});
+      if (path.endsWith('/service-tier-routing')) {
+        await delay();
+        const provider = url.searchParams.get('provider');
+        return json({scope:tierScope,routing:tierRouting(provider),group_results:groupTierResults(provider,url.searchParams.get('model'))});
+      }
       if (path.endsWith('/service-tier-target')) {
         const candidate = managed.find(member => member.source_id === sid && member.provider === url.searchParams.get('provider'));
         const model = url.searchParams.get('model');
@@ -142,6 +153,12 @@ const plugin = {
       if (path.endsWith('/automations/audit')) return json({data:[{id:1,task_id:'fixture-task',task_name:'模拟路由排序',run_at:new Date(at).toISOString(),status:'suggested',source_id:'source-1',model:models[0],reason:'样本达到阈值，建议检查顺序。',before_order:[longName,'渠道-13'],after_order:['渠道-13',longName],changes:[],policy:{},metrics:{comparisons:['按最近一小时的成功率比较']}}]});
       if (path.endsWith('/model-channels') || path.endsWith('/channel-metrics')) return json({data:scope(channels),snapshot_revision:'r1',generated_at:Math.floor(at/1000)});
       if (path.endsWith('/analytics')) return json({data:scope(channels),total:{requests:25391,attempts:33011,success:31740,failed:1271,input_tokens:32901122,output_tokens:3918242,cache_read_tokens:23045018,estimated_cost_usd:431.289}, models:[],from:Math.floor(at/1000)-86400,to:Math.floor(at/1000),generated_at:Math.floor(at/1000),coverage:'full',source_freshness:sources.map(s=>({source_id:s.id,latest_fact_at:Math.floor(at/1000)-5,last_exporter_seen_at:Math.floor(at/1000)-4}))});
+      if (path.endsWith('/channel-tier-tps')) {
+        await delay();
+        if (mode !== 'success') return fail();
+        return json({data:scope(channels).filter(c => !url.searchParams.get('model') || c.model === url.searchParams.get('model'))
+          .flatMap(c => c.provider === longName ? [{...c,tier:'fast',samples:5,p50:31.5,p95:44}] : c.provider === channels[4].provider ? [{...c,tier:'ultrafast',samples:8,p50:103,p95:147.5}] : [])});
+      }
       if (path.endsWith('/key-request-stats')) return json({data:scope(keys).map(k=>({...k,key_id:'demo',requests:3200,success:3140,failed:60})),total:{requests:9600,success:9420,failed:180},import:{caught_up:true}});
       if (path.endsWith('/request-logs')) return json({data:logs,models,next_cursor:'page-2',from:at-86400000,to:at,import:{caught_up:true}});
       if (path.endsWith('/request-trace')) {
@@ -161,7 +178,12 @@ const plugin = {
         return json({format:'management-page-v1',revision:'fixture-only',read_at_ms:Date.now(),rows:page,total:rows.length,eligible_count:rows.length,offset,page_size:25,next_cursor:offset+25<rows.length?'25':undefined,previous_cursor:offset?'0':undefined,selection_token:'fixture-only',accounts:[testAccount],rates:[],platforms:['gpt'],models,detection_models:models,context:{prices:[],imports:[],routes:{},fingerprints:Object.fromEntries(page.map(r=>[r.id,[]])),fingerprint_models:models}});
       }
       if (path.endsWith('/channel-management/checks')) return json({data:fixtureChecks});
-      if (path.endsWith('/channel-management')) return json({data:scope(managed),unavailable_sources:[]});
+      if (path.endsWith('/channel-management')) return json({data:scope(managed).map(member => ({...member,
+        group_tier_results:Object.fromEntries(member.models.flatMap(model => {
+          const result = groupTierResults(member.provider,model);
+          return result ? [[model,result]] : [];
+        })),
+      })),unavailable_sources:[]});
       if (path.endsWith('/sub2api/accounts')) return json({data:[testAccount]});
       if (path.endsWith('/sub2api/channels')) {
         const model_billing = {};

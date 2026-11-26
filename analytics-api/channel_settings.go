@@ -169,7 +169,8 @@ func (s *Service) channelSettingsValidate(w http.ResponseWriter, r *http.Request
 			http.Error(w, "来源读取失败", 503)
 			return
 		}
-		resolved, code, err := s.resolveServiceTierChoices(r.Context(), original, in)
+		owner, _ := s.controlUser(r)
+		resolved, code, err := s.resolveServiceTierChoices(r.Context(), original, in, owner)
 		if err != nil {
 			http.Error(w, err.Error(), code)
 			return
@@ -256,7 +257,7 @@ func (s *Service) applyChannelSettings(w http.ResponseWriter, r *http.Request, i
 		http.Error(w, "配置已更新或已完成重启恢复，请刷新后重新编辑；本次修改尚未发送", 409)
 		return
 	}
-	resolved, code, err := s.resolveServiceTierChoices(ctx, original, in)
+	resolved, code, err := s.resolveServiceTierChoices(ctx, original, in, owner)
 	if err != nil {
 		http.Error(w, err.Error(), code)
 		return

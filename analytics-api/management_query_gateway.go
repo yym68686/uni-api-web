@@ -287,7 +287,9 @@ func managementSnapshotFromFacts(facts managementGatewayFacts) managementSnapsho
 		snapshot.Providers[provider.Provider] = managementProviderEvidence(facts.Source, provider)
 	}
 	var controls subGatewayControls
-	_ = decodeMap(facts.Controls, &controls)
+	if decodeMap(facts.Controls, &controls) == nil {
+		snapshot.TierImportKeys = tierImportKeys(controls, facts.Providers)
+	}
 	callers := map[string]bool{}
 	for _, key := range facts.Keys {
 		callers[key.ID] = true

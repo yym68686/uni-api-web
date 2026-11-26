@@ -12,11 +12,12 @@ import (
 
 type managementChannel struct {
 	subInstalledChannel
-	Engine           string    `json:"engine"`
-	ProtocolOptions  *[]string `json:"upstream_protocol_options,omitempty"`
-	AccountIDs       []string  `json:"account_ids"`
-	ProbeFingerprint string    `json:"probe_fingerprint"`
-	CredentialCount  int       `json:"credential_count,omitempty"`
+	GroupTierResults map[string]map[string]subTierProbe `json:"group_tier_results,omitempty"`
+	Engine           string                             `json:"engine"`
+	ProtocolOptions  *[]string                          `json:"upstream_protocol_options,omitempty"`
+	AccountIDs       []string                           `json:"account_ids"`
+	ProbeFingerprint string                             `json:"probe_fingerprint"`
+	CredentialCount  int                                `json:"credential_count,omitempty"`
 }
 
 type managementModel struct {
@@ -37,12 +38,13 @@ type managementProvider struct {
 	CredentialCount    int               `json:"credential_count,omitempty"`
 }
 type managementSnapshot struct {
-	Rows      []managementModel             `json:"rows"`
-	Providers map[string]managementProvider `json:"providers"`
-	Copies    map[string]bool               `json:"copies"`
-	CopyKeys  map[string]string             `json:"copy_keys,omitempty"`
-	CheckedAt int64                         `json:"checked_at"`
-	Identity  string                        `json:"identity"`
+	Rows           []managementModel             `json:"rows"`
+	Providers      map[string]managementProvider `json:"providers"`
+	Copies         map[string]bool               `json:"copies"`
+	CopyKeys       map[string]string             `json:"copy_keys,omitempty"`
+	TierImportKeys map[string]string             `json:"tier_import_keys"`
+	CheckedAt      int64                         `json:"checked_at"`
+	Identity       string                        `json:"identity"`
 }
 
 func managementProviderEvidence(src controlSource, p configuredProvider) managementProvider {
@@ -89,7 +91,9 @@ func loadManagementSnapshot(ctx context.Context, src controlSource) (managementS
 		result.Providers[p.Provider] = managementProviderEvidence(src, p)
 	}
 	var live subGatewayControls
-	_ = decodeMap(controls, &live)
+	if controls != nil && decodeMap(controls, &live) == nil {
+		result.TierImportKeys = tierImportKeys(live, providers)
+	}
 	result.CopyKeys = configuredCopyCallers(live, nil)
 	for _, c := range live.Temporary {
 		for _, p := range providers {
@@ -232,6 +236,12 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 // Include key-owned copies here: observation rows address the actual serving
 // provider, whereas management groups or hides some of those copies.
 func (s *Service) serviceTierInventory(w http.ResponseWriter, r *http.Request) {
+	owner, _ := s.controlUser(r)
+	refs, err := s.control.subChannelRefs(r.Context(), owner)
+	if err != nil {
+		http.Error(w, "档位分组读取失败", 503)
+		return
+	}
 	sources, err := s.control.listSources(r.Context())
 	if err != nil {
 		http.Error(w, "来源列表读取失败", 503)
@@ -261,8 +271,13 @@ func (s *Service) serviceTierInventory(w http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			src, err := s.control.source(ctx, source.ID)
 			snapshot, cached := snapshots[source.ID]
-			if err == nil && (!cached || snapshot.Identity != controlTarget(src) || time.Since(time.Unix(snapshot.CheckedAt, 0)) > time.Minute) {
+			if err == nil && (!cached || snapshot.TierImportKeys == nil || snapshot.Identity != controlTarget(src) || time.Since(time.Unix(snapshot.CheckedAt, 0)) > time.Minute) {
 				snapshot, err = loadManagementSnapshot(ctx, src)
+			}
+			var members []managementChannel
+			if err == nil {
+				snapshot.Copies = nil
+				members = assembleManagementChannels(src, snapshot, nil, nil, "", nil)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -270,16 +285,22 @@ func (s *Service) serviceTierInventory(w http.ResponseWriter, r *http.Request) {
 				unavailable = append(unavailable, source.ID)
 				return
 			}
-			snapshot.Copies = nil
-			for _, member := range assembleManagementChannels(src, snapshot, nil, nil, "", nil) {
+			for _, member := range members {
 				if member.ServiceTierScope != "" {
-					member.Base, member.ProbeFingerprint = "", ""
+					// Resolve group identity after all workers finish. Never
+					// publish the saved site or caller ID with tier evidence.
+					member.KeyID = snapshot.TierImportKeys[member.Provider]
 					data = append(data, member)
 				}
 			}
 		}()
 	}
 	workers.Wait()
+	if err := s.addObservationGroupTiers(r.Context(), data, refs); err != nil {
+		http.Error(w, "档位分组检测结果读取失败", 503)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, 200, map[string]any{"data": data, "unavailable_sources": unavailable})
 }
 

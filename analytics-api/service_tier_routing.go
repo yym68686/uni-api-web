@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -61,46 +62,53 @@ func (s *Service) installedGroupTierResults(ctx context.Context, src controlSour
 	if err != nil {
 		return nil, err
 	}
-	var base string
 	for _, p := range providers {
-		if p.Provider == provider && p.Temporary && !p.IdentityChanged && p.ServiceTierScope == scope {
-			base = p.Base
-			break
+		if p.Provider == provider && p.ServiceTierScope == scope {
+			ref, _, err := s.installedTierGroup(ctx, src, owner, p)
+			if err != nil || ref.Account == "" {
+				return nil, err
+			}
+			results, err := s.groupTierResults(ctx, ref.Account, ref.Group, []string{upstream})
+			return results[upstream], err
 		}
-	}
-	if base == "" {
-		return nil, nil
-	}
-	raw, _, err := subGateway(ctx, src, http.MethodGet, "/v1/channel-controls", nil)
-	if err != nil {
-		return nil, err
-	}
-	var state subGatewayControls
-	if err := decodeMap(raw, &state); err != nil {
-		return nil, err
-	}
-	refs, err := s.control.subChannelRefs(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-	index := newSubProviderRefIndex(refs)
-	for _, channel := range state.Temporary {
-		if channel.Provider != provider || channel.IdentityChanged || channel.KeyID == "" {
-			continue
-		}
-		matches := index.matches(provider, channel.KeyID, base)
-		if len(matches) != 1 {
-			return nil, nil
-		}
-		ref := matches[0]
-		results, err := s.groupTierResults(ctx, ref.Account, ref.Group, []string{upstream})
-		return results[upstream], err
 	}
 	return nil, nil
 }
 
+func (s *Service) installedTierGroup(ctx context.Context, src controlSource, owner string, p configuredProvider) (subChannelRef, []string, error) {
+	if owner == "" || !generatedSubProvider(p.Provider) || !p.Temporary || p.IdentityChanged || p.Base == "" {
+		return subChannelRef{}, nil, nil
+	}
+	raw, _, err := subGateway(ctx, src, http.MethodGet, "/v1/channel-controls", nil)
+	if err != nil {
+		return subChannelRef{}, nil, err
+	}
+	var state subGatewayControls
+	if err := decodeMap(raw, &state); err != nil {
+		return subChannelRef{}, nil, err
+	}
+	refs, err := s.control.subChannelRefs(ctx, owner)
+	if err != nil {
+		return subChannelRef{}, nil, err
+	}
+	index := newSubProviderRefIndex(refs)
+	for _, channel := range state.Temporary {
+		if channel.Provider != p.Provider || channel.IdentityChanged || channel.KeyID == "" {
+			continue
+		}
+		matches := index.matches(p.Provider, channel.KeyID, p.Base)
+		if len(matches) != 1 {
+			return subChannelRef{}, nil, nil
+		}
+		return matches[0], channel.Models, nil
+	}
+	return subChannelRef{}, nil, nil
+}
+
 func (s *Service) serviceTierRouting(w http.ResponseWriter, r *http.Request) {
-	src, err := s.control.source(r.Context(), r.PathValue("id"))
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	src, err := s.control.source(ctx, r.PathValue("id"))
 	if err != nil {
 		http.Error(w, "来源不存在", 404)
 		return
@@ -110,23 +118,50 @@ func (s *Service) serviceTierRouting(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "无效渠道", 400)
 		return
 	}
-	providers, err := effectiveProviders(r.Context(), src, true)
+	providers, err := effectiveProviders(ctx, src, true)
 	if err != nil {
 		http.Error(w, "无法读取当前档位配置", 503)
 		return
 	}
 	for _, p := range providers {
 		if p.Provider == provider {
+			out := map[string]any{"scope": serviceTierScope(src, p.ServiceTierScope), "routing": p.ServiceTierRouting}
+			if model := r.URL.Query().Get("model"); validProbeModel(model) && generatedSubProvider(provider) {
+				owner, _ := s.controlUser(r)
+				results, err := s.routingGroupTiers(ctx, src, owner, p, model)
+				if err != nil {
+					out["group_results_unavailable"] = true
+				} else if len(results) != 0 {
+					out["group_results"] = results
+				}
+			}
 			w.Header().Set("Cache-Control", "no-store")
-			writeJSON(w, 200, map[string]any{"scope": serviceTierScope(src, p.ServiceTierScope), "routing": p.ServiceTierRouting})
+			writeJSON(w, 200, out)
 			return
 		}
 	}
 	http.Error(w, "渠道不存在", 404)
 }
 
+func (s *Service) routingGroupTiers(ctx context.Context, src controlSource, owner string, p configuredProvider, model string) (map[string]subTierProbe, error) {
+	ref, models, err := s.installedTierGroup(ctx, src, owner, p)
+	if err != nil || ref.Account == "" || !slices.Contains(models, model) {
+		return nil, err
+	}
+	admin, err := serviceTierAdmin(src)
+	if err != nil {
+		return nil, err
+	}
+	target, err := serviceTierGateway(ctx, admin, p.Provider, model, "fast", p.ServiceTierScope, true)
+	if err != nil || target.Status != "ready" || target.UpstreamModel == "" {
+		return nil, err
+	}
+	results, err := s.groupTierResults(ctx, ref.Account, ref.Group, []string{target.UpstreamModel})
+	return results[target.UpstreamModel], err
+}
+
 // This endpoint cannot change membership, order or the other tier. Enabling
-// requires an existing receipt for this exact live provider and credential.
+// requires a current route receipt or a matching group/model receipt.
 func (s *Service) applyServiceTierRouting(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Revision  string                     `json:"revision"`
@@ -164,7 +199,7 @@ func validateServiceTierChoices(choices []serviceTierRoutingChoice) error {
 
 // Resolve against the live provider both at preview and under the apply lock.
 // The gateway only receives ordinary settings patches with confirmed evidence.
-func (s *Service) resolveServiceTierChoices(ctx context.Context, src controlSource, in channelSettingMutation) (channelSettingMutation, int, error) {
+func (s *Service) resolveServiceTierChoices(ctx context.Context, src controlSource, in channelSettingMutation, owner string) (channelSettingMutation, int, error) {
 	if len(in.TierChoices) == 0 {
 		return in, 0, nil
 	}
@@ -221,7 +256,9 @@ func (s *Service) resolveServiceTierChoices(ctx context.Context, src controlSour
 		}
 		if choice.Enabled && p.ServiceTierRouting[choice.Tier] != "disabled_verified" && p.ServiceTierRouting[choice.Tier] != "enabled" {
 			if err := s.tierRoutingEvidence(ctx, src, choice, set); err != nil {
-				return in, 409, errors.New("没有当前渠道的有效档位证据，请先检测")
+				if owner == "" || s.bindInstalledGroupTier(ctx, src, owner, p, choice.Tier, set) != nil {
+					return in, 409, errors.New("没有当前渠道或同分组模型的有效档位证据，请先检测")
+				}
 			}
 		}
 		set["/preferences/service_tier_disabled/"+choice.Tier] = !choice.Enabled
@@ -229,6 +266,50 @@ func (s *Service) resolveServiceTierChoices(ctx context.Context, src controlSour
 	}
 	in.Changes, in.TierChoices = changes, nil
 	return in, 0, nil
+}
+
+// Bind a group receipt to the exact installed endpoint/model. The gateway
+// resolves this locally and does not send a new upstream request.
+func (s *Service) bindInstalledGroupTier(ctx context.Context, src controlSource, owner string, p configuredProvider, tier string, set map[string]any) error {
+	ref, models, err := s.installedTierGroup(ctx, src, owner, p)
+	if err != nil || ref.Account == "" {
+		return errors.New("no matching installed group")
+	}
+	// Read the actual wire model from its current binding, including aliases.
+	admin, err := serviceTierAdmin(src)
+	if err != nil {
+		return err
+	}
+	targets := make(map[string][]string)
+	for _, model := range models {
+		target, err := serviceTierGateway(ctx, admin, p.Provider, model, tier, p.ServiceTierScope, true)
+		if err != nil {
+			return err
+		}
+		if target.Status == "ready" && target.UpstreamModel != "" {
+			targets[target.UpstreamModel] = append(targets[target.UpstreamModel], target.Binding)
+		}
+	}
+	results, err := s.groupTierResults(ctx, ref.Account, ref.Group, slices.Collect(maps.Keys(targets)))
+	if err != nil {
+		return err
+	}
+	found := false
+	now := time.Now().Unix()
+	for upstream, bindings := range targets {
+		result := results[upstream][tier]
+		if result.Status != "supported" || !serviceTierFresh(result.CheckedAt, now) {
+			continue
+		}
+		for _, binding := range bindings {
+			set["/preferences/service_tier_evidence/"+binding+"/"+tier] = result.CheckedAt
+			found = true
+		}
+	}
+	if !found {
+		return errors.New("no fresh group evidence")
+	}
+	return nil
 }
 
 func checkTierRoutingDraft(change channelSettingChange, enabling bool) error {

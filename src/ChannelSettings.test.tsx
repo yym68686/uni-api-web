@@ -21,6 +21,7 @@ let effective: typeof base,
 let catalog: Partial<Channel>[];
 let bodyOverrides: unknown;
 let tierRouting: Record<string,string>;
+let groupResults: Record<string, {status: string; checked_at: number}>;
 const tierScope = "a".repeat(64);
 beforeEach(() => {
   effective = structuredClone(base);
@@ -31,11 +32,12 @@ beforeEach(() => {
   catalog = [{ provider: "one", engine: "codex", engine_mode: "auto" }];
   bodyOverrides = undefined;
   tierRouting = {fast:"enabled",ultrafast:"disabled_verified"};
+  groupResults = {};
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes("/service-tier-routing?"))
-        return Response.json({scope:tierScope,routing:tierRouting});
+        return Response.json({scope:tierScope,routing:tierRouting,group_results:groupResults});
       if (url.includes("/secrets?"))
         return new Response(
           JSON.stringify({
@@ -157,6 +159,27 @@ async function mount(provider = "one") {
 it("does not render the retired protocol repair action for an imported channel", async () => {
   await mount("sub2api-imported");
   expect(screen.queryByRole("button",{name:"预览旧渠道协议修复"})).not.toBeInTheDocument();
+});
+it("shows group Fast support without making an unconfigured Ultrafast switch look enabled", async () => {
+  tierRouting = {fast:"unconfigured",ultrafast:"unconfigured"};
+  const checked = Math.floor(Date.now()/1000);
+  groupResults = {fast:{status:"supported",checked_at:checked},ultrafast:{status:"not_honored",checked_at:checked}};
+  const user = await mount("sub2api-imported");
+  await user.click(screen.getByRole("button",{name:"请求规则"}));
+  await screen.findByText("未开启 · 已验证支持");
+  expect(screen.getByText("未命中")).toBeInTheDocument();
+  const fast = screen.getByRole("switch",{name:"允许 Fast 请求"});
+  const ultra = screen.getByRole("switch",{name:"允许 Ultrafast 请求"});
+  expect(fast).not.toBeChecked();
+  expect(ultra).not.toBeChecked();
+  await user.click(fast);
+  await user.click(screen.getByRole("button",{name:"校验与预览"}));
+  await waitFor(() => expect(screen.getByRole("button",{name:"保存并应用"})).toBeEnabled());
+  await user.click(screen.getByRole("button",{name:"保存并应用"}));
+  await screen.findByText("设置已保存并应用");
+  await waitFor(() => expect(fast).toBeChecked());
+  expect(ultra).not.toBeChecked();
+  expect(writes[1].service_tier_choices).toEqual([{provider:"sub2api-imported",scope:tierScope,tier:"fast",enabled:true}]);
 });
 it("stages the two route switches and saves both through the existing settings operation", async () => {
   const user = await mount();

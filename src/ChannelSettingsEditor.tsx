@@ -40,12 +40,18 @@ import type { ManagedChannel } from "./channelManagement";
 import type { ConfiguredChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
 import { Spinner } from "./ui";
 import type { Channel } from "./types";
-import { serviceTierName, serviceTiers, type ServiceTier } from "./serviceTierStatus";
+import { serviceTierFilterLabels, serviceTierName, serviceTiers, type ServiceTier } from "./serviceTierStatus";
+import { siteTierStatus } from "./serviceTierTable";
 import type { InstalledChannel } from "./sub2apiImports";
 import { WorkbenchNotice } from "./Workbench";
 
 type Document = Record<string, unknown>;
-type TierRoutingView = { scope: string; routing?: InstalledChannel["service_tier_routing"] };
+type TierRoutingView = {
+  scope: string;
+  routing?: InstalledChannel["service_tier_routing"];
+  group_results?: NonNullable<InstalledChannel["group_tier_results"]>[string];
+  group_results_unavailable?: boolean;
+};
 interface Field {
   path: string;
   group: string;
@@ -510,9 +516,9 @@ export function Editor({
   const [tierScope, setTierScope] = useState("");
   const hasTierDraft = Object.keys(tierDraft).length > 0;
   const tierRouting = useQuery({
-    queryKey: ["service-tier-routing", row.source_id, row.provider],
+    queryKey: ["service-tier-routing", row.source_id, row.provider, row.model],
     queryFn: ({ signal }) => controlRequest<TierRoutingView>(
-      `/v1/sources/${encodeURIComponent(row.source_id!)}/service-tier-routing?` + new URLSearchParams({provider: row.provider}), { signal }),
+      `/v1/sources/${encodeURIComponent(row.source_id!)}/service-tier-routing?` + new URLSearchParams({provider: row.provider, model: row.model}), { signal }),
     enabled: !isGlobal && !!row.source_id && tab === "请求规则" && !hasTierDraft,
     retry: false, staleTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false,
   });
@@ -900,13 +906,18 @@ export function Editor({
             {serviceTiers.map(tier => {
               const state = tierRouting.data?.routing?.[tier];
               const available = !!state && !!tierRouting.data?.scope && !tierRouting.isError;
-              // Unconfigured means no explicit opt-out, not verified support.
-              const allowed = state === "enabled" || state === "unconfigured";
+              // With no bound receipt, the gateway cannot route this tier.
+              const allowed = state === "enabled";
               const value = tierDraft[tier] ?? allowed;
+              const groupStatus = siteTierStatus(tierRouting.data?.group_results?.[tier]);
+              const verified = groupStatus === "supported" || state === "enabled" || state === "disabled_verified";
+              const evidence = verified ? "已验证支持" : groupStatus ? serviceTierFilterLabels[groupStatus] :
+                tierRouting.data?.group_results_unavailable ? "检测记录读取失败" : "未验证";
               const detail = tierRouting.isError ? "读取失败" : tierRouting.isPending ? "读取中…" :
                 !available ? "来源不支持" : tierDraft[tier] !== undefined ? "待保存" :
-                  state === "unconfigured" ? "未验证" : state === "enabled" ? "已验证支持" :
-                    state === "disabled_verified" ? "已关闭 · 已验证" : "已关闭";
+                  allowed ? evidence : state === "unconfigured" ? (verified ? "未开启 · 已验证支持" : evidence) :
+                    verified ? "已关闭 · 已验证" :
+                    groupStatus ? "已关闭 · " + evidence : "已关闭";
               return <div className="settings-tier-row" key={tier}>
                 <label id={`tier-switch-${tier}`} htmlFor={`tier-toggle-${tier}`}>允许 {serviceTierName[tier]} 请求</label>
                 <span className={detail === "已验证支持" ? "positive" : detail === "未验证" ? "settings-tier-warning" : "muted"}>{detail}</span>

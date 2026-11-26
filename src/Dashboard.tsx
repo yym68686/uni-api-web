@@ -9,6 +9,7 @@ import { FailureCounts, failureReasonLabel } from "./FailureCounts";
 import { refreshAccountBalanceAfterLogin } from "./accountBalance";
 import type { SiteWallet } from "./types";
 import { useKeyRequestStats } from "./keyRequestStats";
+import { ChannelTierTPS, useChannelTierTPS } from "./channelTierTPS";
 import {
   Fragment,
   lazy,
@@ -53,7 +54,7 @@ import {
   analyticsRequest,
 } from "./api";
 import { ObservedDetectionActions, ObservedDetectionRow, useObservedDetection } from "./ObservedDetection";
-import { ServiceTierCell } from "./serviceTierTable";
+import { observedTierStatus, ServiceTierCell } from "./serviceTierTable";
 import { isServiceTier, serviceTierName } from "./serviceTierStatus";
 import {
   ChannelCheckAction,
@@ -868,6 +869,10 @@ export default function Dashboard({
     refetchInterval: (query) => initializationRetryInterval(query) || (auto ? 30_000 : false),
     refetchIntervalInBackground: false,
   });
+  const tierThroughput = useChannelTierTPS(connection, {
+    range: effectiveWindow, model: statisticsModel, endpoint: effectiveEndpoint, stream: effectiveStream,
+    keyId, to: metrics.data?.to,
+  }, channelView && !keyRemoved && !noSources && visibleColumns.some(isServiceTier));
   const liveMetrics = useQuery({
     queryKey: ["live-metrics", connection.session, keyId, effectiveEndpoint, effectiveStream],
     queryFn: ({ signal }) =>
@@ -2062,13 +2067,15 @@ export default function Dashboard({
                                 entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)), fingerprints.supportedModels)}
                                 error={fingerprints.error} loading={fingerprints.isPending}
                                 supportedModels={fingerprints.supportedModels}
-                              /></td> : <td className="column-quality"><ServiceTierCell tier={id}
+                              /></td> : <td className="column-quality column-service-tier"><div className="channel-tier-verdict"><ServiceTierCell tier={id}
                                 targets={[observedDetection.tierTargetFor(row)].filter(target => target !== undefined)}
                                 index={observedDetection.tierChecks.index}
+                                siteStatuses={[observedTierStatus(id, row, observedDetection.tierMembers.members.get(providerId(row)),
+                                  observedDetection.tierChecks.index)].filter(status => status !== undefined)}
                                 loading={observedDetection.tierMembers.isPending || observedDetection.tierChecks.isPending}
                                 failed={observedDetection.tierMembers.isError || observedDetection.tierChecks.isError ||
                                   observedDetection.tierMembers.unavailable.includes(row.source_id || "")}
-                              /></td>}
+                              /></div><ChannelTierTPS value={tierThroughput.get(row, id)} loading={tierThroughput.loading} failed={tierThroughput.failed} /></td>}
                             />
                           </tr>
                         );

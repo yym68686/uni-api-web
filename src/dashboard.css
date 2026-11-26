@@ -97,6 +97,9 @@
 .wallet-summary ul { display:grid; gap:8px; padding:0; list-style:none; }
 .wallet-summary li { display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:.83rem; }
 .balance-recharge-link { margin-top:6px; }
+.observation-table .column-service-tier {min-width:11rem;}
+.channel-tier-verdict {display:flex;align-items:center;min-height:1.25rem;white-space:nowrap;}
+.channel-tier-tps {display:flex;gap:.375rem;min-height:1rem;align-items:center;margin-top:2px;font-size:.7rem;font-variant-numeric:tabular-nums;white-space:nowrap;}
 @media (max-width:780px) {
   .workspace-summary-loading, .workspace-summary:not(.expanded) { display:none; }
   .workspace-summary-toggle { display:inline-flex; margin-bottom:.5rem; }

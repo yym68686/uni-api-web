@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
+import type { ServiceTier, ServiceTierResult } from "./serviceTierStatus";
 export interface InstalledChannel {
+  group_tier_results?: Record<string, Partial<Record<ServiceTier, ServiceTierResult>>>;
   service_tier_scope?: string;
   service_tier_routing?: Partial<Record<"fast" | "ultrafast", "enabled" | "disabled" | "disabled_verified" | "unconfigured">>;
   protocol?: string;

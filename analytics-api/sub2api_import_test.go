@@ -83,6 +83,10 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	revision := "boot:1"
 	callerKey := "key-" + strings.Repeat("a", 64)
 	provider := subProviderName(account, 7, callerKey)
+	otherProvider := subProviderName(account, 8, callerKey)
+	if _, err := store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,encrypted_key) VALUES($1,8,'other group','openai',2,$2)`, account, testkey); err != nil {
+		t.Fatal(err)
+	}
 	rawScope := strings.Repeat("c", 64)
 	startSyncOnRead := false
 	changedIdentity := false
@@ -156,7 +160,8 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 			writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{
 				Provider: provider, Base: "https://site.example/v1/responses", Temporary: true,
 				IdentityChanged: changedIdentity, ServiceTierScope: rawScope,
-			}}})
+				ServiceTierRouting: map[string]string{"fast": "unconfigured", "ultrafast": "unconfigured"},
+			}, {Provider: otherProvider, Base: "https://site.example/v1/responses", Temporary: true, ServiceTierScope: rawScope}}})
 		case "/v1/channel-controls":
 			if startSyncOnRead {
 				startSyncOnRead = false
@@ -166,13 +171,20 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 			}
 			temporary := []any{}
 			if exposeInstalled {
-				temporary = append(temporary, map[string]any{"provider": provider, "api_key_id": callerKey, "models": []string{checkModel}})
+				for _, id := range []string{provider, otherProvider} {
+					temporary = append(temporary, map[string]any{"provider": id, "api_key_id": callerKey, "models": []string{checkModel}})
+				}
 			}
 			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_import": true, "temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "temporary_channels": temporary})
 		case "/v1/channel-settings/export":
 			writeJSON(w, 200, map[string]any{"revision": revision, "channel_settings": map[string]any{}, "temporary_definitions": map[string]any{}})
 		case "/v1/model-channels":
-			writeJSON(w, 200, map[string]any{"data": []any{}})
+			data := []managementModel{}
+			if exposeInstalled {
+				data = append(data, managementModel{Provider: provider, Model: "public-alias", Upstream: checkModel, Engine: "codex"})
+				data = append(data, managementModel{Provider: otherProvider, Model: "public-alias", Upstream: checkModel, Engine: "codex"})
+			}
+			writeJSON(w, 200, map[string]any{"data": data})
 		case "/v1/channel-controls/restore":
 			imports++
 			json.NewDecoder(r.Body).Decode(&last)
@@ -342,7 +354,65 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	if _, results := targetRequest(foreign); len(results) != 0 {
 		t.Fatal("foreign group results exposed", results)
 	}
+	read := func(uri, cookie string, out any) {
+		t.Helper()
+		r := httptest.NewRequest("GET", uri, nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != 200 || strings.Contains(w.Body.String(), callerKey) || json.Unmarshal(w.Body.Bytes(), out) != nil {
+			t.Fatalf("invalid tier response: %d %s", w.Code, w.Body.String())
+		}
+	}
+	readInventory := func(cookie string, wantProvider string) managementChannel {
+		var out struct{ Data []managementChannel }
+		read("/v1/channel-management?view=service-tiers", cookie, &out)
+		for _, member := range out.Data {
+			if member.SourceID == sourceID && member.Provider == wantProvider {
+				return member
+			}
+		}
+		t.Fatal("missing installed channel")
+		return managementChannel{}
+	}
+	member := readInventory(session, provider)
+	if member.Base != "" || member.KeyID != "" || member.ProbeFingerprint != "" ||
+		member.GroupTierResults["public-alias"]["fast"].CheckedAt != now || member.GroupTierResults[checkModel] != nil {
+		t.Fatal("same-group observation result not projected to its public model", member)
+	}
+	if member = readInventory(session, otherProvider); len(member.GroupTierResults) != 0 {
+		t.Fatal("observation reused detection results from a different group at the same site")
+	}
+	if member = readInventory(foreign, provider); len(member.GroupTierResults) != 0 {
+		t.Fatal("observation exposed another owner's detection results")
+	}
+	var routing struct {
+		Routing      map[string]string
+		GroupResults map[string]subTierProbe `json:"group_results"`
+	}
+	read("/v1/sources/"+sourceID+"/service-tier-routing?"+url.Values{"provider": {provider}, "model": {checkModel}}.Encode(), session, &routing)
+	if routing.Routing["ultrafast"] != "unconfigured" || routing.GroupResults["fast"].CheckedAt != now {
+		t.Fatal("routing settings lost group detection or changed stored preferences", routing)
+	}
+	src, err := store.source(context.Background(), sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	choices := []serviceTierRoutingChoice{{Provider: provider, Scope: serviceTierScope(src, rawScope), Tier: "fast", Enabled: true}}
+	resolved, code, err := s.resolveServiceTierChoices(context.Background(), src, channelSettingMutation{TierChoices: choices}, owner)
+	if err != nil || len(resolved.Changes) != 1 || len(resolved.Changes[0].Set) != 2 ||
+		resolved.Changes[0].Set["/preferences/service_tier_disabled/fast"] != false ||
+		resolved.Changes[0].Set["/preferences/service_tier_evidence/"+strings.Repeat("b", 64)+"/fast"] != now {
+		t.Fatal("could not activate only Fast from the group receipt", code, err, resolved.Changes)
+	}
+	choices[0].Tier = "ultrafast"
+	if _, code, err := s.resolveServiceTierChoices(context.Background(), src, channelSettingMutation{TierChoices: choices}, owner); err == nil || code != 409 {
+		t.Fatal("stale Ultrafast group evidence accepted", code, err)
+	}
 	changedIdentity = true
+	if member = readInventory(session, provider); len(member.GroupTierResults) != 0 {
+		t.Fatal("observation retained the former group's result")
+	}
 	if code, results := targetRequest(session); code != 200 || len(results) != 0 {
 		t.Fatal("new identity must not inherit results from its former group", code, results)
 	}

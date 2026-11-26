@@ -62,7 +62,19 @@ export function tierResultStatus(check: ConfiguredCheck | undefined, target: Tie
   return tierPending(check) ? "pending" : "unknown";
 }
 
-export function siteTierStatus(result?: {status: string; checked_at: number}) {
+export function observedTierStatus(tier: ServiceTier, row: Channel, member: InstalledChannel | undefined, index: ReturnType<typeof tierIndex>): ReturnType<typeof siteTierStatus> {
+  const target = observedTierTarget(row, member);
+  if (!target) return;
+  const check = tierRecord(index, tier, target);
+  if (check?.fingerprint === target.scope && tierPending(check)) return;
+  const group = member?.group_tier_results?.[row.model]?.[tier];
+  const shared = siteTierStatus(group);
+  const own = check?.fingerprint === target.scope ? check.result as ServiceTierResult | null : null;
+  const ownStatus = tierResultStatus(check, target);
+  if (group && shared && (ownStatus === "unknown" || ownStatus === "pending" || !own || group.checked_at > own.checked_at)) return shared;
+}
+
+export function siteTierStatus(result?: {status: string; checked_at: number}): "supported" | "unsupported" | "not_honored" | undefined {
   if (serviceTierFresh(result?.checked_at) &&
     (result?.status === "supported" || result?.status === "unsupported" || result?.status === "not_honored"))
     return result.status;
@@ -113,6 +125,7 @@ export function useTierMembers(owner: string, enabled: boolean) {
 
 export function refreshTierViews(client: QueryClient, owner: string) {
   return Promise.all([
+    client.invalidateQueries({queryKey: ["service-tier-members", owner]}, {cancelRefetch: false}),
     client.invalidateQueries({queryKey: ["service-tier-table", owner]}, {cancelRefetch: false}),
     client.invalidateQueries({queryKey: ["service-tier-checks", owner]}, {cancelRefetch: false}),
   ]);
