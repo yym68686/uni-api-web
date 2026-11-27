@@ -47,12 +47,60 @@ func previousSubOptionsData(ctx context.Context, src controlSource, query url.Va
 			}
 		}
 	}
-	return map[string]any{"batch_revisions": true, "model_upstream_protocols": state["model_upstream_protocols"] == true, "revision": state["revision"], "supported": state["temporary_channel_import"] == true, "manageable": state["temporary_channel_management"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(query.Get("account_id"), int64Param(query.Get("group_id")), strings.TrimPrefix(query.Get("api_key_id"), src.ID+"::"))}, 200, nil
+	return map[string]any{"batch_revisions": true, "compaction_ultrafast_only": state["compaction_ultrafast_only"] == true, "model_upstream_protocols": state["model_upstream_protocols"] == true, "revision": state["revision"], "supported": state["temporary_channel_import"] == true, "manageable": state["temporary_channel_management"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(query.Get("account_id"), int64Param(query.Get("group_id")), strings.TrimPrefix(query.Get("api_key_id"), src.ID+"::"))}, 200, nil
 }
 
 type optionsTestError string
 
 func (e optionsTestError) Error() string { return string(e) }
+
+func TestSubOptionsReadsGatewayPromptCompactionWithoutChangingImportAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name, schema string
+		code         int
+		want         any
+	}{
+		{"modern", `{"fields":[{"path":"/preferences/compaction_mode"}]}`, 200, true},
+		{"old schema", `{"fields":[{"path":"/preferences/compaction_ultrafast_only"}]}`, 200, false},
+		{"old gateway", "", 404, false},
+		{"schema denied", "", 403, nil},
+		{"temporarily unavailable", "", 503, nil},
+		{"invalid schema", `{"fields":"bad"}`, 200, nil},
+		{"invalid field", `{"fields":[{"path":[]},null]}`, 200, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" {
+					t.Error("capability lookup must be read-only")
+				}
+				switch r.URL.Path {
+				case "/v1/channel-controls":
+					writeJSON(w, 200, map[string]any{"revision": "r1", "temporary_channel_import": true, "compaction_ultrafast_only": true})
+				case "/v1/api-keys", "/v1/model-channels":
+					writeJSON(w, 200, map[string]any{"data": []any{}})
+				case "/v1/channel-settings/schema":
+					calls.Add(1)
+					if r.Header.Get("Authorization") != "Bearer fixture-config-admin" {
+						t.Error("schema requires the source config admin credential")
+					}
+					w.WriteHeader(tc.code)
+					_, _ = w.Write([]byte(tc.schema))
+				default:
+					t.Error("unexpected endpoint", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+			src := controlSource{sourceView: sourceView{Base: server.URL}, Key: "fixture-catalog", ConfigKey: "fixture-config-admin"}
+			query := url.Values{"api_key_id": {"key-" + strings.Repeat("a", 64)}, "include_compaction_mode": {"true"}}
+			got, code, err := subChannelOptionsData(context.Background(), src, query)
+			capability, present := got["gateway_prompt_compaction"]
+			if err != nil || code != 200 || !present || capability != tc.want || got["supported"] != true || got["compaction_ultrafast_only"] != true || calls.Load() != 1 {
+				t.Fatal("unexpected capability/options result", got, code, err, calls.Load())
+			}
+		})
+	}
+}
 
 func TestSubOptionsPreservesSerialResultsAndErrors(t *testing.T) {
 	key := "key-" + strings.Repeat("a", 64)

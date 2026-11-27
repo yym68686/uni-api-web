@@ -1494,7 +1494,6 @@ it("preselects successful models and imports into the selected source key at the
     group_id: 1,
     source_id: "source",
     api_key_id: "key-target",
-    compaction_enabled: false,
     models: ["gpt-6-astra", "gpt-5.6-sol"],
     position: 2,
     positions: {"gpt-6-astra":2,"gpt-5.6-sol":2},
@@ -1505,7 +1504,7 @@ it("preselects successful models and imports into the selected source key at the
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "添加到渠道" })).not.toBeInTheDocument());
 });
 
-it("filters compaction across all pages, queues groups independently of the selected model, and defaults imports from evidence", async () => {
+it("filters compaction across all pages, queues by group and reports site evidence separately from import policy", async () => {
   const data = fixtures().slice(0, 1);
   const template = data[0].targets[0];
   data[0].targets = Array.from({ length: 27 }, (_, i) => ({ ...template, group_id: i + 1, name: `compact-${i + 1}`,
@@ -1532,11 +1531,13 @@ it("filters compaction across all pages, queues groups independently of the sele
   expect(writes[0].targets.map(t => t.group_id)).toEqual(Array.from({length:27}, (_,i)=>i+1));
   expect(writes[0].targets.every(t => !t.models)).toBe(true);
   await user.click(screen.getAllByRole("button", {name:"添加到渠道"})[0]);
-  expect(await within(screen.getByRole("dialog")).findByRole("checkbox", {name:"开启远程压缩"})).toBeChecked();
+  expect(await within(screen.getByRole("dialog")).findByRole("combobox", {name:"远程压缩策略"})).toHaveValue("auto");
+  expect(within(screen.getByRole("dialog")).getByText("支持压缩")).toBeVisible();
   await user.click(screen.getByRole("button", {name:"关闭添加渠道"}));
   await user.selectOptions(filter,"unsupported");
   await user.click(screen.getByRole("button", {name:"添加到渠道"}));
-  expect(await within(screen.getByRole("dialog")).findByRole("checkbox", {name:"开启远程压缩"})).not.toBeChecked();
+  expect(await within(screen.getByRole("dialog")).findByRole("combobox", {name:"远程压缩策略"})).toHaveValue("auto");
+  expect(within(screen.getByRole("dialog")).getByText("不支持压缩")).toBeVisible();
   await user.click(screen.getByRole("button", {name:"关闭添加渠道"}));
   view.unmount();
   mount("compaction-filter");

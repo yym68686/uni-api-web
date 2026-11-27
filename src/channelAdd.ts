@@ -10,11 +10,12 @@ export interface ChannelAddDraft {
   error?: string;
 }
 
+export type SiteCompactionMode = "auto" | "enabled" | "disabled" | "ultrafast";
+
 export interface SiteChannelAddDraft extends ChannelAddDraft {
   modelChoices: Record<string, boolean>;
   protocols: Record<string, string>;
-  compactionEnabled: boolean;
-  compactionUltrafastOnly?: boolean;
+  compactionMode: SiteCompactionMode;
   serviceTierChoices?: Partial<Record<"fast" | "ultrafast", boolean>>;
 }
 

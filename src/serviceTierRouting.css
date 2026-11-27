@@ -10,6 +10,26 @@
   gap: .5rem;
   white-space: nowrap;
 }
-.service-tier-import-toggles .compaction-tier-scope {
+.service-tier-import-toggles .compaction-import-mode {
+  min-inline-size: 0;
+  max-inline-size: 100%;
   white-space: normal;
+}
+.compaction-import-mode select {
+  width: auto;
+  min-inline-size: 0;
+}
+.compaction-import-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .15rem .45rem;
+}
+.compaction-tested-model {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.compaction-import-policy {
+  display: block;
+  min-block-size: 3em;
 }

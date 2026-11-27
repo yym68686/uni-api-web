@@ -11,7 +11,7 @@ import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import { channelEngineLabel, channelProtocols } from "./channelProtocol";
 import { Spinner } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";
-import type { SiteChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
+import type { SiteChannelAddDraft, SiteCompactionMode, SubmitChannelAdd } from "./channelAdd";
 import { CompactDialogHeader } from "./CompactDialog";
 import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
 import { AccountForm } from "./SiteAccountForm";
@@ -65,6 +65,7 @@ interface Options {
   provider?: string;
   supported: boolean;
   manageable: boolean;
+  gateway_prompt_compaction?: boolean | null;
   compaction_ultrafast_only?: boolean;
   revision: string;
   keys: KeyInfo[];
@@ -328,13 +329,8 @@ function Sub2apiImportForm({
   const [error, setError] = useState(initialAdd?.error || "");
   const [relogin, setRelogin] = useState(false);
   const [success, setSuccess] = useState("");
-  const [compactionChoice, setCompactionChoice] = useState<boolean | null>(
-    initialAdd?.compactionEnabled ?? null,
-  );
-  const compactionEnabled =
-    compactionChoice ?? target.compaction?.status === "supported";
-  const [compactionUltrafastOnly, setCompactionUltrafastOnly] = useState(
-    initialAdd?.compactionUltrafastOnly ?? false,
+  const [compactionMode, setCompactionMode] = useState<SiteCompactionMode>(
+    initialAdd?.compactionMode ?? "auto",
   );
   const [tierOverride, setTierOverride] = useState(() => ({
     destination: JSON.stringify([initialAdd?.source, initialAdd?.key]),
@@ -375,7 +371,7 @@ function Sub2apiImportForm({
     .map(tier => [tier, tierIsEnabled(tier)]));
   const waitingForTiers = checkTiers && !tierPreview.data && !tierPreview.isError;
   const options = useQuery({
-    queryKey: ["sub-import-options", source, key, account.id, target.group_id],
+    queryKey: ["sub-import-options", source, key, account.id, target.group_id, adding],
     queryFn: ({ signal }) =>
       controlRequest<Options>(
         "/v1/sub2api/channel-options?" +
@@ -384,6 +380,7 @@ function Sub2apiImportForm({
             api_key_id: key,
             account_id: account.id,
             group_id: String(target.group_id),
+            ...(adding && { include_compaction_mode: "true" }),
           }),
         { signal },
       ),
@@ -392,7 +389,10 @@ function Sub2apiImportForm({
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
-  const compactionScopeUnavailable = compactionEnabled && compactionUltrafastOnly &&
+  const gatewayCompaction = options.data?.gateway_prompt_compaction;
+  const siteNativeCompaction = target.compaction?.status === "supported";
+  const autoExcludesCompaction = gatewayCompaction === false && !siteNativeCompaction;
+  const compactionScopeUnavailable = compactionMode === "ultrafast" &&
     options.data?.compaction_ultrafast_only !== true;
   const importStatus = useQuery({
     queryKey: ["sub-import-status", account.id],
@@ -620,7 +620,7 @@ function Sub2apiImportForm({
   }
   function add() {
     setProtocolChoices({});
-    setCompactionChoice(null);
+    setCompactionMode("auto");
     setEditing(null);
     setView("new");
     setRemoving(null);
@@ -678,7 +678,10 @@ function Sub2apiImportForm({
           !keyDirectory?.data?.keys.some((k) => k.key_id === key)))
     )
       return;
-    const restrictCompaction = action === "add" && compactionEnabled && compactionUltrafastOnly;
+    const restrictCompaction = action === "add" && compactionMode === "ultrafast";
+    const compactionEnabled = compactionMode === "auto"
+      ? autoExcludesCompaction ? false : undefined
+      : compactionMode !== "disabled";
     const path = restrictCompaction
       ? "/v1/sub2api/channels/ultrafast-compaction"
       : "/v1/sub2api/channels";
@@ -687,7 +690,7 @@ function Sub2apiImportForm({
       group_id: target.group_id,
       source_id: item?.source_id || source,
       api_key_id: item?.api_key_id || key,
-      ...(action === "add" ? { compaction_enabled: compactionEnabled } : {
+      ...(action === "add" ? (compactionEnabled === undefined ? {} : { compaction_enabled: compactionEnabled }) : {
         action, provider: item?.provider || editing?.provider,
       }),
       ...(action === "add" && serviceTiers.some(tierAvailable) && {
@@ -710,7 +713,7 @@ function Sub2apiImportForm({
         path,
         body,
         draft: {
-          source, key, aliases, position, perModel, modelPositions, protocols, compactionEnabled, compactionUltrafastOnly,
+          source, key, aliases, position, perModel, modelPositions, protocols, compactionMode,
           serviceTierChoices: tierChoices,
           modelChoices: Object.fromEntries(checks.map(check => [check.model, originals.includes(check.model)])),
         },
@@ -1327,26 +1330,15 @@ function Sub2apiImportForm({
                 {!editing && (
                   <div className="sub-import-field">
                     <div className="service-tier-import-toggles" role="group" aria-label="渠道能力">
-                    <label className="settings-check">
-                      <input
-                        type="checkbox"
-                        checked={compactionEnabled}
-                        disabled={busy}
-                        onChange={(e) => {
-                          setCompactionChoice(e.target.checked);
-                          if (!e.target.checked) setCompactionUltrafastOnly(false);
-                        }}
-                      />
-                      开启远程压缩
-                    </label>
-                    <label className="settings-check compaction-tier-scope">
-                      <input type="checkbox" checked={compactionEnabled && compactionUltrafastOnly}
-                        disabled={busy || (!compactionUltrafastOnly && options.data?.compaction_ultrafast_only !== true)}
-                        onChange={event => {
-                          setCompactionUltrafastOnly(event.target.checked);
-                          if (event.target.checked) setCompactionChoice(true);
-                        }}/>
-                      仅对 Ultrafast 请求开启远程压缩
+                    <label className="settings-check compaction-import-mode">
+                      远程压缩策略
+                      <select value={compactionMode} disabled={busy} aria-describedby={formId + "-compaction"}
+                        onChange={event => setCompactionMode(event.target.value as SiteCompactionMode)}>
+                        <option value="auto">自动（默认）</option>
+                        <option value="enabled">开启</option>
+                        <option value="disabled">关闭</option>
+                        <option value="ultrafast" disabled={options.data?.compaction_ultrafast_only !== true}>仅 Ultrafast</option>
+                      </select>
                     </label>
                     {serviceTiers.map(tier => <label className="settings-check" key={tier}>
                       <input type="checkbox" aria-label={`开启 ${serviceTierName[tier]}`}
@@ -1360,17 +1352,20 @@ function Sub2apiImportForm({
                       </small>
                     </label>)}
                     </div>
-                    <CompactionStatus target={target} />
-                    <small className="muted">
-                      关闭后此渠道跳过压缩请求；选择仅 Ultrafast 后，默认和 Fast 压缩也会跳过。此规则不代替档位验证，不影响非压缩请求。
-                      {target.compaction?.model &&
-                        ` 已验证模型：${target.compaction.model}。`}
+                    <small id={formId + "-compaction"} className="muted">
+                      自动：网关支持适配或能力未确认时不排除压缩；确认是旧网关时沿用站点原生检测结果。此策略不影响普通请求。
                     </small>
-                    {options.data && options.data.compaction_ultrafast_only !== true && (
-                      <small className={compactionScopeUnavailable ? "negative" : "muted"}>
-                        此来源不支持仅 Ultrafast 压缩。{compactionScopeUnavailable && "请取消该选项或切换来源后再添加。"}
-                      </small>
-                    )}
+                    <div className="compaction-import-evidence muted">
+                      <small>站点原生检测：</small><CompactionStatus target={target} />
+                      {target.compaction?.model && <small className="compaction-tested-model">检测模型：{target.compaction.model}</small>}
+                      <small>网关压缩适配：{gatewayCompaction === true ? "支持" : gatewayCompaction === false ? "不支持" : "未确认"}</small>
+                    </div>
+                    <small className={`compaction-import-policy ${compactionScopeUnavailable ? "negative" : "muted"}`} role="status">
+                      {compactionScopeUnavailable ? "此来源不支持仅 Ultrafast，请调整策略或切换来源。"
+                        : compactionMode !== "auto" ? "\u00a0"
+                        : autoExcludesCompaction ? "自动：此旧网关将排除压缩。"
+                        : "自动：不写入压缩排除规则。"}
+                    </small>
                   </div>
                 )}
                 <ModelPositions

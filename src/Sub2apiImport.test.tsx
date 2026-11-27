@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import type { ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -61,7 +62,8 @@ const configured = (source: string): InstalledChannel => ({
     },
   ],
 });
-function mount(checkedTarget: SubTarget = target, prices?: ModelPrice[]) {
+function mount(checkedTarget: SubTarget = target, prices?: ModelPrice[],
+  addProps?: Pick<ComponentProps<typeof Sub2apiImport>, "initialAdd" | "submitAdd">) {
   const data = [
     imported("primary"),
     imported("do"),
@@ -76,6 +78,7 @@ function mount(checkedTarget: SubTarget = target, prices?: ModelPrice[]) {
     >
       <Tooltip.Provider>
         <Sub2apiImport
+          {...addProps}
           account={account}
           target={checkedTarget}
           prices={prices}
@@ -580,7 +583,7 @@ it.each([false, true])("preselects Fast and submits it with the correct evidence
   await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
   await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
   const group = within(screen.getByRole("group", {name: "渠道能力"}));
-  expect(group.getByRole("checkbox", {name: "开启远程压缩"})).toBeInTheDocument();
+  expect(group.getByRole("combobox", {name: "远程压缩策略"})).toHaveValue("auto");
   const fast = group.getByRole("checkbox", {name: "开启 Fast"});
   const ultra = group.getByRole("checkbox", {name: "开启 Ultrafast"});
   const add = screen.getByRole("button", {name: "添加到渠道"});
@@ -631,12 +634,12 @@ it.each([true, false])("only offers Ultrafast compaction on a compatible destina
   await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
   const add = screen.getByRole("button", {name: "添加到渠道"});
   await waitFor(() => expect(add).toBeEnabled());
-  const scope = screen.getByRole("checkbox", {name: "仅对 Ultrafast 请求开启远程压缩"});
+  const mode = screen.getByRole("combobox", {name: "远程压缩策略"});
+  const scope = within(mode).getByRole("option", {name: "仅 Ultrafast"});
   if (supported) {
     expect(screen.getByRole("checkbox", {name: "开启 Ultrafast"})).toBeDisabled();
-    await user.click(scope);
-    expect(scope).toBeChecked();
-    expect(screen.getByRole("checkbox", {name: "开启远程压缩"})).toBeChecked();
+    await user.selectOptions(mode, "ultrafast");
+    expect(mode).toHaveValue("ultrafast");
   } else {
     expect(scope).toBeDisabled();
   }
@@ -646,6 +649,102 @@ it.each([true, false])("only offers Ultrafast compaction on a compatible destina
     ? /\/sub2api\/channels\/ultrafast-compaction$/
     : /\/sub2api\/channels$/);
   if (supported) expect(writes[0].body).toMatchObject({compaction_enabled: true});
+});
+
+it.each([
+  {gateway: true, site: undefined, mode: "auto", expected: undefined, status: "支持"},
+  {gateway: true, site: "unsupported", mode: "auto", expected: undefined, status: "支持"},
+  {gateway: null, site: "unsupported", mode: "auto", expected: undefined, status: "未确认"},
+  {gateway: false, site: "unsupported", mode: "auto", expected: false, status: "不支持"},
+  {gateway: false, site: "supported", mode: "auto", expected: undefined, status: "不支持"},
+  {gateway: true, site: "supported", mode: "disabled", expected: false, status: "支持"},
+  {gateway: false, site: "unsupported", mode: "enabled", expected: true, status: "不支持"},
+] as const)("applies Gemini compression policy for gateway $gateway, site $site and mode $mode", async ({gateway, site, mode, expected, status}) => {
+  const writes: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.endsWith("/channel-tier-options")) return Response.json({verified: {}, total: 1});
+    if (input.endsWith("/import-status")) return Response.json({state: "idle", can_import: true});
+    if (input.endsWith("/groups/1/access")) return Response.json({available: true, status: "available"});
+    if (input.includes("channel-options")) {
+      const params = new URL(input).searchParams;
+      if (params.has("api_key_id")) expect(params.get("include_compaction_mode")).toBe("true");
+      return Response.json({
+        supported: true, manageable: true, revision: "r1", gateway_prompt_compaction: gateway,
+        keys: [{key_id: "key2", position: 2, prefix: "masked-two"}], channels: [],
+      });
+    }
+    if (init?.method === "POST") {
+      writes.push(JSON.parse(String(init.body)));
+      return Response.json({message: "已添加"});
+    }
+    return Response.json({data: [], unavailable_keys: [], unavailable_sources: []});
+  }));
+  const model = "gemini-4-neon";
+  mount({...target, active: true,
+    compaction: site && {status: site, model: "gpt-5.6-sol", checked_at: 1, attempts: []},
+    models: [{model, state: "done", message: "", result: {model, availability: {status: "success", protocol: "responses"}}}],
+  } as SubTarget);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", {name: /新增接入/}));
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  const add = screen.getByRole("button", {name: "添加到渠道"});
+  await waitFor(() => expect(add).toBeEnabled());
+  expect(screen.getByText("网关压缩适配：" + status)).toBeVisible();
+  const select = screen.getByRole("combobox", {name: "远程压缩策略"});
+  expect(select).toHaveValue("auto");
+  if (mode !== "auto") await user.selectOptions(select, mode);
+  await user.click(add);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({models: [model]});
+  if (expected === undefined) expect(writes[0]).not.toHaveProperty("compaction_enabled");
+  else expect(writes[0]).toHaveProperty("compaction_enabled", expected);
+});
+
+it.each(["auto", "disabled"] as const)("preserves %s in a reopened draft and re-evaluates only automatic policy after switching sources", async mode => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    if (input.endsWith("/channel-tier-options")) return Response.json({verified: {}, total: 1});
+    if (input.endsWith("/import-status")) return Response.json({state: "idle", can_import: true});
+    if (input.endsWith("/groups/1/access")) return Response.json({available: true, status: "available"});
+    if (input.includes("channel-options")) {
+      const modern = new URL(input).searchParams.get("source_id") === "primary";
+      return Response.json({
+        supported: true, manageable: true, revision: "r1", gateway_prompt_compaction: modern,
+        keys: [{key_id: "key2", position: 2, prefix: "masked-two"}], channels: [],
+      });
+    }
+    return Response.json({data: [], unavailable_keys: [], unavailable_sources: []});
+  }));
+  const model = "gemini-4-neon";
+  const checkedTarget = {...target, active: true,
+    models: [{model, state: "done", message: "", result: {model, availability: {status: "success", protocol: "responses"}}}],
+  } as SubTarget;
+  const submitAdd = vi.fn<NonNullable<ComponentProps<typeof Sub2apiImport>["submitAdd"]>>(() => true);
+  const user = userEvent.setup();
+  const initial = mount(checkedTarget, undefined, {submitAdd});
+  await user.click(await screen.findByRole("button", {name: /新增接入/}));
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "do");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  await waitFor(() => expect(screen.getByRole("button", {name: "添加到渠道"})).toBeEnabled());
+  if (mode !== "auto") await user.selectOptions(screen.getByRole("combobox", {name: "远程压缩策略"}), mode);
+  await user.click(screen.getByRole("button", {name: "添加到渠道"}));
+  expect(submitAdd).toHaveBeenCalledOnce();
+  const [{body, draft}] = submitAdd.mock.calls[0];
+  expect(JSON.parse(body)).toHaveProperty("compaction_enabled", false);
+  expect(draft.compactionMode).toBe(mode);
+  initial.unmount();
+
+  mount(checkedTarget, undefined, {submitAdd, initialAdd: {...draft, error: "模拟网关配置冲突"}});
+  expect(await screen.findByText("模拟网关配置冲突")).toBeVisible();
+  expect(screen.getByRole("combobox", {name: "远程压缩策略"})).toHaveValue(mode);
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  await waitFor(() => expect(screen.getByRole("button", {name: "添加到渠道"})).toBeEnabled());
+  await user.click(screen.getByRole("button", {name: "添加到渠道"}));
+  expect(submitAdd).toHaveBeenCalledTimes(2);
+  const retried = JSON.parse(submitAdd.mock.calls[1][0].body);
+  if (mode === "auto") expect(retried).not.toHaveProperty("compaction_enabled");
+  else expect(retried).toHaveProperty("compaction_enabled", false);
 });
 
 it("keeps addition blocked when account state cannot be read and permits an explicit retry", async () => {

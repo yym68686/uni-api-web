@@ -246,12 +246,18 @@ func TestCompactionQueueSelectsAvailableModelsAndPreservesOtherResults(t *testin
 }
 
 func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
+	enabled, disabled := true, false
 	for _, tc := range []struct {
-		name               string
-		enabled, ultrafast bool
-	}{{"disabled", false, false}, {"all", true, false}, {"ultrafast", true, true}} {
+		name      string
+		enabled   *bool
+		ultrafast bool
+	}{
+		{"default delegates to gateway", nil, false},
+		{"disabled", &disabled, false},
+		{"all", &enabled, false},
+		{"ultrafast", &enabled, true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			enabled := tc.enabled
 			var applied retainedSnapshot
 			mutations := 0
 			revision := "r1"
@@ -282,7 +288,7 @@ func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
 			state := map[string]any{"temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "rules": []retainedRule{{KeyID: "key", Model: checkModel, Order: []string{"configured", "existing"}, Disabled: []string{"existing"}}, {KeyID: "other", Model: "other-model", Order: []string{"unrelated"}, Disabled: []string{}}}, "temporary_channels": []retainedChannel{{Provider: "existing", KeyID: "key", Models: []string{checkModel}}}}
 			src := controlSource{sourceView: sourceView{Base: server.URL}}
 			service := &Service{}
-			in := subImportInput{Revision: "r1", Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}, Position: 2, CompactionEnabled: &enabled, CompactionUltrafastOnly: tc.ultrafast}
+			in := subImportInput{Revision: "r1", Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}, Position: 2, CompactionEnabled: tc.enabled, CompactionUltrafastOnly: tc.ultrafast}
 			if tc.ultrafast {
 				if _, code, err := service.subImportCompactionChannel(context.Background(), src, state, in, "key", "sub2api-new", "https://new.test", "new-secret"); err == nil || code != 409 || mutations != 0 {
 					t.Fatal("old gateway must reject the import without writing", code, err, mutations)
@@ -313,7 +319,8 @@ func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
 				t.Fatal("existing channel engine changed", existing["engine"])
 			}
 			types := doc["exclude_request_types"].([]any)
-			if enabled && len(types) != 0 || !enabled && (len(types) != 1 || types[0] != "compaction") {
+			excluded := tc.enabled != nil && !*tc.enabled
+			if !excluded && len(types) != 0 || excluded && (len(types) != 1 || types[0] != "compaction") {
 				t.Fatal("incorrect compaction policy", types)
 			}
 			policy, _ := doc["preferences"].(map[string]any)

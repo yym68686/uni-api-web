@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type subOptionsRead struct {
@@ -26,6 +27,43 @@ func startSubOptionsRead(ctx context.Context, stage string, read func() (map[str
 		result <- subOptionsRead{data, status, err}
 	}()
 	return result
+}
+
+// A gateway's own schema distinguishes prompt adaptation from the site's
+// native Responses probe. An unreadable schema is unknown, not unsupported.
+func subPromptCompactionCapability(ctx context.Context, src controlSource) any {
+	src.Key = managedRuntimeCredential(src)
+	if src.Key == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	schema, status, err := subGateway(ctx, src, http.MethodGet, "/v1/channel-settings/schema", nil)
+	if status == http.StatusNotFound {
+		return false
+	}
+	if err != nil {
+		return nil
+	}
+	fields, ok := schema["fields"].([]any)
+	if !ok {
+		return nil
+	}
+	valid := true
+	for _, field := range fields {
+		item, _ := field.(map[string]any)
+		path, ok := item["path"].(string)
+		if !ok || path == "" {
+			valid = false
+		}
+		if path == "/preferences/compaction_mode" {
+			return true
+		}
+	}
+	if !valid {
+		return nil
+	}
+	return false
 }
 
 func subChannelOptionsData(ctx context.Context, src controlSource, query url.Values) (map[string]any, int, error) {
@@ -52,9 +90,15 @@ func subChannelOptionsData(ctx context.Context, src controlSource, query url.Val
 		return nil, keys.status, errors.New("无法读取来源 API key")
 	}
 	channels := []any{}
+	var capability <-chan subOptionsRead
 	if keyInput != "" {
 		if keyErr != nil {
 			return nil, http.StatusBadRequest, keyErr
+		}
+		if query.Get("include_compaction_mode") == "true" {
+			capability = startSubOptionsRead(ctx, "options_compaction", func() (map[string]any, int, error) {
+				return map[string]any{"gateway_prompt_compaction": subPromptCompactionCapability(ctx, src)}, http.StatusOK, nil
+			})
 		}
 		catalog := <-startSubOptionsRead(ctx, "options_catalog", func() (map[string]any, int, error) {
 			return fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {key}, "endpoint": {"all"}, "stream": {"all"}})
@@ -73,5 +117,9 @@ func subChannelOptionsData(ctx context.Context, src controlSource, query url.Val
 			}
 		}
 	}
-	return map[string]any{"batch_revisions": true, compactionUltrafastOnly: state.data[compactionUltrafastOnly] == true, configuredProtocolField: state.data[configuredProtocolField] == true, "revision": state.data["revision"], "supported": state.data["temporary_channel_import"] == true, "manageable": state.data["temporary_channel_management"] == true, "keys": keys.data["data"], "channels": channels, "provider": subProviderName(query.Get("account_id"), int64Param(query.Get("group_id")), strings.TrimPrefix(keyInput, src.ID+"::"))}, http.StatusOK, nil
+	result := map[string]any{"batch_revisions": true, compactionUltrafastOnly: state.data[compactionUltrafastOnly] == true, configuredProtocolField: state.data[configuredProtocolField] == true, "revision": state.data["revision"], "supported": state.data["temporary_channel_import"] == true, "manageable": state.data["temporary_channel_management"] == true, "keys": keys.data["data"], "channels": channels, "provider": subProviderName(query.Get("account_id"), int64Param(query.Get("group_id")), strings.TrimPrefix(keyInput, src.ID+"::"))}
+	if capability != nil {
+		result["gateway_prompt_compaction"] = (<-capability).data["gateway_prompt_compaction"]
+	}
+	return result, http.StatusOK, nil
 }
