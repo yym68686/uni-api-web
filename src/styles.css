@@ -2616,6 +2616,13 @@ nav > button.active > svg {
 .settings-tier-row .channel-detection-switch[aria-checked=true] span {transform:translateX(16px);}
 .settings-tier-warning {color:var(--warning);}
 .settings-tier-row > .positive {color:var(--green);}
+.settings-compaction-controls {margin-top:4px;padding-top:6px;border-top:1px solid var(--line);}
+.settings-compaction-row {padding-block:6px;}
+.settings-compaction-copy {display:grid;gap:3px;min-width:0;overflow-wrap:anywhere;}
+.settings-compaction-copy > small {font-size:12px;line-height:1.45;}
+.settings-compaction-advanced {padding-block:8px;font-size:12px;color:var(--muted);}
+.settings-compaction-advanced > summary {width:fit-content;max-width:100%;cursor:pointer;}
+.settings-compaction-advanced > div {display:grid;gap:6px;margin-top:10px;}
 .settings-field {display:grid;grid-template-columns:minmax(140px,28%) minmax(0,1fr);align-items:start;gap:16px;padding:14px 0;border-bottom:1px solid var(--line);}
 .settings-field-heading {display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:34px;min-width:0;}
 .settings-field-heading h4 {font-size:13px;font-weight:550;line-height:1.7;margin:0;}

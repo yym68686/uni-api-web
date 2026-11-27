@@ -1,6 +1,6 @@
 import { DetailLoading } from "./PageLoading";
 import { LoadingIndicator } from "./LoadingIndicator";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useId, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Eye,
@@ -172,7 +172,13 @@ const categories: Record<string, typeof Settings2> = {
 };
 const keyOf = (path: string) => path.split("/").at(-1)!;
 const ultrafastCompactionPath = "/preferences/compaction_ultrafast_only";
+const onlyRequestTypesPath = "/only_request_types";
 const excludeRequestTypesPath = "/exclude_request_types";
+const compactionControls = [
+  { path: onlyRequestTypesPath, label: "仅允许压缩请求", description: "此渠道不接收普通请求。" },
+  { path: excludeRequestTypesPath, label: "排除压缩请求", description: "此渠道不接收远程压缩请求。" },
+  { path: ultrafastCompactionPath, label: labels.compaction_ultrafast_only, description: "压缩不能降为普通档重试。普通请求仍按其他渠道规则转发。" },
+];
 const requestTypes = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.filter((v): v is string => typeof v === "string")
@@ -211,6 +217,82 @@ const canonical = (value: unknown): unknown =>
       : value;
 const equal = (a: unknown, b: unknown) =>
   JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
+const isCompaction = (type: string) => type.trim().toLowerCase() === "compaction";
+
+function CompactionControls({ view, draft, fields, busy, onChange }: {
+  view: SettingsView;
+  draft: Document;
+  fields: Field[];
+  busy: boolean;
+  onChange: (next: Document) => void;
+}) {
+  const id = useId();
+  const supported = compactionControls.filter(({ path }) => fields.some((field) => field.path === path));
+  const listFields = supported.filter(({ path }) => path !== ultrafastCompactionPath);
+  const active = (path: string) => path === ultrafastCompactionPath
+    ? get(draft, path) === true
+    : requestTypes(get(draft, path)).some(isCompaction);
+  const withoutCompaction = (doc: Document, path: string) => {
+    const types = requestTypes(get(doc, path)).filter((type) => !isCompaction(type));
+    const saved = get(view.effective, path);
+    // Restore the original representation on a round trip, including a missing field.
+    return set(doc, path, equal(types, requestTypes(saved)) ? saved : types);
+  };
+  const disableUltrafast = (doc: Document) => {
+    const saved = get(view.effective, ultrafastCompactionPath);
+    if (saved === undefined && view.effective.preferences === undefined &&
+      equal(doc.preferences, { compaction_ultrafast_only: true }))
+      return set(doc, "/preferences", undefined);
+    return set(doc, ultrafastCompactionPath, saved === undefined ? undefined : false);
+  };
+  function toggle(path: string) {
+    const enabled = !active(path);
+    let next = path === ultrafastCompactionPath
+      ? enabled ? set(draft, path, true) : disableUltrafast(draft)
+      : enabled ? set(draft, path, [...requestTypes(get(draft, path)), "compaction"])
+        : withoutCompaction(draft, path);
+    if (enabled) {
+      const conflicts = path === excludeRequestTypesPath
+        ? [onlyRequestTypesPath, ultrafastCompactionPath]
+        : [excludeRequestTypesPath];
+      for (const other of conflicts) {
+        if (supported.some((field) => field.path === other) && active(other))
+          next = other === ultrafastCompactionPath ? disableUltrafast(next) : withoutCompaction(next, other);
+      }
+    }
+    onChange(next);
+  }
+
+  if (!supported.length) return null;
+  return <div className="settings-compaction-controls" role="group" aria-label="远程压缩规则">
+    {supported.map(({ path, label, description }, index) => {
+      const labelId = `${id}-${index}`;
+      const baseValue = get(view.base, path);
+      return <div className="settings-tier-row settings-compaction-row" key={path}>
+        <div className="settings-compaction-copy">
+          <span id={labelId}>{label}</span>
+          <small id={`${labelId}-hint`} className="muted">{description}</small>
+        </div>
+        <button type="button" className="settings-icon-button settings-reset-field"
+          hidden={equal(get(draft, path), baseValue)} disabled={busy}
+          title="恢复基础值" aria-label={`${labels[keyOf(path)]}：恢复基础值`}
+          onClick={() => onChange(set(draft, path, baseValue))}><RotateCcw size={15} /></button>
+        <button type="button" className="channel-detection-switch" role="switch"
+          aria-labelledby={labelId} aria-describedby={`${labelId}-hint`} aria-checked={active(path)}
+          disabled={busy} onClick={() => toggle(path)}><span /></button>
+      </div>;
+    })}
+    {listFields.length > 0 && <details className="settings-compaction-advanced">
+      <summary>编辑请求类型列表（高级）</summary>
+      {listFields.map(({ path }) => <div key={path}>
+        <span>{labels[keyOf(path)]}</span>
+        <JSONField label={labels[keyOf(path)]} value={get(draft, path)}
+          onChange={(value) => onChange(set(draft, path, value))} />
+      </div>)}
+    </details>}
+  </div>;
+}
 export function settingsDiff(view: SettingsView, draft: Document): Change {
   const change: Change = { provider: view.provider, set: {}, remove: [] };
   for (const field of view.schema.fields) {
@@ -806,6 +888,9 @@ export function Editor({
       (f.path !== upstream400RetriesPath ||
         view.schema.all_upstream_400_retries === true),
   );
+  const inlineCompactionFields = isGlobal ? [] : visibleFields.filter(
+    (field) => field.group === "请求规则" && compactionControls.some(({ path }) => path === field.path),
+  );
   const retryField = visibleFields.find(f => f.path === upstream400RetriesPath);
   const retryMin = retryField?.minimum ?? 0;
   const retryMax = retryField?.maximum ?? 3;
@@ -903,9 +988,9 @@ export function Editor({
             </p>
           )}
 
-          {!isGlobal && tab === "请求规则" && <section className="settings-tier-section" aria-label="Fast / Ultrafast 路由">
+          {!isGlobal && tab === "请求规则" && <section className="settings-tier-section" aria-label="服务档位与远程压缩">
             <div className="settings-tier-heading">
-              <h4>服务档位</h4>
+              <h4>{inlineCompactionFields.length ? "服务档位与远程压缩" : "服务档位"}</h4>
               <div className="settings-tier-tools">
               <WorkbenchNotice urgent={tierRouting.isError} label="档位配置读取失败" messages={[tierRouting.isError && tierRouting.error.message]} />
               <button type="button" className="settings-icon-button" title="重新读取档位配置"
@@ -945,10 +1030,11 @@ export function Editor({
                   }}><span /></button>
               </div>;
             })}
+            <CompactionControls view={view} draft={draft} fields={inlineCompactionFields} busy={busy} onChange={edit} />
           </section>}
 
           {visibleFields
-            .filter((f) => f.group === tab)
+            .filter((f) => f.group === tab && !inlineCompactionFields.includes(f))
             .map((f) => {
               const ownValue = get(draft, f.path),
                 resolved = view.resolved_fields?.[f.path],
@@ -1106,86 +1192,6 @@ export function Editor({
                         value={value}
                         onChange={(v) => edit(set(draft, f.path, v))}
                       />
-                    ) : f.path === ultrafastCompactionPath ? (
-                      <div>
-                        <label className="settings-check">
-                          <input
-                            type="checkbox"
-                            checked={value === true}
-                            onChange={(e) => {
-                              let next = set(draft, f.path, e.target.checked);
-                              const excluded = requestTypes(get(next, excludeRequestTypesPath));
-                              if (e.target.checked && excluded.some((v) => v.toLowerCase() === "compaction"))
-                                next = set(next, excludeRequestTypesPath, excluded.filter((v) => v.toLowerCase() !== "compaction"));
-                              edit(next);
-                            }}
-                          />
-                          {label}
-                        </label>
-                        <small className="muted">
-                          只限制压缩请求。普通请求照常转发，压缩不会在此渠道降为普通档重试。
-                        </small>
-                      </div>
-                    ) : [
-                        "/only_request_types",
-                        excludeRequestTypesPath,
-                      ].includes(f.path) ? (
-                      <div>
-                        <label className="settings-check">
-                          <input
-                            type="checkbox"
-                            checked={requestTypes(value).some(
-                              (v) => v.toLowerCase() === "compaction",
-                            )}
-                            onChange={(e) => {
-                              const values = requestTypes(value).filter(
-                                (v) => v.toLowerCase() !== "compaction",
-                              );
-                              let next = set(
-                                draft,
-                                f.path,
-                                e.target.checked
-                                  ? [...values, "compaction"]
-                                  : values,
-                              );
-                              if (e.target.checked) {
-                                const other =
-                                  f.path === "/only_request_types"
-                                    ? excludeRequestTypesPath
-                                    : "/only_request_types";
-                                const previous = requestTypes(get(next, other));
-                                if (
-                                  previous.some(
-                                    (v) => v.toLowerCase() === "compaction",
-                                  )
-                                )
-                                  next = set(
-                                    next,
-                                    other,
-                                    previous.filter(
-                                      (v) => v.toLowerCase() !== "compaction",
-                                    ),
-                                  );
-                              }
-                              if (e.target.checked && f.path === excludeRequestTypesPath &&
-                                  get(next, ultrafastCompactionPath) === true)
-                                next = set(next, ultrafastCompactionPath, false);
-                              edit(next);
-                            }}
-                          />
-                          {f.path === "/only_request_types"
-                            ? "仅允许压缩请求"
-                            : "排除压缩请求"}
-                        </label>
-                        <details>
-                          <summary>编辑请求类型列表</summary>
-                          <JSONField
-                            label={label}
-                            value={value}
-                            onChange={(v) => edit(set(draft, f.path, v))}
-                          />
-                        </details>
-                      </div>
                     ) : f.type === "json" ||
                       (value && typeof value === "object") ? (
                       <JSONField

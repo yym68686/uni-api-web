@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChannelSettings } from "./ChannelSettings";
@@ -314,31 +314,34 @@ it("sends only changed fields, preserves zero, and refreshes the draft after app
   expect(reads).toBeGreaterThan(1);
   expect(JSON.stringify(writes)).not.toContain("opaque-");
 });
-it("edits compaction request types without allowing contradictory checkboxes", async () => {
+it("groups compaction switches with service tiers and clears contradictory draft rules", async () => {
   const user = await mount();
   await user.click(screen.getByRole("button", { name: "请求规则" }));
-  await user.click(screen.getByRole("checkbox", { name: "排除压缩请求" }));
+  const routing = within(screen.getByRole("region", { name: "服务档位与远程压缩" }));
+  expect(routing.getByRole("switch", { name: "允许 Fast 请求" })).toBeInTheDocument();
+  expect(routing.getAllByRole("switch")).toHaveLength(5);
+  const excluded = routing.getByRole("switch", { name: "排除压缩请求" });
+  excluded.focus();
+  await user.keyboard("[Space]");
+  expect(excluded).toBeChecked();
   await user.click(screen.getByRole("button", { name: "校验与预览" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect((writes[0].changes as { set: object }[])[0].set).toEqual({
     "/exclude_request_types": ["compaction"],
   });
-  await user.click(screen.getByRole("checkbox", { name: "仅允许压缩请求" }));
-  expect(
-    screen.getByRole("checkbox", { name: "排除压缩请求" }),
-  ).not.toBeChecked();
+  await user.click(routing.getByRole("switch", { name: "仅允许压缩请求" }));
+  expect(excluded).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "校验与预览" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect((writes[1].changes as { set: object }[])[0].set).toEqual({
-    "/exclude_request_types": [],
     "/only_request_types": ["compaction"],
   });
 });
 it("previews and saves Ultrafast-only compaction instead of excluding all compaction", async () => {
   const user = await mount();
   await user.click(screen.getByRole("button", { name: "请求规则" }));
-  const excluded = screen.getByRole("checkbox", { name: "排除压缩请求" });
-  const ultrafast = screen.getByRole("checkbox", { name: "仅对 Ultrafast 请求开启远程压缩" });
+  const excluded = screen.getByRole("switch", { name: "排除压缩请求" });
+  const ultrafast = screen.getByRole("switch", { name: "仅对 Ultrafast 请求开启远程压缩" });
   await user.click(excluded);
   await user.click(ultrafast);
   expect(ultrafast).toBeChecked();
@@ -351,11 +354,39 @@ it("previews and saves Ultrafast-only compaction instead of excluding all compac
   await user.click(screen.getByRole("button", { name: "保存并应用" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   for (const write of writes) {
-    expect((write.changes as {set: object}[])[0].set).toMatchObject({
+    expect((write.changes as {set: object}[])[0].set).toEqual({
       "/preferences/compaction_ultrafast_only": true,
-      "/exclude_request_types": [],
     });
   }
+});
+it("keeps advanced request types and recognizes legacy compaction spelling", async () => {
+  Object.assign(effective, { exclude_request_types: [" COMPACTION ", "future_type"] });
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "请求规则" }));
+  const excluded = screen.getByRole("switch", { name: "排除压缩请求" });
+  expect(excluded).toBeChecked();
+  await user.click(excluded);
+  await user.click(screen.getByText("编辑请求类型列表（高级）"));
+  const list = screen.getByRole("textbox", { name: "排除请求类型" });
+  expect(JSON.parse((list as HTMLTextAreaElement).value)).toEqual(["future_type"]);
+  fireEvent.change(list, { target: { value: '["future_type", "another_type"]' } });
+  await user.click(excluded);
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect((writes[0].changes as { set: object }[])[0].set).toEqual({
+    "/exclude_request_types": ["future_type", "another_type", "compaction"],
+  });
+});
+it("leaves no draft after switching an unset compaction option on and off", async () => {
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "请求规则" }));
+  const group = within(screen.getByRole("group", { name: "远程压缩规则" }));
+  for (const control of group.getAllByRole("switch")) {
+    await user.click(control);
+    await user.click(control);
+  }
+  expect(screen.getByRole("button", { name: "撤销修改" })).toBeDisabled();
+  expect(writes).toHaveLength(0);
 });
 it("reset then edit applies the edited value over the base and never discards edits silently", async () => {
   const user = await mount();
