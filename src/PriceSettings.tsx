@@ -474,7 +474,10 @@ export function PriceSettings({
                   editorOpener.current = event.currentTarget;
                   setDetails(false);
                   setEditing(price.model);
-                }}><span>{price.model}</span><span className="price-edit-affordance" aria-hidden="true"><Pencil /></span></button>
+                }}>
+                  <span>{price.model}</span>
+                  <span className="price-edit-affordance" aria-hidden="true"><Pencil />编辑</span>
+                </button>
                 {(drafts.has(price.model) || !price.verified) && <small>{drafts.has(price.model) ? "未保存" : published ? "待确认" : "Standard 未定价"}</small>}</th>
                 {visibleColumns.map(column => <td key={column}>{priceColumnValue(price, column)}</td>)}
               </tr>;

@@ -16,6 +16,23 @@ function closeEditor() {
   fireEvent.click(screen.getByRole("button", {name:"关闭价格编辑"}));
 }
 
+it("shows a labeled edit action without hover and returns keyboard focus to it on close", async () => {
+  render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={vi.fn()} />);
+  const user = userEvent.setup();
+  const opener = screen.getByRole("button", { name: "编辑 gpt-6-astra" });
+  const unpricedOpener = screen.getByRole("button", { name: "编辑 glm-5.4" });
+  expect(within(opener).getByText("编辑")).toBeVisible();
+  expect(within(unpricedOpener).getByText("编辑")).toBeVisible();
+
+  opener.focus();
+  await user.keyboard("{Enter}");
+  const editor = screen.getByRole("dialog", { name: "gpt-6-astra" });
+  expect(within(editor).getByRole("spinbutton", { name: "gpt-6-astra 输入价格" })).toBeEnabled();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await waitFor(() => expect(opener).toHaveFocus());
+});
+
 it("shows official GPT 6.2 Standard prices and explains cache retention limits", async () => {
  render(<PriceSettings prices={[]} loading={false} connection={{base:'',key:'',session:'test',account:true}} onSaved={vi.fn()}/>);
  const user=userEvent.setup();

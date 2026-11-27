@@ -15,11 +15,7 @@
 .price-overview-table tbody tr:hover { background: var(--subtle); }
 .price-model-open { display: inline-flex; align-items: center; gap: 8px; padding: 0; background: none; border: 0; text-align: left; font-weight: 650; color: var(--ink); }
 .price-model-open:hover { color: var(--accent); }
-.price-edit-affordance { display: inline-flex; inline-size: 24px; color: var(--muted); }
-@media (hover:hover) and (pointer:fine) {
-  .price-edit-affordance { visibility: hidden; }
-  .price-model-open:is(:hover,:focus-visible) .price-edit-affordance { visibility: visible; }
-}
+.price-edit-affordance { display: inline-flex; align-items: center; flex: none; padding-inline-end: 6px; border-radius: 6px; background: var(--selection); color: var(--accent); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .price-overview-table small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
 .price-overview-table .price-empty { padding: 32px 16px; color: var(--muted); text-align: center; }
 .price-table-footer { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 11px; color: var(--muted); }
@@ -96,7 +92,6 @@
 @media (max-width:780px) {
   .price-overview-table th:first-child { position:sticky; left:0; z-index:1; width:152px; min-width:152px; max-width:152px; background:var(--surface); white-space:normal; overflow-wrap:anywhere; }
   .price-overview-table thead th:first-child { background:var(--subtle); }
-  .price-model-open { max-width:100%; }
+  .price-model-open { max-width:100%; flex-wrap:wrap; row-gap:4px; }
   .price-model-open > span:first-child { min-width:0; overflow-wrap:anywhere; }
-  .price-edit-affordance { width:18px; flex:none; }
 }
