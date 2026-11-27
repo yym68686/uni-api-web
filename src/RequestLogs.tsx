@@ -348,7 +348,7 @@ export function RequestLogsPage({
   const rowKey = (row: RequestLog) =>
     base.account ? `${row.source_id}::${row.key_id}` : row.key_id;
   const hasFilters = Object.keys(defaultFilters).some(
-    (k) => filters[k as keyof Filters] !== defaultFilters[k as keyof Filters],
+    (k) => k !== "search" && filters[k as keyof Filters] !== defaultFilters[k as keyof Filters],
   );
   async function refresh(latest = false) {
     if (refreshing) return;
@@ -518,7 +518,7 @@ export function RequestLogsPage({
           <WorkbenchNotice urgent label="请求日志读取失败" messages={[error && `${refreshError && data ? "刷新失败，保留当前日志。" : ""}${error.message}`]} />
         </div>
         <div className="workbench-tools">
-          <WorkbenchDisclosure label={search ? "定位 ID · 已用" : "定位 ID"} icon={<Search size={14} aria-hidden="true" />}>
+          <WorkbenchDisclosure label="定位 ID" active={!!search} icon={<Search size={14} aria-hidden="true" />}>
           <form
             className="search-field"
             onSubmit={(e) => {
@@ -716,7 +716,7 @@ export function RequestLogsPage({
         </Select>
         <button
           className="button small ghost reset-filters"
-          disabled={!hasFilters && !exact}
+          disabled={!hasFilters && !exact && !filters.search}
           onClick={() => {
             setFilters({ ...defaultFilters });
             setSearch("");

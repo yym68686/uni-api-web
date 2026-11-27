@@ -27,6 +27,7 @@ h1, h2, h3 { overflow-wrap: anywhere; }
 .observatory-login .connect-card { background: transparent; padding: 0; border: 0; }
 .workspace .workbench-heading { gap: 12px 20px; }
 .workspace .workbench-tools { gap: 8px; }
+.workbench-active-label[data-active="false"] { visibility: hidden; }
 .workspace :is(.data-actions,.workbench-tools) :is(.button,.select-field), .workspace .management-toolbar :is(.button,.search-field) { min-height: 40px; }
 .workspace .channel-browser .workbench-popover :is(.select-field,.button) { max-width: 100%; }
 .workbench-disclosure > .workbench-popover {

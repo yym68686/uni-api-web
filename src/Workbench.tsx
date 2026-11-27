@@ -49,7 +49,7 @@ export function useWorkbenchTools() {
   return { observeHeading, level };
 }
 
-export function WorkbenchDisclosure({ label, children, icon, triggerIcon, className = "", title, align = "end" }: {
+export function WorkbenchDisclosure({ label, children, icon, triggerIcon, className = "", title, align = "end", active }: {
   label: string;
   children: ReactNode;
   icon?: ReactNode;
@@ -57,6 +57,7 @@ export function WorkbenchDisclosure({ label, children, icon, triggerIcon, classN
   className?: string;
   title?: string;
   align?: "start" | "end";
+  active?: boolean;
 }) {
   const id = useId();
   const disclosure = useRef<HTMLDetailsElement>(null);
@@ -106,9 +107,9 @@ export function WorkbenchDisclosure({ label, children, icon, triggerIcon, classN
     event.currentTarget.open = false;
     event.currentTarget.querySelector("summary")?.focus();
   }}>
-    <summary className="button small" aria-controls={id} aria-label={triggerIcon ? label : undefined} title={title}>
+    <summary className="button small" aria-controls={id} aria-label={active ? `${label} · 已用` : active !== undefined || triggerIcon ? label : undefined} title={title}>
       {triggerIcon ? <span className="workbench-trigger-icon" aria-hidden="true">{triggerIcon}</span>
-        : <>{icon}{label}<ChevronDown size={12} aria-hidden="true" /></>}
+        : <>{icon}{active === undefined ? label : <span>{label}<span className="workbench-active-label" data-active={active} aria-hidden="true"> · 已用</span></span>}<ChevronDown size={12} aria-hidden="true" /></>}
     </summary>
     <div ref={body} id={id} className="workbench-popover">
       <div className="workbench-popover-heading"><strong>{label}</strong><button type="button" className="icon-button" aria-label={`关闭${label}`} onClick={event => {

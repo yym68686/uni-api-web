@@ -83,14 +83,14 @@ it("ignores a previously saved ID and exposes a one-click way to clear an active
   });
   await screen.findByRole("button", { name: row.request_id });
   expect(reads).toEqual([""]);
-  await user.click(screen.getByText("定位 ID", { selector: "summary" }));
+  await user.click(screen.getByLabelText("定位 ID", { selector: "summary" }));
   await user.type(screen.getByRole("textbox", { name: "搜索请求" }), "missing-id");
   expect(await screen.findByText("当前 ID 搜索没有匹配记录。")).toBeVisible();
-  expect(screen.getByText("定位 ID · 已用", { selector: "summary" })).toBeVisible();
+  expect(screen.getByLabelText("定位 ID · 已用", { selector: "summary" })).toBeVisible();
   expect(loadFilters(storage, "requests").search).toBe("");
   await user.click(screen.getByRole("button", { name: "清除 ID 搜索" }));
   expect(await screen.findByRole("button", { name: row.request_id })).toBeVisible();
-  expect(screen.getByText("定位 ID", { selector: "summary" })).toBeVisible();
+  expect(screen.getByLabelText("定位 ID", { selector: "summary" })).toBeVisible();
   expect(reads).toContain("missing-id");
 });
 
