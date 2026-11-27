@@ -172,8 +172,8 @@ export function RequestLogsPage({
     const saved = loadFilters(storage, "requests");
     // A normal visit starts with all statuses; scoped links can intentionally filter.
     return incoming.view === "requests" && incoming.filters
-      ? {...incoming.filters, search:history.state?.workspaceOwner === workspaceOwner ? saved.search : ""}
-      : {...saved, statusFilter: defaultFilters.statusFilter};
+      ? incoming.filters
+      : {...saved, search: "", statusFilter: defaultFilters.statusFilter};
   });
   const [cursors, setCursors] = useState<string[]>([""]);
   const [page, setPage] = useState(0);
@@ -205,6 +205,11 @@ export function RequestLogsPage({
     setPage(0);
     setCursors([""]);
   }
+  function clearSearch() {
+    setFilters(current => ({ ...current, search: "" }));
+    setSearch("");
+    resetPage();
+  }
   useEffect(() => {
     if (composing) return;
     const timer = window.setTimeout(() => {
@@ -224,7 +229,8 @@ export function RequestLogsPage({
     [base, filters.sourceId],
   );
   useEffect(
-    () => saveFilters(storage, filters, "requests"),
+    // An ID lookup is specific to this visit; don't store or silently reapply it.
+    () => saveFilters(storage, {...filters, search: ""}, "requests"),
     [storage, filters],
   );
   function change(field: keyof Filters, value: string) {
@@ -512,7 +518,7 @@ export function RequestLogsPage({
           <WorkbenchNotice urgent label="请求日志读取失败" messages={[error && `${refreshError && data ? "刷新失败，保留当前日志。" : ""}${error.message}`]} />
         </div>
         <div className="workbench-tools">
-          <WorkbenchDisclosure label="定位 ID" icon={<Search size={14} aria-hidden="true" />}>
+          <WorkbenchDisclosure label={search ? "定位 ID · 已用" : "定位 ID"} icon={<Search size={14} aria-hidden="true" />}>
           <form
             className="search-field"
             onSubmit={(e) => {
@@ -538,7 +544,7 @@ export function RequestLogsPage({
                 type="button"
                 className="icon-button"
                 aria-label="清除搜索"
-                onClick={() => change("search", "")}
+                onClick={clearSearch}
               >
                 <X size={14} />
               </button>
@@ -740,7 +746,13 @@ export function RequestLogsPage({
         <div className="request-log-empty">
           <Search size={26} />
           <h3>{query.isError ? "请求日志暂不可用" : "没有匹配的请求"}</h3>
-          <p>可调整时间范围或筛选条件后刷新。</p>
+          <p>{query.isError ? "日志未加载，请重试。" : search ? "当前 ID 搜索没有匹配记录。" : "可调整时间范围或筛选条件。关联日志尚在同步时，稍后再刷新。"}</p>
+          {(query.isError || search) && <div className="request-log-empty-actions">
+            {query.isError && <button className="button small" type="button" disabled={busy} aria-busy={busy} onClick={() => void refresh()}>
+              {busy ? <Spinner small /> : <RefreshCw size={15} />}重试加载
+            </button>}
+            {search && <button className="button small" type="button" onClick={clearSearch}>清除 ID 搜索</button>}
+          </div>}
         </div>
       ) : (
         <>

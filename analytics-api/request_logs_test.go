@@ -132,12 +132,20 @@ func TestRequestLogsCursorAndRefresh(t *testing.T) {
 		filter := RequestLogFilter{QueryFilter: QueryFilter{Range: "24h", To: now.Unix()}, Sort: sort}
 		seen := map[string]bool{}
 		last := math.Inf(1)
+		var previous *RequestLog
 		for page := 0; page < 3; page++ {
 			got, err := e.RequestLogs(ctx, filter)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, v := range got.Data {
+				if previous != nil && (sort == "latest" || sort == "oldest") {
+					if (sort == "latest" && previous.AtMS < v.AtMS) || (sort == "oldest" && previous.AtMS > v.AtMS) ||
+						(previous.AtMS == v.AtMS && previous.EventID <= v.EventID) {
+						t.Fatalf("%s changed chronological order across rows or pages: %s before %s", sort, previous.EventID, v.EventID)
+					}
+				}
+				previous = &v
 				var value *float64
 				switch sort {
 				case "duration-desc":

@@ -69,6 +69,43 @@ function setup(fetcher: (input: string) => Promise<Response>) {
   return userEvent.setup();
 }
 
+it("ignores a previously saved ID and exposes a one-click way to clear an active search", async () => {
+  const storage = `${location.origin}:logs-user`;
+  saveFilters(storage, { ...defaultFilters, window: "1h", search: "stale-id" }, "requests");
+  history.replaceState({ workspaceOwner: JSON.stringify([location.origin, "logs-user"]) }, "", "#view=requests&scope=1&window=1h");
+  const reads: string[] = [];
+  const user = setup(async input => {
+    const url = new URL(input);
+    if (!url.pathname.endsWith("/request-logs")) return Response.json({ data: [] });
+    const search = url.searchParams.get("search") || "";
+    reads.push(search);
+    return Response.json({ data: search ? [] : [row], models: [] });
+  });
+  await screen.findByRole("button", { name: row.request_id });
+  expect(reads).toEqual([""]);
+  await user.click(screen.getByText("定位 ID", { selector: "summary" }));
+  await user.type(screen.getByRole("textbox", { name: "搜索请求" }), "missing-id");
+  expect(await screen.findByText("当前 ID 搜索没有匹配记录。")).toBeVisible();
+  expect(screen.getByText("定位 ID · 已用", { selector: "summary" })).toBeVisible();
+  expect(loadFilters(storage, "requests").search).toBe("");
+  await user.click(screen.getByRole("button", { name: "清除 ID 搜索" }));
+  expect(await screen.findByRole("button", { name: row.request_id })).toBeVisible();
+  expect(screen.getByText("定位 ID", { selector: "summary" })).toBeVisible();
+  expect(reads).toContain("missing-id");
+});
+
+it("can retry an initial log request failure without opening the filters", async () => {
+  let reads = 0;
+  const user = setup(async input => {
+    if (!new URL(input).pathname.endsWith("/request-logs")) return Response.json({ data: [] });
+    return ++reads === 1 ? new Response(null, { status: 503 }) : Response.json({ data: [row], models: [] });
+  });
+  expect(await screen.findByRole("heading", { name: "请求日志暂不可用" })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "重试加载" }));
+  expect(await screen.findByRole("button", { name: row.request_id })).toBeVisible();
+  expect(reads).toBe(2);
+});
+
 it.each([
   ["#view=requests", "", "24h"],
   ["#view=requests&scope=1&statusFilter=failed", "failed", defaultFilters.window],

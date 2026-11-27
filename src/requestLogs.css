@@ -113,7 +113,9 @@
 .request-log-empty h3,
 .request-log-empty p {
   margin: 0;
+  text-align: center;
 }
+.request-log-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .request-log-dialog {
   position: fixed;
   top: 50%;

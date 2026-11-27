@@ -158,9 +158,15 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 		where = append(where, `(contains(lower(coalesce(failure_reason,'')),'balance') OR contains(lower(coalesce(outcome,'')),'balance') OR contains(lower(coalesce(failure_reason,'')),'quota'))`)
 	}
 	sortExpr := "-at_ms::DOUBLE PRECISION"
+	// Use the existing (at_ms,event_id) index for the chronological order.
+	// Keep sort_value in the result for compatibility with existing cursors.
+	orderBy := "sort_value,at_ms DESC,event_id DESC"
 	switch f.Sort {
+	case "", "latest":
+		orderBy = "at_ms DESC,event_id DESC"
 	case "oldest":
 		sortExpr = "at_ms::DOUBLE PRECISION"
+		orderBy = "at_ms ASC,event_id DESC"
 	case "success":
 		sortExpr = "CASE result WHEN 'success' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END"
 	case "latency":
@@ -190,13 +196,24 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 		args = append(args, f.Status)
 	}
 	if f.Cursor != "" {
-		outer = append(outer, `(sort_value>? OR (sort_value=? AND (at_ms<? OR (at_ms=? AND event_id<?))))`)
-		args = append(args, cursor.Value, cursor.Value, cursor.At, cursor.At, cursor.ID)
+		switch f.Sort {
+		case "", "latest":
+			// The explicit time bound also prunes partitions before the seek.
+			outer = append(outer, `at_ms<=? AND (at_ms,event_id)<(?,?)`)
+			args = append(args, cursor.At, cursor.At, cursor.ID)
+		case "oldest":
+			// Equal timestamps retain the original descending event-ID order.
+			outer = append(outer, `at_ms>=? AND (at_ms>? OR (at_ms=? AND event_id<?))`)
+			args = append(args, cursor.At, cursor.At, cursor.At, cursor.ID)
+		default:
+			outer = append(outer, `(sort_value>? OR (sort_value=? AND (at_ms<? OR (at_ms=? AND event_id<?))))`)
+			args = append(args, cursor.Value, cursor.Value, cursor.At, cursor.At, cursor.ID)
+		}
 	}
 	// Enrich only the selected page. The final status is not necessarily the
 	// status sent in the response headers, e.g. a stream that fails after HTTP 200.
 	rows, err := e.DB.QueryContext(ctx, `WITH scoped AS (SELECT *,`+requestLogResultSQL+` AS result FROM facts WHERE `+strings.Join(where, " AND ")+`), ordered AS (SELECT *,`+sortExpr+` AS sort_value FROM scoped),
- page AS MATERIALIZED (SELECT * FROM ordered WHERE `+strings.Join(outer, " AND ")+` ORDER BY sort_value,at_ms DESC,event_id DESC LIMIT 51)
+ page AS MATERIALIZED (SELECT * FROM ordered WHERE `+strings.Join(outer, " AND ")+` ORDER BY `+orderBy+` LIMIT 51)
  SELECT event_id,coalesce(source_id,''),coalesce(instance_id,''),coalesce(request_id,''),coalesce(trace_id,''),coalesce(key_id,''),coalesce(model,''),coalesce(endpoint,''),coalesce(stream,false),at_ms,started_ms,coalesce(status,0),
  CASE WHEN page.stream AND page.status=502 AND page.trace_id<>'' AND page.request_id<>'' AND page.started_ms IS NOT NULL THEN (
    SELECT h.status FROM facts h WHERE h.kind='trace' AND h.stage='response_headers'
@@ -214,7 +231,7 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
  , CASE NULLIF(trace_detail::text,'')::jsonb->>'requested_service_tier'
         WHEN 'priority' THEN 'fast' WHEN 'fast' THEN 'fast' WHEN 'ultrafast' THEN 'ultrafast'
         WHEN 'default' THEN 'default' WHEN 'flex' THEN 'flex' WHEN 'scale' THEN 'scale' WHEN 'auto' THEN 'auto' ELSE '' END
- FROM page ORDER BY sort_value,at_ms DESC,event_id DESC`, args...)
+ FROM page ORDER BY `+orderBy, args...)
 	if err != nil {
 		return out, err
 	}
