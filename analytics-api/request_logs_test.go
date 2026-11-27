@@ -255,6 +255,35 @@ func TestRequestLogsExactWindowAndAttemptEvidence(t *testing.T) {
 	}
 }
 
+func TestRequestLogsDoesNotEnrichWithoutValidStart(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	at := time.Now().Add(-time.Minute).UnixMilli()
+	for _, tc := range []struct {
+		name  string
+		start int64
+	}{{"unknown", 0}, {"negative", -1}, {"after-end", at + 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := Fact{Schema: 1, Kind: "request", EventID: tc.name, SourceID: "primary", InstanceID: "instance",
+				RequestID: tc.name, TraceID: tc.name, AtMS: at, StartedMS: tc.start, Stream: true, Status: 502}
+			headers := request
+			headers.EventID, headers.Kind, headers.Stage, headers.Status, headers.AtMS = tc.name+"-headers", "trace", "response_headers", 200, at-1000
+			attempt := headers
+			attempt.EventID, attempt.Kind = tc.name+"-attempt", "attempt"
+			if err := e.Import(ctx, tc.name, "v1", []Fact{request, headers, attempt}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := e.RequestLogs(ctx, RequestLogFilter{QueryFilter: QueryFilter{Range: "15m"}, Search: tc.name})
+			if err != nil || len(got.Data) != 1 {
+				t.Fatalf("request should still appear: %+v %v", got, err)
+			}
+			if row := got.Data[0]; row.ResponseHeadersStatus != nil || row.ObservedAttempts != nil || row.Result != "failed" {
+				t.Fatalf("unbounded trace evidence must not be attributed to a request: %+v", row)
+			}
+		})
+	}
+}
+
 func TestRequestLogsHTTPAuthAndValidation(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"can_inspect_all": r.Header.Get("Authorization") == "Bearer admin-secret"})

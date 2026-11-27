@@ -212,20 +212,23 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 	}
 	// Enrich only the selected page. The final status is not necessarily the
 	// status sent in the response headers, e.g. a stream that fails after HTTP 200.
+	// A zero start means the producer did not report a start time. It cannot
+	// bound trace evidence and must not trigger a lookup across all history.
 	rows, err := e.DB.QueryContext(ctx, `WITH scoped AS (SELECT *,`+requestLogResultSQL+` AS result FROM facts WHERE `+strings.Join(where, " AND ")+`), ordered AS (SELECT *,`+sortExpr+` AS sort_value FROM scoped),
  page AS MATERIALIZED (SELECT * FROM ordered WHERE `+strings.Join(outer, " AND ")+` ORDER BY `+orderBy+` LIMIT 51)
  SELECT event_id,coalesce(source_id,''),coalesce(instance_id,''),coalesce(request_id,''),coalesce(trace_id,''),coalesce(key_id,''),coalesce(model,''),coalesce(endpoint,''),coalesce(stream,false),at_ms,started_ms,coalesce(status,0),
- CASE WHEN page.stream AND page.status=502 AND page.trace_id<>'' AND page.request_id<>'' AND page.started_ms IS NOT NULL THEN (
+ CASE WHEN page.stream AND page.status=502 AND page.trace_id<>'' AND page.request_id<>'' AND page.started_ms>0 AND page.started_ms<=page.at_ms THEN (
    SELECT h.status FROM facts h WHERE h.kind='trace' AND h.stage='response_headers'
      AND h.source_id=page.source_id AND h.instance_id IS NOT DISTINCT FROM page.instance_id
      AND h.trace_id=page.trace_id AND h.request_id=page.request_id
      AND h.at_ms BETWEEN page.started_ms AND page.at_ms AND h.status BETWEEN 200 AND 599
    ORDER BY h.at_ms DESC,h.event_id DESC LIMIT 1) END,
  coalesce(outcome,''),result,coalesce(failure_reason,''),duration_ms,dispatch_ms,response_created_ms,first_text_ms,input_tokens,output_tokens,cache_read_tokens,sort_value
- , (SELECT nullif(count(DISTINCT coalesce(nullif(a.attempt_id,''),a.event_id)),0)
-    FROM facts a WHERE a.kind='attempt' AND page.trace_id<>'' AND page.started_ms IS NOT NULL
+ , CASE WHEN page.trace_id<>'' AND page.started_ms>0 AND page.started_ms<=page.at_ms THEN (
+    SELECT nullif(count(DISTINCT coalesce(nullif(a.attempt_id,''),a.event_id)),0)
+    FROM facts a WHERE a.kind='attempt'
       AND a.source_id=page.source_id AND a.instance_id IS NOT DISTINCT FROM page.instance_id
-      AND a.trace_id=page.trace_id AND a.at_ms BETWEEN page.started_ms AND page.at_ms)
+      AND a.trace_id=page.trace_id AND a.at_ms BETWEEN page.started_ms AND page.at_ms) END
  , CASE WHEN rtrim(coalesce(endpoint,''),'/')='/v1/responses/compact' THEN 'compaction'
         WHEN NULLIF(trace_detail::text,'')::jsonb->>'request_type' IN ('compaction','standard') THEN NULLIF(trace_detail::text,'')::jsonb->>'request_type' ELSE '' END
  , CASE NULLIF(trace_detail::text,'')::jsonb->>'requested_service_tier'
