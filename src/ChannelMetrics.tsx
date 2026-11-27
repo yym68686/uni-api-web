@@ -25,7 +25,7 @@ import { salePercent } from "./modelPrices";
 import { ChannelProfit, channelProfitCost } from "./ChannelProfit";
 import { groupRejectionDetail, type GroupRejection } from "./fingerprintRejections";
 import { observationPreset, type ChannelMetricLayout, type ObservationColumn, type DetectionColumn } from "./observationColumns";
-import { channelBillingHint } from "./channelBilling";
+import { channelBillingHint, channelBillingMarker } from "./channelBilling";
 
 const observationMultiplierFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
 type MetricColumnsProps = {
@@ -279,8 +279,9 @@ export function ChannelMetricCells({
         const value = row.billing_multiplier;
         return <td className="observation-multiplier mono">
           {value == null ? <span className="muted">—</span> :
-            <span title={channelBillingHint(row) ?? String(value)}>
-              {value > 0 && value < 1e-8 ? value.toExponential(2) : observationMultiplierFormat.format(value)}
+            <span className="observation-rate-value" title={channelBillingHint(row) ?? String(value)}>
+              <span>{value > 0 && value < 1e-8 ? value.toExponential(2) : observationMultiplierFormat.format(value)}</span>
+              {row.billing_multiplier_source && <small aria-hidden="true">{channelBillingMarker[row.billing_multiplier_source]}</small>}
             </span>}
         </td>;
       }

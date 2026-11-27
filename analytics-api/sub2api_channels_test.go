@@ -43,7 +43,8 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	}
 	provider := subProviderName(account, 7, key)
 	messages := protocolProvider(provider, "messages")
-	_, e = store.db.Exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) VALUES($1,$2,7,625,$3,1,'[]','matched','{"status":"matched","input_price":10,"total_cost":1,"actual_cost":3}')`, randomID(), account, checkModel)
+	detectedAt := time.Now().Add(-time.Minute).Unix()
+	_, e = store.db.Exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) VALUES($1,$2,7,625,$3,$4,'[]','matched','{"status":"matched","input_price":10,"total_cost":1,"actual_cost":3}')`, randomID(), account, checkModel, detectedAt)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -210,7 +211,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if got := listing.ModelBilling[source][provider]["gpt-5.6-sol"]; got.Name != "My Site-0.018" || got.RateSource != "advertised" || got.ObservedAt != 0 {
 		t.Fatal("advertised fallback lost the current coefficient or fabricated a receipt", got)
 	}
-	if got := listing.ModelBilling[source][provider][checkModel]; got.Name != "My Site-0.3" || got.RateSource != "observed" || got.ObservedAt != 1 {
+	if got := listing.ModelBilling[source][provider][checkModel]; got.Name != "My Site-0.3" || got.RateSource != "observed" || got.ObservedAt != detectedAt {
 		t.Fatal("receipt precedence or coefficient changed", got)
 	}
 	// Bindings used by an editor must be independent of receipt-rate history.

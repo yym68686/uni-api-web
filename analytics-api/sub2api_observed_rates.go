@@ -160,7 +160,7 @@ type subChannelModelRate struct {
 	ObservedAt int64    `json:"observed_at,omitempty"`
 }
 
-func subChannelModelRates(channels []subInstalledChannel, refs []subChannelRef) map[string]map[string]map[string]subChannelModelRate {
+func subChannelModelRates(channels []subInstalledChannel, refs []subChannelRef, business map[subBusinessRateKey]map[string]subObservedRate, now time.Time) map[string]map[string]map[string]subChannelModelRate {
 	byGroup := map[string]subChannelRef{}
 	for _, ref := range refs {
 		byGroup[qualityGroupID(ref.Account, ref.Group)] = ref
@@ -183,10 +183,14 @@ func subChannelModelRates(channels []subInstalledChannel, refs []subChannelRef) 
 	}
 	out := map[string]map[string]map[string]subChannelModelRate{}
 	for _, channel := range channels {
-		groups := []subChannelRef{}
+		type member struct {
+			subChannelRef
+			key int64
+		}
+		groups := []member{}
 		if channel.Kind != "configured" {
 			if ref, ok := byGroup[qualityGroupID(channel.AccountID, channel.GroupID)]; ok {
-				groups = append(groups, ref)
+				groups = append(groups, member{ref, ref.RoutingKey})
 			}
 		} else if channel.BindingStatus == "matched" {
 			for _, key := range channel.BoundKeys {
@@ -195,7 +199,7 @@ func subChannelModelRates(channels []subInstalledChannel, refs []subChannelRef) 
 					groups = nil
 					break
 				}
-				groups = append(groups, ref)
+				groups = append(groups, member{ref, key.RemoteKeyID})
 			}
 		}
 		if len(groups) == 0 {
@@ -222,37 +226,36 @@ func subChannelModelRates(channels []subInstalledChannel, refs []subChannelRef) 
 			if upstream := channel.ModelMappings[model]; upstream != "" {
 				model = upstream
 			}
-			value := subChannelModelRate{Name: prefix + "-未知倍率"}
+			value := subChannelModelRate{}
 			for index, group := range groups {
-				rate, ok := group.ObservedRates[model]
-				// Match management's per-model display: prefer the exact model's
-				// receipt, otherwise use the single bound group's advertised rate.
-				// Never borrow another model's receipt or one member of a mixed
-				// binding. Ref.Rate has already applied the site's coefficient.
-				if !ok && len(providerGroups[channel.SourceID+"\n"+channel.Provider]) == 1 && subValidCost(group.Rate) != nil {
-					rate = subObservedRate{Rate: *group.Rate}
-					ok = true
-					value.RateSource = "advertised"
+				receipt, found := business[subBusinessRateKey{group.Account, group.Group, group.key}][model]
+				detection, detected := group.ObservedRates[model]
+				candidate := subChannelModelRate{}
+				switch {
+				case group.key > 0 && found:
+					rate := adjustedSiteAmount(receipt.Rate, group.RateCoefficient)
+					candidate = subChannelModelRate{Rate: subValidCost(&rate), RateSource: "business", ObservedAt: receipt.ObservedAt}
+				case detected && detection.ObservedAt >= businessRateCutoff(now)/1000 && detection.ObservedAt <= now.Unix():
+					candidate = subChannelModelRate{Rate: &detection.Rate, RateSource: "observed", ObservedAt: detection.ObservedAt}
+				case len(providerGroups[channel.SourceID+"\n"+channel.Provider]) == 1 && subValidCost(group.Rate) != nil:
+					candidate = subChannelModelRate{Rate: group.Rate, RateSource: "advertised"}
+				case detected && detection.ObservedAt <= now.Unix():
+					candidate = subChannelModelRate{Rate: &detection.Rate, RateSource: "historical", ObservedAt: detection.ObservedAt}
 				}
-				if !ok || (index > 0 && value.Rate != nil && math.Abs(*value.Rate-rate.Rate) > 1e-9) {
-					value.Rate = nil
-					value.RateSource = ""
-					value.ObservedAt = 0
+				if index == 0 {
+					value = candidate
+				} else {
+					value = mergeSubChannelRates(value, candidate)
+				}
+				if value.Rate == nil {
+					value = subChannelModelRate{}
 					break
 				}
-				value.Rate = &rate.Rate
-				if value.RateSource == "" {
-					value.RateSource = "observed"
-				}
-				if index == 0 || rate.ObservedAt < value.ObservedAt {
-					value.ObservedAt = rate.ObservedAt
-				}
 			}
-			if previous, exists := models[model]; exists && (previous.Rate == nil || value.Rate == nil || math.Abs(*previous.Rate-*value.Rate) > 1e-9) {
-				value.Rate = nil
-				value.RateSource = ""
-				value.ObservedAt = 0
+			if previous, exists := models[model]; exists {
+				value = mergeSubChannelRates(previous, value)
 			}
+			value.Name = prefix + "-未知倍率"
 			if value.Rate != nil {
 				value.Name = prefix + "-" + strconv.FormatFloat(*value.Rate, 'f', -1, 64)
 			}
@@ -260,4 +263,15 @@ func subChannelModelRates(channels []subInstalledChannel, refs []subChannelRef) 
 		}
 	}
 	return out
+}
+
+func mergeSubChannelRates(a, b subChannelModelRate) subChannelModelRate {
+	if a.Rate == nil || b.Rate == nil || math.Abs(*a.Rate-*b.Rate) > 1e-9 {
+		return subChannelModelRate{}
+	}
+	if a.RateSource != b.RateSource {
+		a.RateSource = "mixed"
+	}
+	a.ObservedAt = min(a.ObservedAt, b.ObservedAt)
+	return a
 }

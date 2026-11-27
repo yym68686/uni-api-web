@@ -366,6 +366,44 @@ func TestNewAPIUsageUsesStableRequestIdentityAndExpression(t *testing.T) {
 		t.Fatal(receipt)
 	}
 }
+
+func TestNewAPIBusinessRatePreservesDeclaredGroupRateAcrossQuotaRounding(t *testing.T) {
+	s, account, _ := newAPITestService(t)
+	at := time.Now().Unix()
+	metadata := func(inputPrice, outputPrice int, rate float64) string {
+		expr := fmt.Sprintf(`tier("base", p * %d + c * %d)`, inputPrice, outputPrice)
+		return mustJSON(map[string]any{"billing_source": "wallet", "billing_mode": "tiered_expr", "expr_b64": base64.StdEncoding.EncodeToString([]byte(expr)), "matched_tier": "base", "group_ratio": rate})
+	}
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("type") == "6" {
+			newAPIOK(w, map[string]any{"items": []any{}, "total": 0})
+			return
+		}
+		newAPIOK(w, map[string]any{"total": 3, "items": []newAPILog{
+			{Type: 2, Key: 51, Group: "default", Request: "astra", Model: "gpt-6-astra", At: at, Quota: "322", Input: 447, Output: 18, Other: metadata(10, 50, .12)},
+			{Type: 2, Key: 51, Group: "default", Request: "astra-62", Model: "gpt-6.2-astra", At: at, Quota: "29", Input: 26, Output: 7, Other: metadata(8, 40, .12)},
+			{Type: 2, Key: 51, Group: "default", Request: "unknown", Model: "gpt-6-astra", At: at, Quota: "403", Input: 447, Output: 18, Other: metadata(10, 50, .12)},
+		}})
+	}))
+	var page subSpendPage
+	if err := s.newAPIUsage(context.Background(), account, "https://usage.example", mapValues("page", "1"), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 3 {
+		t.Fatalf("wrong receipt count: %d", len(page.Items))
+	}
+	for i, cost := range []string{"0.0006440000", "0.0000580000", "0.0008060000"} {
+		item := page.Items[i]
+		actual, _ := item.Cost.Float64()
+		if item.Cost.String() != cost {
+			t.Fatalf("spend changed: %s", item.Cost)
+		}
+		rate := subSpendReceiptRate(item, actual)
+		if (i < 2 && (rate == nil || *rate != .12)) || (i == 2 && rate != nil) {
+			t.Fatalf("incorrect billing evidence at row %d: %v", i, rate)
+		}
+	}
+}
 func TestNewAPIRejectsUncertainPricesAndSubscriptionCost(t *testing.T) {
 	for _, expr := range []string{`tier("standard", p * 10 + c * 50) * 2`, `tier("standard", p * 10 + c * 50 + evil())`, `tier("standard", p * 10 + p * 50)`} {
 		if _, ok := newAPIExpressionPrices(base64.StdEncoding.EncodeToString([]byte(expr)), "standard"); ok {

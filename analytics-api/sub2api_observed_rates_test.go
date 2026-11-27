@@ -201,7 +201,8 @@ func TestSubChannelModelRatesRespectModelSourceAndEveryBoundGroup(t *testing.T) 
 		{SourceID: "s", Provider: "mixed", Kind: "configured", BindingStatus: "matched", BoundKeys: bindings, Models: []string{"luna", "astra"}},
 		{SourceID: "s", Provider: "partial", Kind: "configured", BindingStatus: "partial", BoundKeys: bindings[:1], Models: []string{"luna"}},
 	}
-	got := subChannelModelRates(channels, refs)
+	now := time.Unix(1000, 0)
+	got := subChannelModelRates(channels, refs, nil, now)
 	if got["s"]["p"]["luna"].Name != "codex5-3" || got["s"]["p"]["astra"].Name != "codex5-0.3" || got["s"]["p"]["unknown"].Name != "codex5-未知倍率" {
 		t.Fatalf("model identity or display incorrect: %+v", got)
 	}
@@ -212,7 +213,7 @@ func TestSubChannelModelRatesRespectModelSourceAndEveryBoundGroup(t *testing.T) 
 		t.Fatal("mixed or partial bindings fabricated a rate")
 	}
 	channels = append(channels, subInstalledChannel{SourceID: "s", Provider: "p", AccountID: "a", GroupID: 27, Models: []string{"luna"}})
-	if subChannelModelRates(channels, refs)["s"]["p"]["luna"].Rate != nil {
+	if subChannelModelRates(channels, refs, nil, now)["s"]["p"]["luna"].Rate != nil {
 		t.Fatal("conflicting provider bindings picked an arbitrary rate")
 	}
 }
@@ -230,7 +231,7 @@ func TestSubChannelModelRatesAdvertisedFallbackMatchesManagementDisplay(t *testi
 		{SourceID: "s", Provider: "zero", AccountID: "zero", GroupID: 7, Models: []string{"missing"}},
 		{SourceID: "s", Provider: "configured", Kind: "configured", BindingStatus: "matched", BoundKeys: []subBoundKey{{AccountID: "ccodex", GroupID: 57569107}, {AccountID: "ccodex", GroupID: 57569107}}, Models: []string{"gpt-6.1-sol"}},
 	}
-	got := subChannelModelRates(channels, refs)["s"]
+	got := subChannelModelRates(channels, refs, nil, time.Unix(1000, 0))["s"]
 	for _, test := range []struct {
 		provider, model, name, source string
 		rate                          float64
@@ -258,7 +259,7 @@ func TestSubChannelModelRatesAdvertisedFallbackRejectsAmbiguousOrInvalidRates(t 
 	for _, invalid := range []*float64{nil, usageFloat(-1), usageFloat(math.NaN()), usageFloat(math.Inf(1))} {
 		refs := []subChannelRef{{Account: "a", AccountName: "site", Group: 1, Rate: invalid}}
 		channels := []subInstalledChannel{{SourceID: "s", Provider: "p", AccountID: "a", GroupID: 1, Models: []string{"m"}}}
-		got := subChannelModelRates(channels, refs)["s"]["p"]["m"]
+		got := subChannelModelRates(channels, refs, nil, time.Unix(1000, 0))["s"]["p"]["m"]
 		if got.Name != "site-未知倍率" || got.Rate != nil || got.RateSource != "" || got.ObservedAt != 0 {
 			t.Fatalf("invalid advertised rate accepted: %+v", got)
 		}
@@ -271,7 +272,7 @@ func TestSubChannelModelRatesAdvertisedFallbackRejectsAmbiguousOrInvalidRates(t 
 		{{SourceID: "s", Provider: "p", Kind: "configured", BindingStatus: "matched", BoundKeys: []subBoundKey{{AccountID: "a", GroupID: 1}, {AccountID: "a", GroupID: 2}}, Models: []string{"m"}}},
 		{{SourceID: "s", Provider: "p", AccountID: "a", GroupID: 1, Models: []string{"m"}}, {SourceID: "s", Provider: "p", AccountID: "a", GroupID: 2, Models: []string{"m"}}},
 	} {
-		if got := subChannelModelRates(channels, refs)["s"]["p"]["m"]; got.Rate != nil || got.RateSource != "" {
+		if got := subChannelModelRates(channels, refs, nil, time.Unix(1000, 0))["s"]["p"]["m"]; got.Rate != nil || got.RateSource != "" {
 			t.Fatalf("mixed binding acquired an advertised rate: %+v", got)
 		}
 	}

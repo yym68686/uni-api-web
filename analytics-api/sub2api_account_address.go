@@ -82,6 +82,7 @@ func (s *Service) subSaveSiteAddress(w http.ResponseWriter, r *http.Request, ctx
 		{"clear_key_index", `DELETE FROM console_sub_key_index WHERE account_id=$1`},
 		{"clear_key_index_stage", `DELETE FROM console_sub_key_index_stage WHERE account_id=$1`},
 		{"clear_observed_rates", `DELETE FROM console_sub_observed_rates WHERE account_id=$1`},
+		{"clear_business_rates", `DELETE FROM console_sub_business_rates WHERE account_id=$1`},
 	} {
 		if _, err = tx.ExecContext(ctx, step.query, id); err != nil {
 			failed(step.stage, err)

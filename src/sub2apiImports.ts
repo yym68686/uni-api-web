@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
+import type { ChannelBillingSource } from "./types";
 import type { ServiceTier, ServiceTierResult } from "./serviceTierStatus";
 export interface InstalledChannel {
   group_tier_results?: Record<string, Partial<Record<ServiceTier, ServiceTierResult>>>;
@@ -66,7 +67,7 @@ export interface SubImports {
         {
           name: string;
           rate: number | null;
-          rate_source?: "observed" | "advertised";
+          rate_source?: ChannelBillingSource;
           observed_at?: number;
         }
       >

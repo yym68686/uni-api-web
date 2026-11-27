@@ -21,6 +21,7 @@ type subChannelRef struct {
 	ObservedRates   map[string]subObservedRate
 	Account         string
 	Group           int64
+	RoutingKey      int64
 	Name            string
 	Base            string
 	Rate            *float64
@@ -98,7 +99,7 @@ func (s *controlStore) subChannelRefsForAccount(ctx context.Context, owner, acco
 }
 
 func (s *controlStore) subChannelRefsForAccountFrom(ctx context.Context, db controlQueryDB, owner, accountID string) ([]subChannelRef, error) {
-	rows, e := db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing,a.base,a.rate_coefficient FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND ($2='' OR a.id=$2) ORDER BY a.created_at,t.group_id`, owner, accountID)
+	rows, e := db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing,a.base,a.rate_coefficient,t.routing_key_id FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND ($2='' OR a.id=$2) ORDER BY a.created_at,t.group_id`, owner, accountID)
 	if e != nil {
 		return nil, e
 	}
@@ -107,7 +108,7 @@ func (s *controlStore) subChannelRefsForAccountFrom(ctx context.Context, db cont
 	for rows.Next() {
 		var ref subChannelRef
 		var billing []byte
-		if e = rows.Scan(&ref.Account, &ref.Group, &ref.Name, &billing, &ref.Base, &ref.RateCoefficient); e != nil {
+		if e = rows.Scan(&ref.Account, &ref.Group, &ref.Name, &billing, &ref.Base, &ref.RateCoefficient, &ref.RoutingKey); e != nil {
 			return nil, e
 		}
 		ref.AccountName = ref.Name
@@ -147,6 +148,8 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "渠道关联读取失败", 503)
 		return
 	}
+	rateTime := time.Now()
+	var business map[subBusinessRateKey]map[string]subObservedRate
 	if !bindingsOnly {
 		observed, err := s.control.subObservedRates(r.Context(), owner)
 		if err != nil {
@@ -163,6 +166,11 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				rate.Rate = adjustedSiteAmount(rate.Rate, refs[index].RateCoefficient)
 				refs[index].ObservedRates[model] = rate
 			}
+		}
+		business, err = s.control.subBusinessRates(r.Context(), owner, rateTime)
+		if err != nil {
+			http.Error(w, "业务账单倍率读取失败", 503)
+			return
 		}
 	}
 	stages.next("bindings_sources")
@@ -410,7 +418,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "unavailable_sources": unavailable, "scope_source_id": r.URL.Query().Get("source_id")})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "multipliers": subChannelMultipliers(data, refs), "model_billing": subChannelModelRates(data, refs), "unavailable_sources": unavailable})
+	writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "multipliers": subChannelMultipliers(data, refs), "model_billing": subChannelModelRates(data, refs, business, rateTime), "unavailable_sources": unavailable})
 }
 
 // Match Sub2apiImport's installed/configured selection exactly. The new scope

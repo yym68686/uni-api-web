@@ -44,7 +44,7 @@ const configured: ManagedChannel = {
 it("shows receipt rate with a discrepancy annotation only in management", () => {
   render(<BillingRate target={target} model="luna" />);
   expect(screen.getByText("3")).toBeVisible();
-  expect(screen.getByText("倍率不一致 · 公布 0.3")).toBeVisible();
+  expect(screen.getByText("历史检测与公布不一致 · 公布 0.3")).toBeVisible();
   expect(billingRate(target, "astra")).toMatchObject({
     rate: 0.3,
     mismatch: false,

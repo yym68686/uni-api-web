@@ -381,7 +381,14 @@ func (s *Service) newAPIUsage(ctx context.Context, account, base string, q url.V
 			Path string `json:"request_path"`
 		}
 		_ = json.Unmarshal([]byte(log.Other), &meta)
-		spend = append(spend, subSpendLog{ID: id, KeyID: log.Key, GroupID: &group, RequestID: receipt.RequestID, Model: log.Model, Stream: &log.Stream, Endpoint: meta.Path, At: receipt.CreatedAt, Cost: &cost})
+		record := subSpendLog{ID: id, KeyID: log.Key, GroupID: &group, RequestID: receipt.RequestID, Model: log.Model, Stream: &log.Stream, Endpoint: meta.Path, At: receipt.CreatedAt, Cost: &cost}
+		// newAPIReceipt already checks the charged quota against the declared
+		// multiplier within one quota unit. Preserve that declaration instead
+		// of dividing two rounded microtransaction amounts.
+		if receipt.BillingMode == "token" && subValidCost(receipt.TotalCost) != nil && *receipt.TotalCost > 0 {
+			record.verifiedRate = subValidCost(receipt.Rate)
+		}
+		spend = append(spend, record)
 	}
 	if target, ok := out.(*subSpendPage); ok {
 		*target = subSpendPage{Items: spend, Page: page, PageSize: 100, Pages: (list.Total + 99) / 100}

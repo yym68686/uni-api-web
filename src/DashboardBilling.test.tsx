@@ -65,7 +65,7 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   const table = await screen.findByRole("table");
   const rateColumn = within(table).getByRole("columnheader", { name: "倍率" }) as HTMLTableCellElement;
   const channelRow = (await within(table).findByRole("button", { name: "查看 渠道-2026 gpt-6-luna 详情" })).closest("tr")!;
-  expect(within(channelRow).getAllByRole("cell")[rateColumn.cellIndex]).toHaveTextContent(/^0\.04$/);
+  expect(within(channelRow).getAllByRole("cell")[rateColumn.cellIndex]).toHaveTextContent(/^0\.04公$/);
   expect(within(channelRow).queryByText("渠道-2026-0.04")).not.toBeInTheDocument();
   expect(within(channelRow).queryByText("Fugue")).not.toBeInTheDocument();
   expect(within(table).getByText("90.0%")).toBeVisible();

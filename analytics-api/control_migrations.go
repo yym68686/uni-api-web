@@ -166,6 +166,9 @@ var managementTierSignalsSQL string
 //go:embed migrations/0042_site_tier_group_evidence.sql
 var siteTierGroupEvidenceSQL string
 
+//go:embed migrations/0043_business_billing_rates.sql
+var businessBillingRatesSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -219,6 +222,7 @@ func controlMigrations() []controlMigration {
 		{"0040_site_check_tier_projection", siteCheckTierProjectionSQL, []string{"console_sub_models", "console_sub_targets"}},
 		{"0041_management_tier_signals", managementTierSignalsSQL, []string{"console_management_model_signal", "console_sub_models"}},
 		{"0042_site_tier_group_evidence", siteTierGroupEvidenceSQL, []string{"console_sub_targets"}},
+		{"0043_business_billing_rates", businessBillingRatesSQL, []string{"console_sub_accounts", "console_sub_business_rates"}},
 	}
 }
 
@@ -227,6 +231,9 @@ func (m controlMigration) checksum() string {
 }
 
 func (m controlMigration) lockMode(table string) string {
+	if m.Version == "0043_business_billing_rates" && table == "console_sub_accounts" {
+		return "SHARE ROW EXCLUSIVE" // The new table's foreign key; live reads can continue.
+	}
 	if m.Version == "0041_management_tier_signals" && table == "console_sub_models" {
 		// Let source readers continue while fencing the old trigger writers.
 		return "SHARE ROW EXCLUSIVE"

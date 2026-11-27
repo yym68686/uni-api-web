@@ -55,9 +55,11 @@ export interface Stats {
   duration?: Distribution;
   last_success_at: number | null;
 }
+export type ChannelBillingSource = "business" | "observed" | "advertised" | "historical" | "mixed";
 export interface Channel {
   billing_multiplier?: number | null;
-  billing_multiplier_source?: "observed" | "advertised";
+  billing_multiplier_source?: ChannelBillingSource;
+  billing_multiplier_observed_at?: number;
   observation_name?: string;
   provider_name?: string;
   history_configured?: boolean;

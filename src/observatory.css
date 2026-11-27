@@ -393,6 +393,9 @@
 .workspace .observation-table .channel-identity {width:clamp(9rem,21vw,17rem);min-width:8.5rem;max-width:17rem}
 .workspace .observation-table .observation-multiplier {width:112px}
 .workspace .observation-table .observation-multiplier > span {display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workspace .observation-table .observation-multiplier > .observation-rate-value {display:flex;align-items:baseline;justify-content:flex-end;gap:.25em}
+.observation-rate-value > span {min-width:0;overflow:hidden;text-overflow:ellipsis}
+.observation-rate-value > small {color:var(--muted);flex:none;font-size:.8em}
 .workspace .observation-table[data-columns="run"][data-compact] {min-width:max(100%,440px)}
 .workspace .observation-table[data-columns="run"][data-compact][data-editing] {min-width:max(100%,512px)}
 .workspace .observation-table[data-compact] .observation-status {width:72px}

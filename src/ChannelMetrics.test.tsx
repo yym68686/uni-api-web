@@ -82,6 +82,25 @@ it("mounts only compact observation metrics and keeps counts aligned", () => {
   expect(screen.getByRole("columnheader", {name:"站点余额"})).toBeVisible();
 });
 
+it.each([false, true])("keeps rate evidence in the same cell (compact: %s)", (compact) => {
+  const row = { provider: "ccodex", billing_multiplier: .12, billing_multiplier_source: "business", billing_multiplier_observed_at: Date.UTC(2026, 10, 27, 8, 40) / 1000 } as Channel;
+  const display = (item: Channel) => <Tooltip.Provider><table><tbody><tr>
+    <ChannelMetricCells row={item} actualRange={{supported:false}} columns={["multiplier"]} compact={compact} />
+  </tr></tbody></table></Tooltip.Provider>;
+  const view = render(display(row));
+  expect(screen.getAllByRole("cell")).toHaveLength(1);
+  expect(screen.getByText("0.12")).toBeVisible();
+  expect(screen.getByText("账")).toBeVisible();
+  expect(screen.getByTitle(/近期业务账单倍率.*2026\/11\/27/)).toBeVisible();
+  view.rerender(display({ ...row, billing_multiplier_source: "advertised", billing_multiplier_observed_at: undefined }));
+  expect(screen.getAllByRole("cell")).toHaveLength(1);
+  expect(screen.getByText("公")).toBeVisible();
+  expect(screen.getByTitle(/公布倍率.*待核对/)).toBeVisible();
+  view.rerender(display({ ...row, billing_multiplier: null }));
+  expect(screen.getAllByRole("cell")).toHaveLength(1);
+  expect(screen.getByText("—")).toBeVisible();
+});
+
 it.each([[.98, "healthy"], [.87, "warning"], [.55, "critical"], [0, "critical"]] as const)(
   "retains the severity of the exact attempt rate for %s without restoring decorative bars",
   (rate, tone) => {

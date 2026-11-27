@@ -182,15 +182,19 @@ type subSpendTask struct {
 	page, attempts, pageSize int
 }
 type subSpendLog struct {
-	RequestID string       `json:"request_id"`
-	Model     string       `json:"model"`
-	Stream    *bool        `json:"stream"`
-	Endpoint  string       `json:"inbound_endpoint"`
-	ID        int64        `json:"id"`
-	KeyID     int64        `json:"api_key_id"`
-	GroupID   *int64       `json:"group_id"`
-	At        string       `json:"created_at"`
-	Cost      *json.Number `json:"actual_cost"`
+	RequestID    string          `json:"request_id"`
+	Model        string          `json:"model"`
+	Stream       *bool           `json:"stream"`
+	Endpoint     string          `json:"inbound_endpoint"`
+	ID           int64           `json:"id"`
+	KeyID        int64           `json:"api_key_id"`
+	GroupID      *int64          `json:"group_id"`
+	At           string          `json:"created_at"`
+	Cost         *json.Number    `json:"actual_cost"`
+	Total        json.RawMessage `json:"total_cost,omitempty"`
+	Rate         json.RawMessage `json:"rate_multiplier,omitempty"`
+	Mode         json.RawMessage `json:"billing_mode,omitempty"`
+	verifiedRate *float64
 }
 type subSpendPage struct {
 	Items    []subSpendLog `json:"items"`
@@ -454,6 +458,8 @@ func (s *Service) subStoreSpendReceipts(ctx context.Context, task subSpendTask, 
 	// Preserve each record's key so one account download serves every channel.
 	// This is the same immutable row identity used by the earlier per-key cache.
 	unique := map[string]map[string]any{}
+	var businessRates []subBusinessRateSample
+	cutoff := businessRateCutoff(time.Now())
 	for _, record := range page.Items {
 		at, parseErr := time.Parse(time.RFC3339Nano, record.At)
 		if parseErr != nil || record.ID <= 0 || record.KeyID <= 0 || record.Cost == nil {
@@ -470,6 +476,11 @@ func (s *Service) subStoreSpendReceipts(ctx context.Context, task subSpendTask, 
 			"key_id": record.KeyID, "log_id": record.ID, "at_ms": at.UnixMilli(), "actual_cost": record.Cost.String(),
 			"request_id": record.RequestID, "model": record.Model, "stream": record.Stream, "inbound_endpoint": record.Endpoint,
 		}
+		if at.UnixMilli() >= cutoff && record.GroupID != nil && *record.GroupID > 0 && record.Model != "" && len(record.Model) <= 256 {
+			if rate := subSpendReceiptRate(record, cost); rate != nil {
+				businessRates = append(businessRates, subBusinessRateSample{*record.GroupID, record.KeyID, record.Model, at.UnixMilli(), record.ID, *rate})
+			}
+		}
 	}
 	entries := make([]map[string]any, 0, len(unique))
 	for _, entry := range unique {
@@ -484,6 +495,9 @@ func (s *Service) subStoreSpendReceipts(ctx context.Context, task subSpendTask, 
  FROM jsonb_to_recordset($2::jsonb) AS r(key_id bigint,log_id bigint,at_ms bigint,actual_cost numeric,request_id text,model text,stream boolean,inbound_endpoint text)
  ON CONFLICT(account_id,key_id,log_id) DO UPDATE SET at_ms=excluded.at_ms,actual_cost=excluded.actual_cost,request_id=excluded.request_id,model=excluded.model,stream=excluded.stream,inbound_endpoint=excluded.inbound_endpoint`, task.account, string(raw))
 	if err != nil {
+		return err
+	}
+	if err = storeSubBusinessRates(ctx, tx, task.account, businessRates, cutoff); err != nil {
 		return err
 	}
 	if !advance {
