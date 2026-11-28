@@ -141,7 +141,7 @@ func TestSubSyncSelectedModelsReachEveryProbeStage(t *testing.T) {
 			if !test.disabled && len(selected) > 0 && gotCalls["gemini-4-argon"] != 1 {
 				t.Fatal("missing Gemini availability", gotCalls)
 			}
-			if !test.disabled && len(selected) > 1 && (gotCalls["gpt-6.1-sol"] != 3 || gotCalls["extra-selected"] != 1) {
+			if !test.disabled && len(selected) > 1 && (gotCalls["gpt-6.1-sol"] != 3+subFixtureTierProbeCountForModel("gpt-6.1-sol") || gotCalls["extra-selected"] != 1) {
 				t.Fatal("availability/compression/tools not scoped", gotCalls)
 			}
 			wantCalls := len(selected)

@@ -46,7 +46,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 		}
 	}
 	panelStarted := make(chan string, count*2)
-	probesStarted := make(chan string, count*subFixtureSyncProbeCount())
+	probesStarted := make(chan string, count*subFixtureFullSyncProbeCount())
 	releasePanel, releaseProbes := make(chan struct{}), make(chan struct{})
 	var releasePanelOnce, releaseProbesOnce sync.Once
 	unblockPanel := func() { releasePanelOnce.Do(func() { close(releasePanel) }) }
@@ -297,8 +297,8 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 	mu.Lock()
 	defer mu.Unlock()
 	for _, id := range accounts {
-		if peak[id] != 2 || calls[id] != subFixtureSyncProbeCount() {
-			t.Fatal("per-account probes changed or duplicated", id, peak[id], calls[id], "expected", subFixtureSyncProbeCount(), "stages", stages[id])
+		if peak[id] != 2 || calls[id] != subFixtureFullSyncProbeCount() {
+			t.Fatal("per-account probes changed or duplicated", id, peak[id], calls[id], "expected", subFixtureFullSyncProbeCount(), "stages", stages[id])
 		}
 	}
 }

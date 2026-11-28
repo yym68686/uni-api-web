@@ -467,8 +467,8 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		if subTierModel(model) {
 			wantSpeed += 2
 			for _, tier := range []string{"fast", "ultrafast"} {
-				if speedProbes[model+"/"+tier] != 1 {
-					t.Errorf("expected exactly one %s probe for %s", tier, model)
+				if speedProbes[model+"/"+tier] != 6 {
+					t.Errorf("expected six %s probes for %s across five syncs and one explicit check", tier, model)
 				}
 			}
 		}
