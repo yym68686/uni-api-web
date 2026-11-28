@@ -68,6 +68,15 @@ export function useSiteFingerprints(account: string, group: number, enabled: boo
 function partialFingerprint(result?: FingerprintResult | null) {
   return result?.decision === "partial" && result.used_outputs > 0 && result.used_outputs < 3 && result.candidates?.length > 0;
 }
+export function fingerprintImportMismatch(record?: FingerprintRecord): "confirmed" | "provisional" | undefined {
+  const verdict = fingerprintVerdict(record);
+  if (verdict?.status === "mismatch") return "confirmed";
+  if (verdict || !partialFingerprint(record?.result) || !record?.result?.prediction) return undefined;
+  const legacy = (referenceModels as Record<string, {class_id:string;class_name:string}>)[record.result.model];
+  const expected = record.result.expected_class_id ||
+    (legacy && legacy.class_name === record.result.expected_class ? legacy.class_id : undefined);
+  return expected && record.result.prediction !== expected ? "provisional" : undefined;
+}
 function fingerprintLabel(status: string, result?: FingerprintResult | null) {
   if (status === "error") {
     const failures = fingerprintFailures(result);

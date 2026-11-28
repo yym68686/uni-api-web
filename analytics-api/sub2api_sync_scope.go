@@ -67,6 +67,32 @@ func subSyncIncludesModel(ctx context.Context, model string) bool {
 	return false
 }
 
+// Initial account synchronization carries the model selection submitted by
+// the user, while a manual model check carries a per-group queue snapshot.
+// Speed-tier probes are billable, so run them only for models explicitly
+// selected in one of those scopes; an unscoped legacy sync must not expand
+// into extra requests.
+func subTierProbeSelected(ctx context.Context, group int64, model string) bool {
+	if models, scoped := siteModelCheckScope(ctx, group); scoped {
+		for _, selected := range models {
+			if selected == model {
+				return true
+			}
+		}
+		return false
+	}
+	models, scoped := ctx.Value(subSyncScopeKey{}).([]string)
+	if !scoped {
+		return false
+	}
+	for _, selected := range models {
+		if selected == model {
+			return true
+		}
+	}
+	return false
+}
+
 func subSyncModelResults(ctx context.Context, models []subModelResult) []subModelResult {
 	out := make([]subModelResult, 0, len(models))
 	for _, model := range models {

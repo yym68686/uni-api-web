@@ -119,11 +119,13 @@ const route = (
   position,
 });
 
-it("defaults away from an exact group's confirmed mismatch but permits explicitly choosing it", async () => {
+it("defaults away from an exact-group confirmed or provisional mismatch but permits explicit choice", async () => {
  const mismatch = {state:"done", account_id:account.id, group_id:target.group_id, model:"gpt-6-sol", result:{status:"mismatch",probability:0}};
  const data = [
    mismatch,
-   {...mismatch, model:"gpt-6.2-sol", state:"error", previous_result:mismatch.result, result:null},
+   {...mismatch, model:"gpt-6.2-sol", result:{...mismatch.result, status:"insufficient", decision:"partial", used_outputs:2,
+     prediction:"gpt-6-astra", expected_class:"gpt-6.2-sol", expected_class_id:"gpt-6.2-sol",
+     candidates:[{model:"gpt-6-astra",display_name:"GPT-6 Astra",probability:null}]}},
    {...mismatch, model:"gpt-6.2-astra", result:{status:"insufficient",decision:"partial",probability:null}},
    {...mismatch, model:"gpt-5.5", group_id:2},
  ];
@@ -146,8 +148,11 @@ it("defaults away from an exact group's confirmed mismatch but permits explicitl
  expect(checkbox("gpt-5.5")).toBeChecked();
  expect(checkbox("gpt-5.6-sol")).toBeChecked();
  expect(checkbox("gpt-6-sol").closest("label")).toHaveTextContent("不匹配");
+ expect(checkbox("gpt-6.2-sol").closest("label")).toHaveTextContent("暂判不匹配");
  await user.click(checkbox("gpt-6-sol"));
  expect(checkbox("gpt-6-sol")).toBeChecked();
+ await user.click(checkbox("gpt-6.2-sol"));
+ expect(checkbox("gpt-6.2-sol")).toBeChecked();
 });
 
 it("waits for complete group receipts before initializing import defaults", async () => {

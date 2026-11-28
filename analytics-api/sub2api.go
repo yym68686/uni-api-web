@@ -1439,7 +1439,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 						errs <- errors.New("模型指纹入队失败，请单独重新检测")
 					}
 				}
-				if _, selected := siteModelCheckScope(ctx, t.id); selected && subTierModel(t.model) &&
+				if subTierProbeSelected(ctx, t.id, t.model) && subTierModel(t.model) &&
 					result.Availability.Status == "success" && result.Availability.Protocol == "responses" && ctx.Err() == nil {
 					for _, tier := range []string{"fast", "ultrafast"} {
 						if ctx.Err() != nil {

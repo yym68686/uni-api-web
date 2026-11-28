@@ -227,3 +227,13 @@ func subFixtureSyncProbeCount() int {
 	}
 	return count
 }
+
+func subFixtureTierProbeCount() int {
+	count := 0
+	for _, model := range subModels {
+		if subTierModel(model) {
+			count += 2
+		}
+	}
+	return count
+}

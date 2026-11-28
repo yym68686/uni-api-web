@@ -25,7 +25,7 @@ import "./serviceTierRouting.css";
 import { assessPrice } from "./sub2apiPriceCheck";
 import { ModelPriceWarning } from "./Sub2apiPricing";
 import { ModelQualityWarning } from "./ModelQualityWarning";
-import { FingerprintVerdictBadge, fingerprintVerdict, useSiteFingerprints } from "./ModelFingerprints";
+import { FingerprintVerdictBadge, fingerprintImportMismatch, fingerprintVerdict, useSiteFingerprints } from "./ModelFingerprints";
 import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
@@ -266,7 +266,7 @@ function Sub2apiImportForm({
           : modelIsDefaultSelected(check) &&
             assessPrice(check, prices).status !== "abnormal" &&
             !toolUseFailed(target, check.model) &&
-            fingerprintFor(check.model)?.status !== "mismatch"),
+            !fingerprintImportMismatch(fingerprintQuery.data?.get(check.model))),
     )
     .map((check) => check.model);
   const [aliases, setAliases] = useState<ModelAlias[]>(initialAdd?.aliases || []);
@@ -1277,8 +1277,12 @@ function Sub2apiImportForm({
                     const check = editChecks.find((c) => c.model === model)!;
                     return (
                       <>
-                        {!editing && fingerprintFor(model)?.status === "mismatch" && (
-                          <FingerprintVerdictBadge kind="mismatch" probability={fingerprintFor(model)?.probability ?? null} />
+                        {!editing && fingerprintImportMismatch(fingerprintQuery.data?.get(model)) && (
+                          <FingerprintVerdictBadge
+                            kind="mismatch"
+                            prefix={fingerprintImportMismatch(fingerprintQuery.data?.get(model)) === "provisional" ? "暂判" : undefined}
+                            probability={fingerprintFor(model)?.probability ?? null}
+                          />
                         )}
                         <ModelQualityWarning model={model} result={quality} />
                         {toolUseFailed(target, model) && (

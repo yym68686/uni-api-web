@@ -223,3 +223,20 @@ func TestSubSyncSelectedModelsReachEveryProbeStage(t *testing.T) {
 		})
 	}
 }
+
+func TestSiteTierProbeRequiresSelectedModelScope(t *testing.T) {
+	model := "gpt-6.2-sol"
+	if subTierProbeSelected(context.Background(), 1, model) {
+		t.Fatal("unscoped legacy sync must not add billable tier probes")
+	}
+	if !subTierProbeSelected(withSubSyncModels(context.Background(), []string{model}), 1, model) {
+		t.Fatal("new-site sync must probe explicitly selected models")
+	}
+	if subTierProbeSelected(withSubSyncModels(context.Background(), []string{"gpt-6-astra"}), 1, model) {
+		t.Fatal("new-site sync probed a model outside the user's selection")
+	}
+	manual := context.WithValue(context.Background(), siteModelCheckScopeKey{}, map[int64][]string{1: {model}})
+	if !subTierProbeSelected(manual, 1, model) || subTierProbeSelected(manual, 2, model) {
+		t.Fatal("manual check must remain scoped to its selected group")
+	}
+}

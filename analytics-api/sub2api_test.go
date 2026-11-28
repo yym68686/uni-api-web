@@ -197,6 +197,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	var created, probes, refreshed atomic.Int32
 	var compactions atomic.Int32
 	speedProbes := map[string]int{}
+	speedProbesByKey := map[string]int{}
 	var groupCount atomic.Int32
 	groupCount.Store(3)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -250,11 +251,12 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 			}
 			_ = json.NewDecoder(r.Body).Decode(&in)
 			if in.Tier != "" {
-				if r.Header.Get("Authorization") != "Bearer key-secret-1" {
-					t.Error("unselected group was probed for a speed tier")
+				if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer key-secret-") {
+					t.Error("speed-tier probe did not use a dedicated site test key")
 				}
 				mu.Lock()
 				speedProbes[in.Model+"/"+in.Tier]++
+				speedProbesByKey[r.Header.Get("Authorization")+"/"+in.Model+"/"+in.Tier]++
 				mu.Unlock()
 				writeJSON(w, 200, map[string]any{"id": "resp-fixture", "model": in.Model, "status": "completed", "service_tier": in.Tier, "output": []any{}})
 				return
@@ -355,9 +357,24 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	if !service.subWorkOne(context.Background()) {
 		t.Fatal("no queued job")
 	}
-	if created.Load() != 3 || probes.Load() != int32(3*subFixtureSyncProbeCount()) || refreshed.Load() != 1 {
+	tierProbeCount := subFixtureTierProbeCount()
+	if created.Load() != 3 || probes.Load() != int32(3*(subFixtureSyncProbeCount()+tierProbeCount)) || refreshed.Load() != 1 {
 		t.Fatal("wrong initial work", created.Load(), probes.Load(), refreshed.Load())
 	}
+	mu.Lock()
+	for group := 1; group <= 3; group++ {
+		for _, model := range subModels {
+			if !subTierModel(model) {
+				continue
+			}
+			for _, tier := range []string{"fast", "ultrafast"} {
+				if speedProbesByKey[fmt.Sprintf("Bearer key-secret-%d/%s/%s", group, model, tier)] != 1 {
+					t.Errorf("initial site sync did not probe selected %s tier for group %d model %s", tier, group, model)
+				}
+			}
+		}
+	}
+	mu.Unlock()
 	w = request("GET", "/v1/sub2api/accounts", "", token)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -400,9 +417,27 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	service.subWorkOne(context.Background())
-	if created.Load() != 3 || probes.Load() != int32(5*subFixtureSyncProbeCount()) || refreshed.Load() != 1 {
+	if created.Load() != 3 || probes.Load() != int32(5*(subFixtureSyncProbeCount()+tierProbeCount)) || refreshed.Load() != 1 {
 		t.Fatal("sync duplicated keys or refreshed a rotated token", created.Load(), probes.Load(), refreshed.Load())
 	}
+	mu.Lock()
+	for group := 1; group <= 3; group++ {
+		want := 1
+		if group <= 2 {
+			want = 2
+		}
+		for _, model := range subModels {
+			if !subTierModel(model) {
+				continue
+			}
+			for _, tier := range []string{"fast", "ultrafast"} {
+				if got := speedProbesByKey[fmt.Sprintf("Bearer key-secret-%d/%s/%s", group, model, tier)]; got != want {
+					t.Errorf("unexpected tier probes after refresh for group %d model %s tier %s: got %d want %d", group, model, tier, got, want)
+				}
+			}
+		}
+	}
+	mu.Unlock()
 	var active bool
 	store.db.QueryRow(`SELECT active FROM console_sub_targets WHERE account_id=$1 AND group_id=3`, added.ID).Scan(&active)
 	if active {
@@ -438,12 +473,17 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 			}
 		}
 	}
-	gotSpeed := len(speedProbes)
+	gotSpeed := 0
+	for _, count := range speedProbes {
+		gotSpeed += count
+	}
 	mu.Unlock()
 	// Account sync tries one viable model for remote compaction. The
 	// explicit selection compacts every applicable model and tests two tiers.
-	wantProbes := int32(6*subFixtureSyncProbeCount()) - 1 + wantCompaction + wantSpeed
-	if probes.Load() != wantProbes || compactions.Load()-compactBefore != wantCompaction || gotSpeed != int(wantSpeed) {
+	// Initial and follow-up sync probe selected speed tiers for five group runs;
+	// the explicit group check above adds one more run.
+	wantProbes := int32(6*subFixtureSyncProbeCount()) - 1 + wantCompaction + int32(5*tierProbeCount) + wantSpeed
+	if probes.Load() != wantProbes || compactions.Load()-compactBefore != wantCompaction || gotSpeed != 5*tierProbeCount+int(wantSpeed) {
 		t.Fatal("unexpected explicit model-check coverage", probes.Load(), wantProbes, compactions.Load()-compactBefore, gotSpeed)
 	}
 	request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", syncBody, token)
